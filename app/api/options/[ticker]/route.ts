@@ -33,7 +33,7 @@ export async function GET(
     const currentPrice = stockRes?.c || 0;
     
     // Find nearest expiration date
-    const expirations = [...new Set(contracts.map((c: any) => c.expiration_date))].sort();
+    const expirations = Array.from(new Set(contracts.map((c: any) => c.expiration_date))).sort();
     const nearestExpiration = expirations[0] || null;
     
     // Filter contracts for nearest expiration
