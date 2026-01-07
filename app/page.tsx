@@ -335,13 +335,13 @@ export default function Home() {
       
       for (let i = 0; i < INVESTOR_AGENTS.length; i++) {
         const agent = INVESTOR_AGENTS[i];
-        setLoadingAgents(prev => new Set([...prev, agent.id]));
+        setLoadingAgents(prev => new Set([...Array.from(prev), agent.id]));
         await new Promise(r => setTimeout(r, 100)); // Stagger for visual effect
         
         const result = analyzeAgent(agent, stockData, optionsData);
         results.push(result);
         setAnalysis(prev => ({ ...prev, [agent.id]: result }));
-        setLoadingAgents(prev => { const next = new Set(prev); next.delete(agent.id); return next; });
+        setLoadingAgents(prev => { const next = new Set(Array.from(prev)); next.delete(agent.id); return next; });
       }
       
       // Calculate risk
