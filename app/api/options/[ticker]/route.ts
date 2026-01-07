@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const POLYGON_KEY = process.env.POLYGON_API_KEY;
-
 export async function GET(
   request: NextRequest,
   { params }: { params: { ticker: string } }
@@ -9,122 +7,137 @@ export async function GET(
   const ticker = params.ticker.toUpperCase();
   
   try {
-    // Get options contracts from Polygon
-    const [contractsRes, snapshotRes] = await Promise.all([
-      // Get list of options contracts
-      fetch(`https://api.polygon.io/v3/reference/options/contracts?underlying_ticker=${ticker}&limit=100&apiKey=${POLYGON_KEY}`)
-        .then(r => r.ok ? r.json() : null)
-        .catch(() => null),
-      
-      // Get options chain snapshot (requires paid tier, but we'll try)
-      fetch(`https://api.polygon.io/v3/snapshot/options/${ticker}?apiKey=${POLYGON_KEY}`)
-        .then(r => r.ok ? r.json() : null)
-        .catch(() => null),
-    ]);
-
-    const contracts = contractsRes?.results || [];
-    const snapshots = snapshotRes?.results || [];
+    // Use Yahoo Finance for FREE full options data (bid, ask, volume, OI, IV)
+    const response = await fetch(
+      `https://query1.finance.yahoo.com/v7/finance/options/${ticker}`,
+      { 
+        headers: { 
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        next: { revalidate: 60 } // Cache for 60 seconds
+      }
+    );
     
-    // Get current stock price for ITM calculations
-    const stockRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${process.env.FINNHUB_KEY}`)
-      .then(r => r.ok ? r.json() : null)
-      .catch(() => null);
+    if (!response.ok) {
+      return NextResponse.json({ error: 'Failed to fetch options data' }, { status: 500 });
+    }
     
-    const currentPrice = stockRes?.c || 0;
+    const data = await response.json();
+    const result = data.optionChain?.result?.[0];
     
-    // Find nearest expiration date
-    const expirations = Array.from(new Set(contracts.map((c: any) => c.expiration_date))).sort();
-    const nearestExpiration = expirations[0] || null;
+    if (!result) {
+      return NextResponse.json({ error: 'No options data available for this ticker' }, { status: 404 });
+    }
     
-    // Filter contracts for nearest expiration
-    const nearTermContracts = contracts.filter((c: any) => c.expiration_date === nearestExpiration);
+    const currentPrice = result.quote?.regularMarketPrice || 0;
+    const expirationTimestamps = result.expirationDates || [];
     
-    // Separate calls and puts
-    const calls = nearTermContracts
-      .filter((c: any) => c.contract_type === 'call')
-      .sort((a: any, b: any) => a.strike_price - b.strike_price)
-      .slice(0, 15)
-      .map((c: any) => {
-        const snapshot = snapshots.find((s: any) => s.details?.ticker === c.ticker);
-        return {
-          strike: c.strike_price,
-          expiration: c.expiration_date,
-          contractSymbol: c.ticker,
-          bid: snapshot?.last_quote?.bid || 0,
-          ask: snapshot?.last_quote?.ask || 0,
-          last: snapshot?.day?.close || 0,
-          volume: snapshot?.day?.volume || 0,
-          openInterest: snapshot?.open_interest || 0,
-          impliedVolatility: snapshot?.implied_volatility || 0,
-          delta: snapshot?.greeks?.delta || 0,
-          gamma: snapshot?.greeks?.gamma || 0,
-          theta: snapshot?.greeks?.theta || 0,
-          vega: snapshot?.greeks?.vega || 0,
-          itm: currentPrice > c.strike_price,
-        };
-      });
+    if (expirationTimestamps.length === 0) {
+      return NextResponse.json({ error: 'No options expirations available' }, { status: 404 });
+    }
     
-    const puts = nearTermContracts
-      .filter((c: any) => c.contract_type === 'put')
-      .sort((a: any, b: any) => a.strike_price - b.strike_price)
-      .slice(0, 15)
-      .map((c: any) => {
-        const snapshot = snapshots.find((s: any) => s.details?.ticker === c.ticker);
-        return {
-          strike: c.strike_price,
-          expiration: c.expiration_date,
-          contractSymbol: c.ticker,
-          bid: snapshot?.last_quote?.bid || 0,
-          ask: snapshot?.last_quote?.ask || 0,
-          last: snapshot?.day?.close || 0,
-          volume: snapshot?.day?.volume || 0,
-          openInterest: snapshot?.open_interest || 0,
-          impliedVolatility: snapshot?.implied_volatility || 0,
-          delta: snapshot?.greeks?.delta || 0,
-          gamma: snapshot?.greeks?.gamma || 0,
-          theta: snapshot?.greeks?.theta || 0,
-          vega: snapshot?.greeks?.vega || 0,
-          itm: currentPrice < c.strike_price,
-        };
-      });
+    // Get nearest expiration
+    const nearestTimestamp = expirationTimestamps[0];
+    const nearestExpiration = new Date(nearestTimestamp * 1000).toISOString().split('T')[0];
+    
+    // Fetch chain for nearest expiration
+    const chainResponse = await fetch(
+      `https://query1.finance.yahoo.com/v7/finance/options/${ticker}?date=${nearestTimestamp}`,
+      { 
+        headers: { 
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+      }
+    );
+    
+    if (!chainResponse.ok) {
+      return NextResponse.json({ error: 'Failed to fetch chain data' }, { status: 500 });
+    }
+    
+    const chainData = await chainResponse.json();
+    const options = chainData.optionChain?.result?.[0]?.options?.[0];
+    
+    if (!options) {
+      return NextResponse.json({ error: 'No chain data available' }, { status: 404 });
+    }
+    
+    // Process calls - Yahoo gives us REAL data!
+    const calls = (options.calls || [])
+      .slice(0, 20) // Limit to 20 strikes around ATM
+      .map((c: any) => ({
+        strike: c.strike,
+        last: c.lastPrice || 0,
+        bid: c.bid || 0,
+        ask: c.ask || 0,
+        volume: c.volume || 0,
+        openInterest: c.openInterest || 0,
+        impliedVolatility: c.impliedVolatility || 0,
+        itm: c.inTheMoney || false,
+        change: c.change || 0,
+        percentChange: c.percentChange || 0,
+        contractSymbol: c.contractSymbol,
+      }));
+    
+    // Process puts
+    const puts = (options.puts || [])
+      .slice(0, 20)
+      .map((p: any) => ({
+        strike: p.strike,
+        last: p.lastPrice || 0,
+        bid: p.bid || 0,
+        ask: p.ask || 0,
+        volume: p.volume || 0,
+        openInterest: p.openInterest || 0,
+        impliedVolatility: p.impliedVolatility || 0,
+        itm: p.inTheMoney || false,
+        change: p.change || 0,
+        percentChange: p.percentChange || 0,
+        contractSymbol: p.contractSymbol,
+      }));
     
     // Calculate aggregate metrics
-    const totalCallVolume = calls.reduce((sum: number, c: any) => sum + c.volume, 0);
-    const totalPutVolume = puts.reduce((sum: number, c: any) => sum + c.volume, 0);
-    const totalCallOI = calls.reduce((sum: number, c: any) => sum + c.openInterest, 0);
-    const totalPutOI = puts.reduce((sum: number, c: any) => sum + c.openInterest, 0);
+    const totalCallVolume = calls.reduce((sum: number, c: any) => sum + (c.volume || 0), 0);
+    const totalPutVolume = puts.reduce((sum: number, p: any) => sum + (p.volume || 0), 0);
+    const totalCallOI = calls.reduce((sum: number, c: any) => sum + (c.openInterest || 0), 0);
+    const totalPutOI = puts.reduce((sum: number, p: any) => sum + (p.openInterest || 0), 0);
     
-    const avgCallIV = calls.length > 0 
-      ? calls.reduce((sum: number, c: any) => sum + c.impliedVolatility, 0) / calls.length 
-      : 0;
-    const avgPutIV = puts.length > 0 
-      ? puts.reduce((sum: number, c: any) => sum + c.impliedVolatility, 0) / puts.length 
-      : 0;
+    // Calculate average IV
+    const callIVs = calls.filter((c: any) => c.impliedVolatility > 0).map((c: any) => c.impliedVolatility);
+    const putIVs = puts.filter((p: any) => p.impliedVolatility > 0).map((p: any) => p.impliedVolatility);
+    const allIVs = [...callIVs, ...putIVs];
+    
+    const avgCallIV = callIVs.length > 0 ? callIVs.reduce((a: number, b: number) => a + b, 0) / callIVs.length : 0;
+    const avgPutIV = putIVs.length > 0 ? putIVs.reduce((a: number, b: number) => a + b, 0) / putIVs.length : 0;
+    const avgIV = allIVs.length > 0 ? allIVs.reduce((a: number, b: number) => a + b, 0) / allIVs.length : 0;
+    
+    // Convert expiration timestamps to dates for UI
+    const expirations = expirationTimestamps.slice(0, 6).map((ts: number) => 
+      new Date(ts * 1000).toISOString().split('T')[0]
+    );
 
     const optionsData = {
       ticker,
       currentPrice,
       expiration: nearestExpiration,
-      expirations: expirations.slice(0, 6), // Next 6 expirations
+      expirations,
       
       calls,
       puts,
       
-      // Aggregate metrics
       metrics: {
-        putCallRatio: totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 0,
-        putCallOIRatio: totalCallOI > 0 ? totalPutOI / totalCallOI : 0,
+        putCallRatio: totalCallVolume > 0 ? (totalPutVolume / totalCallVolume).toFixed(2) : '0.00',
+        putCallOIRatio: totalCallOI > 0 ? (totalPutOI / totalCallOI).toFixed(2) : '0.00',
         totalCallVolume,
         totalPutVolume,
         totalCallOI,
         totalPutOI,
-        avgCallIV: avgCallIV * 100, // Convert to percentage
-        avgPutIV: avgPutIV * 100,
-        avgIV: ((avgCallIV + avgPutIV) / 2) * 100,
+        avgCallIV: (avgCallIV * 100).toFixed(1),
+        avgPutIV: (avgPutIV * 100).toFixed(1),
+        avgIV: (avgIV * 100).toFixed(1),
       },
       
       timestamp: new Date().toISOString(),
-      source: 'polygon',
+      source: 'yahoo',
     };
 
     return NextResponse.json(optionsData);

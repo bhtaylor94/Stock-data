@@ -383,11 +383,11 @@ export default function Home() {
     <div className="min-h-screen bg-slate-950 text-slate-100">
       {/* Background effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-cyan-500/5 rounded-full blur-3xl" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-gradient-to-r from-blue-500/3 to-purple-500/3 rounded-full blur-3xl" />
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl" />
+        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-full blur-3xl" />
       </div>
-      <div className="fixed inset-0 opacity-[0.015] pointer-events-none" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)', backgroundSize: '50px 50px' }} />
+      <div className="fixed inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)', backgroundSize: '50px 50px' }} />
 
       <div className="relative max-w-7xl mx-auto px-4 py-8">
         {/* Header */}
@@ -529,6 +529,7 @@ export default function Home() {
                     <div><p className="text-xs text-slate-400">Avg IV</p><p className="text-sm font-semibold text-amber-400">{options.metrics?.avgIV?.toFixed(1) || 'N/A'}%</p></div>
                   </div>
                 </div>
+                <p className="text-xs text-emerald-400/70 mt-3 text-center">✓ Real-time options data via Yahoo Finance - bid/ask, volume, OI, and IV included</p>
                 <div className="grid md:grid-cols-2 gap-6">
                   <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5">
                     <h3 className="text-lg font-semibold text-emerald-400 mb-4">📈 Calls</h3>
