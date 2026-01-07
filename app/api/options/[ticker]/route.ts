@@ -1,5 +1,56 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// Token cache (in-memory for serverless - will reset on cold start)
+let cachedAccessToken: string | null = null;
+let tokenExpiry: number = 0;
+
+async function getAccessToken(): Promise<string | null> {
+  const appKey = process.env.SCHWAB_APP_KEY;
+  const appSecret = process.env.SCHWAB_APP_SECRET;
+  const refreshToken = process.env.SCHWAB_REFRESH_TOKEN;
+
+  if (!appKey || !appSecret || !refreshToken) {
+    console.error('Missing Schwab credentials');
+    return null;
+  }
+
+  // Return cached token if still valid (with 1 min buffer)
+  if (cachedAccessToken && Date.now() < tokenExpiry - 60000) {
+    return cachedAccessToken;
+  }
+
+  try {
+    const credentials = Buffer.from(`${appKey}:${appSecret}`).toString('base64');
+    
+    const response = await fetch('https://api.schwabapi.com/v1/oauth/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${credentials}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        'grant_type': 'refresh_token',
+        'refresh_token': refreshToken,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Token refresh failed:', errorText);
+      return null;
+    }
+
+    const data = await response.json();
+    cachedAccessToken = data.access_token;
+    tokenExpiry = Date.now() + (data.expires_in * 1000); // expires_in is in seconds
+    
+    return cachedAccessToken;
+  } catch (error) {
+    console.error('Error refreshing token:', error);
+    return null;
+  }
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: { ticker: string } }
@@ -7,119 +58,126 @@ export async function GET(
   const ticker = params.ticker.toUpperCase();
   
   try {
-    // Use Yahoo Finance for FREE full options data (bid, ask, volume, OI, IV)
+    const accessToken = await getAccessToken();
+    
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: 'Failed to authenticate with Schwab. Check your credentials.' },
+        { status: 401 }
+      );
+    }
+
+    // Fetch options chain from Schwab
     const response = await fetch(
-      `https://query1.finance.yahoo.com/v7/finance/options/${ticker}`,
-      { 
-        headers: { 
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      `https://api.schwabapi.com/marketdata/v1/chains?symbol=${ticker}&contractType=ALL&strikeCount=20&includeUnderlyingQuote=true`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
         },
-        next: { revalidate: 60 } // Cache for 60 seconds
       }
     );
-    
+
     if (!response.ok) {
-      return NextResponse.json({ error: 'Failed to fetch options data' }, { status: 500 });
+      const errorText = await response.text();
+      console.error('Schwab API error:', errorText);
+      return NextResponse.json(
+        { error: 'Failed to fetch options data from Schwab' },
+        { status: response.status }
+      );
     }
-    
+
     const data = await response.json();
-    const result = data.optionChain?.result?.[0];
+
+    // Process calls
+    const callExpDateMap = data.callExpDateMap || {};
+    const calls: any[] = [];
     
-    if (!result) {
-      return NextResponse.json({ error: 'No options data available for this ticker' }, { status: 404 });
-    }
+    // Get the nearest expiration
+    const callExpirations = Object.keys(callExpDateMap).sort();
+    const nearestCallExp = callExpirations[0];
     
-    const currentPrice = result.quote?.regularMarketPrice || 0;
-    const expirationTimestamps = result.expirationDates || [];
-    
-    if (expirationTimestamps.length === 0) {
-      return NextResponse.json({ error: 'No options expirations available' }, { status: 404 });
-    }
-    
-    // Get nearest expiration
-    const nearestTimestamp = expirationTimestamps[0];
-    const nearestExpiration = new Date(nearestTimestamp * 1000).toISOString().split('T')[0];
-    
-    // Fetch chain for nearest expiration
-    const chainResponse = await fetch(
-      `https://query1.finance.yahoo.com/v7/finance/options/${ticker}?date=${nearestTimestamp}`,
-      { 
-        headers: { 
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    if (nearestCallExp && callExpDateMap[nearestCallExp]) {
+      const strikesMap = callExpDateMap[nearestCallExp];
+      for (const strike of Object.keys(strikesMap)) {
+        const contract = strikesMap[strike][0]; // First contract at this strike
+        if (contract) {
+          calls.push({
+            strike: parseFloat(strike),
+            last: contract.last || 0,
+            bid: contract.bid || 0,
+            ask: contract.ask || 0,
+            volume: contract.totalVolume || 0,
+            openInterest: contract.openInterest || 0,
+            impliedVolatility: contract.volatility || 0,
+            delta: contract.delta || 0,
+            gamma: contract.gamma || 0,
+            theta: contract.theta || 0,
+            vega: contract.vega || 0,
+            itm: contract.inTheMoney || false,
+            contractSymbol: contract.symbol,
+          });
         }
       }
-    );
-    
-    if (!chainResponse.ok) {
-      return NextResponse.json({ error: 'Failed to fetch chain data' }, { status: 500 });
     }
-    
-    const chainData = await chainResponse.json();
-    const options = chainData.optionChain?.result?.[0]?.options?.[0];
-    
-    if (!options) {
-      return NextResponse.json({ error: 'No chain data available' }, { status: 404 });
-    }
-    
-    // Process calls - Yahoo gives us REAL data!
-    const calls = (options.calls || [])
-      .slice(0, 20) // Limit to 20 strikes around ATM
-      .map((c: any) => ({
-        strike: c.strike,
-        last: c.lastPrice || 0,
-        bid: c.bid || 0,
-        ask: c.ask || 0,
-        volume: c.volume || 0,
-        openInterest: c.openInterest || 0,
-        impliedVolatility: c.impliedVolatility || 0,
-        itm: c.inTheMoney || false,
-        change: c.change || 0,
-        percentChange: c.percentChange || 0,
-        contractSymbol: c.contractSymbol,
-      }));
-    
+
     // Process puts
-    const puts = (options.puts || [])
-      .slice(0, 20)
-      .map((p: any) => ({
-        strike: p.strike,
-        last: p.lastPrice || 0,
-        bid: p.bid || 0,
-        ask: p.ask || 0,
-        volume: p.volume || 0,
-        openInterest: p.openInterest || 0,
-        impliedVolatility: p.impliedVolatility || 0,
-        itm: p.inTheMoney || false,
-        change: p.change || 0,
-        percentChange: p.percentChange || 0,
-        contractSymbol: p.contractSymbol,
-      }));
+    const putExpDateMap = data.putExpDateMap || {};
+    const puts: any[] = [];
     
+    const putExpirations = Object.keys(putExpDateMap).sort();
+    const nearestPutExp = putExpirations[0];
+    
+    if (nearestPutExp && putExpDateMap[nearestPutExp]) {
+      const strikesMap = putExpDateMap[nearestPutExp];
+      for (const strike of Object.keys(strikesMap)) {
+        const contract = strikesMap[strike][0];
+        if (contract) {
+          puts.push({
+            strike: parseFloat(strike),
+            last: contract.last || 0,
+            bid: contract.bid || 0,
+            ask: contract.ask || 0,
+            volume: contract.totalVolume || 0,
+            openInterest: contract.openInterest || 0,
+            impliedVolatility: contract.volatility || 0,
+            delta: contract.delta || 0,
+            gamma: contract.gamma || 0,
+            theta: contract.theta || 0,
+            vega: contract.vega || 0,
+            itm: contract.inTheMoney || false,
+            contractSymbol: contract.symbol,
+          });
+        }
+      }
+    }
+
+    // Sort by strike
+    calls.sort((a, b) => a.strike - b.strike);
+    puts.sort((a, b) => a.strike - b.strike);
+
     // Calculate aggregate metrics
-    const totalCallVolume = calls.reduce((sum: number, c: any) => sum + (c.volume || 0), 0);
-    const totalPutVolume = puts.reduce((sum: number, p: any) => sum + (p.volume || 0), 0);
-    const totalCallOI = calls.reduce((sum: number, c: any) => sum + (c.openInterest || 0), 0);
-    const totalPutOI = puts.reduce((sum: number, p: any) => sum + (p.openInterest || 0), 0);
+    const totalCallVolume = calls.reduce((sum, c) => sum + c.volume, 0);
+    const totalPutVolume = puts.reduce((sum, p) => sum + p.volume, 0);
+    const totalCallOI = calls.reduce((sum, c) => sum + c.openInterest, 0);
+    const totalPutOI = puts.reduce((sum, p) => sum + p.openInterest, 0);
     
-    // Calculate average IV
-    const callIVs = calls.filter((c: any) => c.impliedVolatility > 0).map((c: any) => c.impliedVolatility);
-    const putIVs = puts.filter((p: any) => p.impliedVolatility > 0).map((p: any) => p.impliedVolatility);
+    const callIVs = calls.filter(c => c.impliedVolatility > 0).map(c => c.impliedVolatility);
+    const putIVs = puts.filter(p => p.impliedVolatility > 0).map(p => p.impliedVolatility);
     const allIVs = [...callIVs, ...putIVs];
     
-    const avgCallIV = callIVs.length > 0 ? callIVs.reduce((a: number, b: number) => a + b, 0) / callIVs.length : 0;
-    const avgPutIV = putIVs.length > 0 ? putIVs.reduce((a: number, b: number) => a + b, 0) / putIVs.length : 0;
-    const avgIV = allIVs.length > 0 ? allIVs.reduce((a: number, b: number) => a + b, 0) / allIVs.length : 0;
-    
-    // Convert expiration timestamps to dates for UI
-    const expirations = expirationTimestamps.slice(0, 6).map((ts: number) => 
-      new Date(ts * 1000).toISOString().split('T')[0]
-    );
+    const avgIV = allIVs.length > 0 
+      ? allIVs.reduce((a, b) => a + b, 0) / allIVs.length 
+      : 0;
+
+    // Get expiration date in readable format
+    const expiration = nearestCallExp ? nearestCallExp.split(':')[0] : null;
 
     const optionsData = {
       ticker,
-      currentPrice,
-      expiration: nearestExpiration,
-      expirations,
+      currentPrice: data.underlyingPrice || data.underlying?.last || 0,
+      expiration,
+      expirations: callExpirations.slice(0, 6).map(e => e.split(':')[0]),
       
       calls,
       puts,
@@ -131,13 +189,11 @@ export async function GET(
         totalPutVolume,
         totalCallOI,
         totalPutOI,
-        avgCallIV: (avgCallIV * 100).toFixed(1),
-        avgPutIV: (avgPutIV * 100).toFixed(1),
-        avgIV: (avgIV * 100).toFixed(1),
+        avgIV: avgIV.toFixed(1),
       },
       
       timestamp: new Date().toISOString(),
-      source: 'yahoo',
+      source: 'schwab',
     };
 
     return NextResponse.json(optionsData);

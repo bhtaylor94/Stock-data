@@ -529,7 +529,7 @@ export default function Home() {
                     <div><p className="text-xs text-slate-400">Avg IV</p><p className="text-sm font-semibold text-amber-400">{options.metrics?.avgIV?.toFixed(1) || 'N/A'}%</p></div>
                   </div>
                 </div>
-                <p className="text-xs text-emerald-400/70 mt-3 text-center">✓ Real-time options data via Yahoo Finance - bid/ask, volume, OI, and IV included</p>
+                <p className="text-xs text-emerald-400/70 mt-3 text-center">✓ Real-time options data via Schwab API - bid/ask, volume, OI, IV, and Greeks included</p>
                 <div className="grid md:grid-cols-2 gap-6">
                   <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5">
                     <h3 className="text-lg font-semibold text-emerald-400 mb-4">📈 Calls</h3>
