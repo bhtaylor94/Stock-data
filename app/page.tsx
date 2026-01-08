@@ -45,20 +45,87 @@ interface StockData {
 interface OptionsData {
   ticker: string;
   currentPrice: number;
-  expiration: string;
-  analysis: {
-    trend: { trend: string; changePercent: number; };
-    newsSentiment: { sentiment: string; recentHeadlines: string[]; };
-    earnings: { date: string; daysUntil: number; };
+  lastUpdated: string;
+  dataSource: string;
+  technicals: {
+    trend: string;
+    trendStrength: number;
+    rsi: number;
+    rsiSignal: string;
+    macdSignal: string;
+    priceVsSMA20: string;
+    priceVsSMA50: string;
+    support: number;
+    resistance: number;
+    nearSupport: boolean;
+    nearResistance: boolean;
   };
-  metrics: { putCallRatio: string; totalCallVolume: number; totalPutVolume: number; avgIV: string; };
+  ivAnalysis: {
+    currentIV: number;
+    ivRank: number;
+    ivPercentile: number;
+    ivSignal: string;
+    recommendation: string;
+  };
+  earnings: {
+    date: string;
+    daysUntil: number;
+    expectedMove: number;
+    ivCrushRisk: string;
+  };
+  sentiment: {
+    sentiment: string;
+    score: number;
+    keywords: string[];
+    recentHeadlines: string[];
+  };
+  metrics: {
+    putCallRatio: string;
+    totalCallVolume: number;
+    totalPutVolume: number;
+    avgIV: string;
+    ivRank: string;
+    ivPercentile: string;
+  };
   suggestions: Array<{
-    type: string; strategy: string; strike?: number; delta?: number; gamma?: number;
-    theta?: number; ask?: number; maxRisk?: string; breakeven?: string;
-    reasoning: string[]; riskLevel: string; confidence: number;
+    type: string;
+    strategy: string;
+    strike?: number;
+    expiration?: string;
+    dte?: number;
+    delta?: number;
+    gamma?: number;
+    theta?: number;
+    vega?: number;
+    iv?: number;
+    bid?: number;
+    ask?: number;
+    midPrice?: number;
+    maxRisk: string;
+    maxReward: string;
+    breakeven: string;
+    probabilityITM: number;
+    probabilityProfit: number;
+    riskRewardRatio: string;
+    setupScore: {
+      total: number;
+      technicalScore: number;
+      ivScore: number;
+      greeksScore: number;
+      timingScore: number;
+      riskRewardScore: number;
+    };
+    reasoning: string[];
+    warnings: string[];
+    entryTriggers: string[];
+    riskLevel: string;
+    confidence: number;
+    timeframe: string;
   }>;
-  calls: Array<{ strike: number; bid: number; ask: number; delta: number; gamma: number; theta: number; volume: number; impliedVolatility: number; }>;
-  puts: Array<{ strike: number; bid: number; ask: number; delta: number; gamma: number; theta: number; volume: number; impliedVolatility: number; }>;
+  optionsChain: {
+    calls: Array<{ strike: number; bid: number; ask: number; delta: number; gamma: number; theta: number; volume: number; openInterest: number; impliedVolatility: number; dte: number; expiration: string; midPrice: number; }>;
+    puts: Array<{ strike: number; bid: number; ask: number; delta: number; gamma: number; theta: number; volume: number; openInterest: number; impliedVolatility: number; dte: number; expiration: string; midPrice: number; }>;
+  };
 }
 
 // Components
@@ -111,7 +178,7 @@ function MetricCard({ label, value, suffix = '', positive }: { label: string; va
   );
 }
 
-function OptionsTable({ data, type }: { data: OptionsData['calls'] | OptionsData['puts']; type: string }) {
+function OptionsTable({ data, type }: { data: OptionsData['optionsChain']['calls'] | OptionsData['optionsChain']['puts']; type: string }) {
   if (!data?.length) return <p className="text-slate-500 text-sm text-center py-8">No data</p>;
   return (
     <div className="overflow-x-auto">
@@ -121,22 +188,26 @@ function OptionsTable({ data, type }: { data: OptionsData['calls'] | OptionsData
             <th className="text-left py-2 px-2">Strike</th>
             <th className="text-right py-2 px-2">Bid</th>
             <th className="text-right py-2 px-2">Ask</th>
+            <th className="text-right py-2 px-2">Mid</th>
             <th className="text-right py-2 px-2">Delta</th>
-            <th className="text-right py-2 px-2">Gamma</th>
             <th className="text-right py-2 px-2">Theta</th>
             <th className="text-right py-2 px-2">IV</th>
+            <th className="text-right py-2 px-2">Vol</th>
+            <th className="text-right py-2 px-2">DTE</th>
           </tr>
         </thead>
         <tbody>
-          {data.map((opt, i) => (
+          {data.slice(0, 8).map((opt, i) => (
             <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-700/20">
               <td className="py-2 px-2 font-mono font-medium text-white">${opt.strike}</td>
               <td className="text-right py-2 px-2 font-mono text-slate-300">${opt.bid?.toFixed(2)}</td>
               <td className="text-right py-2 px-2 font-mono text-slate-300">${opt.ask?.toFixed(2)}</td>
+              <td className="text-right py-2 px-2 font-mono text-blue-400">${opt.midPrice?.toFixed(2)}</td>
               <td className={`text-right py-2 px-2 font-mono ${opt.delta > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{opt.delta?.toFixed(2)}</td>
-              <td className="text-right py-2 px-2 font-mono text-amber-400">{opt.gamma?.toFixed(3)}</td>
               <td className="text-right py-2 px-2 font-mono text-red-400">{opt.theta?.toFixed(2)}</td>
-              <td className="text-right py-2 px-2 font-mono text-slate-400">{(opt.impliedVolatility * 100).toFixed(0)}%</td>
+              <td className="text-right py-2 px-2 font-mono text-amber-400">{(opt.impliedVolatility * 100).toFixed(0)}%</td>
+              <td className="text-right py-2 px-2 font-mono text-slate-400">{opt.volume?.toLocaleString()}</td>
+              <td className="text-right py-2 px-2 font-mono text-slate-400">{opt.dte}d</td>
             </tr>
           ))}
         </tbody>
@@ -246,68 +317,148 @@ function OptionsTab({ data, loading }: { data: OptionsData | null; loading: bool
 
   return (
     <div className="space-y-6">
+      {/* IV Analysis Banner */}
+      <div className={`p-4 rounded-xl border ${data.ivAnalysis?.ivSignal === 'HIGH' ? 'border-red-500/30 bg-red-500/5' : data.ivAnalysis?.ivSignal === 'LOW' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-slate-700/50 bg-slate-800/30'}`}>
+        <div className="flex items-center justify-between flex-wrap gap-4">
+          <div>
+            <h3 className="text-sm font-medium text-white mb-1">IV Analysis</h3>
+            <div className="flex items-center gap-4 text-sm">
+              <div><span className="text-xs text-slate-400">IV Rank:</span> <span className={`font-bold ${parseFloat(data.metrics?.ivRank || '0') > 50 ? 'text-amber-400' : 'text-emerald-400'}`}>{data.metrics?.ivRank}%</span></div>
+              <div><span className="text-xs text-slate-400">IV Percentile:</span> <span className="font-bold text-white">{data.metrics?.ivPercentile}%</span></div>
+              <div><span className="text-xs text-slate-400">Current IV:</span> <span className="font-bold text-white">{data.metrics?.avgIV}%</span></div>
+            </div>
+          </div>
+          <span className={`px-3 py-1.5 rounded-full text-sm font-medium ${data.ivAnalysis?.recommendation === 'BUY_PREMIUM' ? 'bg-emerald-500/20 text-emerald-400' : data.ivAnalysis?.recommendation === 'SELL_PREMIUM' ? 'bg-red-500/20 text-red-400' : 'bg-slate-600/30 text-slate-300'}`}>
+            {data.ivAnalysis?.recommendation === 'BUY_PREMIUM' ? '✓ Options Cheap' : data.ivAnalysis?.recommendation === 'SELL_PREMIUM' ? '⚠ Options Expensive' : '• Neutral IV'}
+          </span>
+        </div>
+      </div>
+
       {/* Suggestions */}
       <div className="p-5 rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-950/30 to-cyan-950/20">
-        <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">💡 Options Trade Suggestions</h2>
+        <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">💡 Trade Setups <span className="text-xs font-normal text-slate-400">(Greeks + IV + Technicals)</span></h2>
         <div className="grid gap-4 md:grid-cols-2">
-          {data.suggestions.map((sug, i) => (
+          {data.suggestions?.map((sug, i) => (
             <div key={i} className={`p-4 rounded-xl border ${sug.type === 'ALERT' ? 'border-amber-500/30 bg-amber-500/5' : sug.type === 'CALL' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
               <div className="flex items-center justify-between mb-3">
                 <span className="font-bold text-white">{sug.type === 'CALL' ? '📈' : sug.type === 'PUT' ? '📉' : '⚠️'} {sug.strategy}</span>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${sug.riskLevel === 'AGGRESSIVE' ? 'bg-orange-500/20 text-orange-400' : sug.riskLevel === 'CONSERVATIVE' ? 'bg-blue-500/20 text-blue-400' : 'bg-amber-500/20 text-amber-400'}`}>{sug.riskLevel}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${sug.riskLevel === 'AGGRESSIVE' ? 'bg-orange-500/20 text-orange-400' : sug.riskLevel === 'MODERATE' ? 'bg-blue-500/20 text-blue-400' : sug.riskLevel === 'CONSERVATIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}`}>{sug.riskLevel}</span>
               </div>
+              
               {sug.type !== 'ALERT' && sug.strike && (
-                <div className="grid grid-cols-3 gap-2 mb-3 text-sm">
-                  <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400 text-xs">Strike</p><p className="font-mono font-bold text-white">${sug.strike}</p></div>
-                  <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400 text-xs">Delta</p><p className={`font-mono font-bold ${(sug.delta || 0) > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{sug.delta?.toFixed(2)}</p></div>
-                  <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400 text-xs">Ask</p><p className="font-mono font-bold text-white">${sug.ask?.toFixed(2)}</p></div>
+                <>
+                  <div className="grid grid-cols-4 gap-2 mb-3 text-sm">
+                    <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400 text-xs">Strike</p><p className="font-mono font-bold text-white">${sug.strike}</p></div>
+                    <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400 text-xs">Delta</p><p className={`font-mono font-bold ${(sug.delta || 0) > 0 ? 'text-emerald-400' : 'text-red-400'}`}>{sug.delta?.toFixed(2)}</p></div>
+                    <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400 text-xs">Prob ITM</p><p className="font-mono font-bold text-white">{sug.probabilityITM?.toFixed(0)}%</p></div>
+                    <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400 text-xs">DTE</p><p className="font-mono font-bold text-white">{sug.dte}d</p></div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 mb-3 text-xs">
+                    <div className="p-2 rounded bg-slate-900/50"><span className="text-slate-400">Risk:</span> <span className="text-red-400 font-mono">${sug.maxRisk}</span></div>
+                    <div className="p-2 rounded bg-slate-900/50"><span className="text-slate-400">B/E:</span> <span className="text-white font-mono">${sug.breakeven}</span></div>
+                    <div className="p-2 rounded bg-slate-900/50"><span className="text-slate-400">R:R:</span> <span className="text-emerald-400 font-mono">{sug.riskRewardRatio}</span></div>
+                  </div>
+                </>
+              )}
+              
+              {/* Setup Score */}
+              {sug.setupScore && sug.type !== 'ALERT' && (
+                <div className="mb-3 p-2 rounded bg-slate-800/30">
+                  <div className="flex justify-between text-xs mb-1">
+                    <span className="text-slate-400">Setup Score</span>
+                    <span className={`font-bold ${sug.setupScore.total >= 60 ? 'text-emerald-400' : sug.setupScore.total >= 40 ? 'text-amber-400' : 'text-red-400'}`}>{sug.setupScore.total.toFixed(0)}/100</span>
+                  </div>
+                  <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${sug.setupScore.total >= 60 ? 'bg-emerald-500' : sug.setupScore.total >= 40 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${sug.setupScore.total}%` }} />
+                  </div>
                 </div>
               )}
-              {sug.confidence > 0 && (
-                <div className="mb-3">
-                  <div className="flex justify-between text-xs mb-1"><span className="text-slate-400">Confidence</span><span className="text-white font-bold">{sug.confidence}%</span></div>
-                  <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden"><div className={`h-full rounded-full ${sug.type === 'CALL' ? 'bg-emerald-500' : 'bg-red-500'}`} style={{ width: `${sug.confidence}%` }} /></div>
+              
+              {/* Reasoning */}
+              <div className="space-y-1 mb-2">
+                {sug.reasoning?.slice(0, 4).map((r, j) => <p key={j} className="text-xs text-slate-300">✓ {r}</p>)}
+              </div>
+              
+              {/* Warnings */}
+              {sug.warnings && sug.warnings.length > 0 && (
+                <div className="space-y-1">
+                  {sug.warnings.map((w, j) => <p key={j} className="text-xs text-amber-400">{w}</p>)}
                 </div>
               )}
-              {sug.reasoning.map((r, j) => <p key={j} className="text-xs text-slate-300">• {r}</p>)}
             </div>
           ))}
         </div>
       </div>
 
-      {/* Metrics */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {/* Market Context */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <div className="p-4 rounded-xl border border-slate-700/50 bg-slate-800/30">
           <p className="text-xs text-slate-400 mb-1">Trend</p>
-          <div className={`text-lg font-bold ${data.analysis.trend.trend === 'BULLISH' ? 'text-emerald-400' : 'text-red-400'}`}>{data.analysis.trend.trend === 'BULLISH' ? '📈' : '📉'} {data.analysis.trend.trend}</div>
+          <div className={`text-lg font-bold ${data.technicals?.trend === 'BULLISH' ? 'text-emerald-400' : data.technicals?.trend === 'BEARISH' ? 'text-red-400' : 'text-slate-300'}`}>
+            {data.technicals?.trend === 'BULLISH' ? '📈' : data.technicals?.trend === 'BEARISH' ? '📉' : '➡️'} {data.technicals?.trend}
+          </div>
+          <p className="text-xs text-slate-500 mt-1">RSI: {data.technicals?.rsi?.toFixed(0)}</p>
+        </div>
+        <div className="p-4 rounded-xl border border-slate-700/50 bg-slate-800/30">
+          <p className="text-xs text-slate-400 mb-1">Sentiment</p>
+          <div className={`text-lg font-bold ${data.sentiment?.sentiment === 'BULLISH' ? 'text-emerald-400' : data.sentiment?.sentiment === 'BEARISH' ? 'text-red-400' : 'text-slate-300'}`}>
+            {data.sentiment?.sentiment === 'BULLISH' ? '😀' : data.sentiment?.sentiment === 'BEARISH' ? '😟' : '😐'} {data.sentiment?.sentiment}
+          </div>
         </div>
         <div className="p-4 rounded-xl border border-slate-700/50 bg-slate-800/30">
           <p className="text-xs text-slate-400 mb-1">Earnings</p>
-          <div className="text-lg font-bold text-white">📅 {data.analysis.earnings.daysUntil}d</div>
+          <div className="text-lg font-bold text-white">📅 {data.earnings?.daysUntil}d</div>
+          <p className={`text-xs ${data.earnings?.ivCrushRisk === 'HIGH' ? 'text-red-400' : 'text-slate-500'}`}>
+            {data.earnings?.ivCrushRisk === 'HIGH' ? '⚠️ IV Crush Risk' : 'Low Risk'}
+          </p>
         </div>
         <div className="p-4 rounded-xl border border-slate-700/50 bg-slate-800/30">
-          <p className="text-xs text-slate-400 mb-1">Avg IV</p>
-          <div className="text-lg font-bold text-amber-400">{data.metrics.avgIV}%</div>
+          <p className="text-xs text-slate-400 mb-1">Expected Move</p>
+          <div className="text-lg font-bold text-amber-400">±{data.earnings?.expectedMove?.toFixed(1)}%</div>
         </div>
         <div className="p-4 rounded-xl border border-slate-700/50 bg-slate-800/30">
           <p className="text-xs text-slate-400 mb-1">Put/Call</p>
-          <div className={`text-lg font-bold font-mono ${parseFloat(data.metrics.putCallRatio) < 0.7 ? 'text-emerald-400' : parseFloat(data.metrics.putCallRatio) > 1.2 ? 'text-red-400' : 'text-white'}`}>{data.metrics.putCallRatio}</div>
+          <div className={`text-lg font-bold font-mono ${parseFloat(data.metrics?.putCallRatio || '0') < 0.7 ? 'text-emerald-400' : parseFloat(data.metrics?.putCallRatio || '0') > 1.2 ? 'text-red-400' : 'text-white'}`}>{data.metrics?.putCallRatio}</div>
         </div>
       </div>
+
+      {/* Support/Resistance */}
+      {data.technicals && (
+        <div className="p-4 rounded-xl border border-slate-700/50 bg-slate-800/30">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <span className="text-xs text-slate-400">Support:</span>
+              <span className={`ml-2 font-mono font-bold ${data.technicals.nearSupport ? 'text-emerald-400' : 'text-white'}`}>${data.technicals.support?.toFixed(2)}</span>
+              {data.technicals.nearSupport && <span className="ml-2 text-xs text-emerald-400">(near)</span>}
+            </div>
+            <div className="text-center">
+              <span className="text-xs text-slate-400">Price:</span>
+              <span className="ml-2 font-mono font-bold text-blue-400">${data.currentPrice?.toFixed(2)}</span>
+            </div>
+            <div>
+              <span className="text-xs text-slate-400">Resistance:</span>
+              <span className={`ml-2 font-mono font-bold ${data.technicals.nearResistance ? 'text-red-400' : 'text-white'}`}>${data.technicals.resistance?.toFixed(2)}</span>
+              {data.technicals.nearResistance && <span className="ml-2 text-xs text-red-400">(near)</span>}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Options Chain */}
       <div className="grid md:grid-cols-2 gap-6">
         <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5">
           <h3 className="text-lg font-semibold text-emerald-400 mb-4">📈 Calls</h3>
-          <OptionsTable data={data.calls} type="calls" />
+          <OptionsTable data={data.optionsChain?.calls} type="calls" />
         </div>
         <div className="p-4 rounded-xl border border-red-500/30 bg-red-500/5">
           <h3 className="text-lg font-semibold text-red-400 mb-4">📉 Puts</h3>
-          <OptionsTable data={data.puts} type="puts" />
+          <OptionsTable data={data.optionsChain?.puts} type="puts" />
         </div>
       </div>
 
-      <p className="text-xs text-center text-slate-500">Expiration: {data.expiration}</p>
+      <p className="text-xs text-center text-slate-500">
+        Updated: {data.lastUpdated ? new Date(data.lastUpdated).toLocaleString() : 'N/A'} • Source: {data.dataSource}
+      </p>
     </div>
   );
 }
