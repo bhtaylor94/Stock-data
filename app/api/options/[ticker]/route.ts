@@ -20,9 +20,9 @@ const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
 // ============================================================
 // SCHWAB AUTH
 // ============================================================
-async function getSchwabToken(): Promise<{ token: string | null; error: string | null }> {
+async function getSchwabToken(): Promise<{ token: string | null; error: string | null; errorCode: number | null }> {
   if (!SCHWAB_APP_KEY || !SCHWAB_APP_SECRET || !SCHWAB_REFRESH_TOKEN) {
-    return { token: null, error: 'Missing Schwab credentials' };
+    return { token: null, error: 'Missing Schwab credentials in environment variables', errorCode: null };
   }
   
   try {
@@ -40,12 +40,18 @@ async function getSchwabToken(): Promise<{ token: string | null; error: string |
     });
 
     if (!response.ok) {
-      return { token: null, error: `Auth failed (${response.status})` };
+      const status = response.status;
+      if (status === 401) {
+        return { token: null, error: 'Refresh token expired - needs renewal (tokens expire every 7 days)', errorCode: 401 };
+      } else if (status === 400) {
+        return { token: null, error: 'Invalid credentials or malformed request', errorCode: 400 };
+      }
+      return { token: null, error: `Auth failed with status ${status}`, errorCode: status };
     }
     const data = await response.json();
-    return { token: data.access_token, error: null };
+    return { token: data.access_token, error: null, errorCode: null };
   } catch (err) {
-    return { token: null, error: `Auth error: ${err}` };
+    return { token: null, error: `Auth network error: ${err}`, errorCode: null };
   }
 }
 
@@ -654,19 +660,29 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   const startTime = Date.now();
 
   // Get Schwab token
-  const { token, error: tokenError } = await getSchwabToken();
+  const { token, error: tokenError, errorCode } = await getSchwabToken();
   
   if (!token) {
+    const instructions = errorCode === 401 
+      ? [
+          '⚠️ Your Schwab refresh token has EXPIRED',
+          'Schwab tokens expire every 7 days',
+          'You need to generate a new refresh token from Schwab Developer Portal',
+          'Then update SCHWAB_REFRESH_TOKEN in Vercel environment variables',
+        ]
+      : [
+          'Set SCHWAB_APP_KEY in Vercel',
+          'Set SCHWAB_APP_SECRET in Vercel', 
+          'Set SCHWAB_REFRESH_TOKEN in Vercel',
+          'Refresh tokens expire every 7 days',
+        ];
+    
     return NextResponse.json({
       error: 'Schwab authentication failed',
       details: tokenError,
+      errorCode,
       ticker,
-      instructions: [
-        'Set SCHWAB_APP_KEY in Vercel',
-        'Set SCHWAB_APP_SECRET in Vercel', 
-        'Set SCHWAB_REFRESH_TOKEN in Vercel',
-        'Refresh tokens expire every 7 days',
-      ],
+      instructions,
       lastUpdated: new Date().toISOString(),
       dataSource: 'none',
     });
