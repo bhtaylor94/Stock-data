@@ -47,6 +47,10 @@ interface OptionsData {
   currentPrice: number;
   lastUpdated: string;
   dataSource: string;
+  responseTimeMs?: number;
+  error?: string;
+  errors?: string[];
+  instructions?: string[];
   technicals: {
     trend: string;
     trendStrength: number;
@@ -315,8 +319,50 @@ function OptionsTab({ data, loading }: { data: OptionsData | null; loading: bool
   if (loading) return <LoadingSpinner />;
   if (!data) return <p className="text-slate-500 text-center py-12">Enter a ticker symbol to view options</p>;
 
+  // Check for error state
+  if (data.error) {
+    return (
+      <div className="space-y-6">
+        <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5">
+          <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ {data.error}</h3>
+          {data.errors && data.errors.length > 0 && (
+            <div className="mb-4 space-y-1">
+              {data.errors.map((err: string, i: number) => (
+                <p key={i} className="text-xs text-red-300">• {err}</p>
+              ))}
+            </div>
+          )}
+          {data.instructions && (
+            <div className="mt-4 p-4 rounded-xl bg-slate-800/50">
+              <p className="text-sm text-slate-300 font-medium mb-2">Setup Instructions:</p>
+              {data.instructions.map((instr: string, i: number) => (
+                <p key={i} className="text-xs text-slate-400">{instr}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
+      {/* Data Source Banner */}
+      <div className={`p-3 rounded-xl border ${data.dataSource === 'schwab-live' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-amber-500/30 bg-amber-500/5'}`}>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <span className={`w-2 h-2 rounded-full ${data.dataSource === 'schwab-live' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+            <span className="text-sm text-slate-300">
+              {data.dataSource === 'schwab-live' ? '🔴 LIVE DATA - Schwab Market Data' : `⚠️ Data Source: ${data.dataSource || 'Unknown'}`}
+            </span>
+          </div>
+          <span className="text-xs text-slate-400">
+            Updated: {data.lastUpdated ? new Date(data.lastUpdated).toLocaleTimeString() : 'N/A'}
+            {data.responseTimeMs && ` (${data.responseTimeMs}ms)`}
+          </span>
+        </div>
+      </div>
+
       {/* IV Analysis Banner */}
       <div className={`p-4 rounded-xl border ${data.ivAnalysis?.ivSignal === 'HIGH' ? 'border-red-500/30 bg-red-500/5' : data.ivAnalysis?.ivSignal === 'LOW' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-slate-700/50 bg-slate-800/30'}`}>
         <div className="flex items-center justify-between flex-wrap gap-4">
@@ -466,6 +512,7 @@ function OptionsTab({ data, loading }: { data: OptionsData | null; loading: bool
 // Main App
 export default function Home() {
   const [ticker, setTicker] = useState('');
+  const [searchedTicker, setSearchedTicker] = useState('');
   const [activeTab, setActiveTab] = useState<'stocks' | 'options'>('stocks');
   const [stockData, setStockData] = useState<StockData | null>(null);
   const [optionsData, setOptionsData] = useState<OptionsData | null>(null);
@@ -476,6 +523,7 @@ export default function Home() {
   const handleSearch = async () => {
     if (!ticker.trim()) return;
     const sym = ticker.toUpperCase().trim();
+    setSearchedTicker(sym);
     setError('');
 
     setLoadingStock(true);
@@ -503,6 +551,36 @@ export default function Home() {
 
     setLoadingStock(false);
     setLoadingOptions(false);
+  };
+
+  const refreshOptions = async () => {
+    if (!searchedTicker) return;
+    setLoadingOptions(true);
+    try {
+      const res = await fetch(`/api/options/${searchedTicker}`);
+      if (res.ok) {
+        const data = await res.json();
+        setOptionsData(data);
+      }
+    } catch (err) {
+      console.error('Refresh failed:', err);
+    }
+    setLoadingOptions(false);
+  };
+
+  const refreshStock = async () => {
+    if (!searchedTicker) return;
+    setLoadingStock(true);
+    try {
+      const res = await fetch(`/api/stock/${searchedTicker}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (!data.error) setStockData(data);
+      }
+    } catch (err) {
+      console.error('Refresh failed:', err);
+    }
+    setLoadingStock(false);
   };
 
   return (
@@ -558,13 +636,25 @@ export default function Home() {
         )}
 
         {/* Tabs */}
-        <div className="mb-6 flex gap-2">
-          <button onClick={() => setActiveTab('stocks')} className={`px-5 py-2.5 rounded-xl font-medium ${activeTab === 'stocks' ? 'bg-gradient-to-r from-emerald-600 to-blue-600 text-white' : 'bg-slate-800/50 text-slate-400 hover:text-white border border-slate-700/50'}`}>
-            📊 Stock Analysis
-          </button>
-          <button onClick={() => setActiveTab('options')} className={`px-5 py-2.5 rounded-xl font-medium ${activeTab === 'options' ? 'bg-gradient-to-r from-emerald-600 to-blue-600 text-white' : 'bg-slate-800/50 text-slate-400 hover:text-white border border-slate-700/50'}`}>
-            📈 Options Intel
-          </button>
+        <div className="mb-6 flex items-center justify-between flex-wrap gap-2">
+          <div className="flex gap-2">
+            <button onClick={() => setActiveTab('stocks')} className={`px-5 py-2.5 rounded-xl font-medium ${activeTab === 'stocks' ? 'bg-gradient-to-r from-emerald-600 to-blue-600 text-white' : 'bg-slate-800/50 text-slate-400 hover:text-white border border-slate-700/50'}`}>
+              📊 Stock Analysis
+            </button>
+            <button onClick={() => setActiveTab('options')} className={`px-5 py-2.5 rounded-xl font-medium ${activeTab === 'options' ? 'bg-gradient-to-r from-emerald-600 to-blue-600 text-white' : 'bg-slate-800/50 text-slate-400 hover:text-white border border-slate-700/50'}`}>
+              📈 Options Intel
+            </button>
+          </div>
+          {searchedTicker && (
+            <button 
+              onClick={activeTab === 'stocks' ? refreshStock : refreshOptions}
+              disabled={loadingStock || loadingOptions}
+              className="px-4 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-300 hover:text-white hover:border-blue-500/50 disabled:opacity-50 flex items-center gap-2 text-sm"
+            >
+              <span className={loadingStock || loadingOptions ? 'animate-spin' : ''}>🔄</span>
+              Refresh Data
+            </button>
+          )}
         </div>
 
         {activeTab === 'stocks' && <StockTab data={stockData} loading={loadingStock} />}
