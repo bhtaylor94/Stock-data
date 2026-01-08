@@ -87,7 +87,7 @@ function StockTab({ data, loading }: { data: any; loading: boolean }) {
       {/* Suggestions */}
       <div className="p-5 rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-950/30 to-cyan-950/20">
         <h2 className="text-lg font-semibold text-white mb-4">💡 Recommendations</h2>
-        <div className="space-y-3">
+        <div className="space-y-4">
           {suggestions?.map((sug: any, i: number) => (
             <div key={i} className={`p-4 rounded-xl border ${
               sug.type === 'BUY' ? 'border-emerald-500/30 bg-emerald-500/5' :
@@ -101,7 +101,81 @@ function StockTab({ data, loading }: { data: any; loading: boolean }) {
                 </span>
                 {sug.confidence > 0 && <span className="text-sm text-slate-400">Confidence: <span className="text-white font-bold">{sug.confidence}%</span></span>}
               </div>
-              {sug.reasoning?.map((r: string, j: number) => <p key={j} className="text-xs text-slate-300">• {r}</p>)}
+              
+              {/* Summary */}
+              {sug.detailedExplanation?.summary && (
+                <p className="text-sm text-slate-200 mb-3 leading-relaxed">{sug.detailedExplanation.summary}</p>
+              )}
+              
+              {/* Quick reasoning */}
+              <div className="mb-3">
+                {sug.reasoning?.map((r: string, j: number) => <p key={j} className="text-xs text-slate-400">• {r}</p>)}
+              </div>
+              
+              {/* Detailed Explanation (expandable) */}
+              {sug.detailedExplanation && sug.type !== 'ALERT' && (
+                <details className="mt-3 pt-3 border-t border-slate-700/50">
+                  <summary className="text-xs text-blue-400 cursor-pointer hover:text-blue-300">📖 View Detailed Analysis</summary>
+                  <div className="mt-3 space-y-3 text-xs">
+                    {/* Key Metrics */}
+                    {sug.detailedExplanation.keyMetrics && (
+                      <div className="grid grid-cols-1 gap-1 p-2 rounded bg-slate-800/50">
+                        <p className="text-slate-400">📊 <span className="text-slate-300">{sug.detailedExplanation.keyMetrics.valuation}</span></p>
+                        <p className="text-slate-400">💰 <span className="text-slate-300">{sug.detailedExplanation.keyMetrics.profitability}</span></p>
+                        <p className="text-slate-400">🏦 <span className="text-slate-300">{sug.detailedExplanation.keyMetrics.financial_health}</span></p>
+                        <p className="text-slate-400">📈 <span className="text-slate-300">{sug.detailedExplanation.keyMetrics.momentum}</span></p>
+                        <p className="text-slate-400">📍 <span className="text-slate-300">{sug.detailedExplanation.keyMetrics.trend}</span></p>
+                      </div>
+                    )}
+                    
+                    {/* Confidence Adjustments */}
+                    {sug.detailedExplanation.confidenceFactors?.adjustments?.length > 0 && (
+                      <div className="p-2 rounded bg-slate-800/50">
+                        <p className="text-slate-400 mb-1">🎯 Confidence Factors:</p>
+                        <p className="text-slate-300">Base: {sug.detailedExplanation.confidenceFactors.baseConfidence}</p>
+                        {sug.detailedExplanation.confidenceFactors.adjustments.map((adj: string, k: number) => (
+                          <p key={k} className={`${adj.startsWith('+') ? 'text-emerald-400' : adj.startsWith('-') ? 'text-red-400' : 'text-slate-300'}`}>• {adj}</p>
+                        ))}
+                        <p className="text-white font-medium mt-1">Final: {sug.detailedExplanation.confidenceFactors.finalConfidence}</p>
+                      </div>
+                    )}
+                    
+                    {/* Reasoning */}
+                    {sug.detailedExplanation.reasoning?.length > 0 && (
+                      <div className="p-2 rounded bg-slate-800/50">
+                        <p className="text-slate-400 mb-1">🧠 Analysis:</p>
+                        {sug.detailedExplanation.reasoning.map((r: string, k: number) => (
+                          <p key={k} className="text-slate-300">• {r}</p>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* Score Breakdown */}
+                    {sug.detailedExplanation.scoreBreakdown && (
+                      <div className="grid md:grid-cols-2 gap-2">
+                        <div className="p-2 rounded bg-emerald-500/10">
+                          <p className="text-emerald-400 font-medium mb-1">✓ Passed Factors ({sug.detailedExplanation.scoreBreakdown.fundamental?.passed?.length || 0})</p>
+                          {sug.detailedExplanation.scoreBreakdown.fundamental?.passed?.slice(0, 5).map((p: string, k: number) => (
+                            <p key={k} className="text-emerald-300/80 text-xs">{p}</p>
+                          ))}
+                          {sug.detailedExplanation.scoreBreakdown.technical?.passed?.slice(0, 5).map((p: string, k: number) => (
+                            <p key={k} className="text-emerald-300/80 text-xs">{p}</p>
+                          ))}
+                        </div>
+                        <div className="p-2 rounded bg-red-500/10">
+                          <p className="text-red-400 font-medium mb-1">✗ Failed Factors ({sug.detailedExplanation.scoreBreakdown.fundamental?.failed?.length || 0})</p>
+                          {sug.detailedExplanation.scoreBreakdown.fundamental?.failed?.slice(0, 5).map((f: string, k: number) => (
+                            <p key={k} className="text-red-300/80 text-xs">{f}</p>
+                          ))}
+                          {sug.detailedExplanation.scoreBreakdown.technical?.failed?.slice(0, 5).map((f: string, k: number) => (
+                            <p key={k} className="text-red-300/80 text-xs">{f}</p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              )}
             </div>
           ))}
         </div>
@@ -350,9 +424,40 @@ function OptionsTab({ data, loading }: { data: any; loading: boolean }) {
                     <span className={`px-1.5 py-0.5 rounded text-xs ${sug.score.unusual >= 1 ? 'bg-orange-500/20 text-orange-400' : 'bg-slate-700 text-slate-400'}`}>UOA{sug.score.unusual}</span>
                   </div>
                 )}
-                <div className="space-y-1">
+                <div className="space-y-1 mb-2">
                   {sug.reasoning?.slice(0, 3).map((r: string, j: number) => <p key={j} className="text-xs text-slate-300">• {r}</p>)}
                 </div>
+                
+                {/* Detailed Explanation */}
+                {sug.detailedExplanation && (
+                  <details className="mt-2 pt-2 border-t border-slate-700/50">
+                    <summary className="text-xs text-blue-400 cursor-pointer hover:text-blue-300">📖 View Detailed Analysis</summary>
+                    <div className="mt-2 space-y-2 text-xs">
+                      <p className="text-slate-200">{sug.detailedExplanation.summary}</p>
+                      
+                      {sug.detailedExplanation.whyThisStrike && (
+                        <p className="text-slate-400">💰 {sug.detailedExplanation.whyThisStrike}</p>
+                      )}
+                      {sug.detailedExplanation.riskReward && (
+                        <p className="text-slate-400">⚖️ {sug.detailedExplanation.riskReward}</p>
+                      )}
+                      {sug.detailedExplanation.marketContext && (
+                        <p className="text-slate-400">📊 {sug.detailedExplanation.marketContext}</p>
+                      )}
+                      
+                      {sug.detailedExplanation.scoreBreakdown && (
+                        <div className="mt-2 p-2 rounded bg-slate-800/50 space-y-1">
+                          <p className="text-slate-400 font-medium">Score Breakdown:</p>
+                          {Object.entries(sug.detailedExplanation.scoreBreakdown).map(([key, val]: [string, any]) => (
+                            <p key={key} className={`${val.score >= 1 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                              {key}: {val.score}/{val.max} - {val.reason}
+                            </p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </details>
+                )}
               </div>
             ))}
           </div>

@@ -431,37 +431,59 @@ function generateSuggestions(
   newsSentiment: { score: number; signal: string },
   analystRating: { consensus: string; buyPercent: number; targetUpside: number },
   insiderActivity: { netActivity: string },
-  earnings: any
+  earnings: any,
+  fundamentalFactors: any[],
+  technicalFactors: any[],
+  price: number,
+  technicals: any,
+  fundamentals: any
 ) {
   const suggestions: any[] = [];
   
   // PRIMARY SCORE: Use the combined fundamental + technical score (18 max)
-  // This is the MAIN deterministic score shown to user
   const combinedScore = fundamentalScore + technicalScore;
   
-  // Secondary factors (can adjust confidence but NOT the main recommendation)
-  // These provide context but don't override the primary analysis
+  // Secondary factors (adjust confidence only)
   let confidenceAdjustment = 0;
+  const adjustmentReasons: string[] = [];
   
   // News sentiment adjustment (-10 to +10)
-  if (newsSentiment.signal === 'BULLISH') confidenceAdjustment += 5;
-  else if (newsSentiment.signal === 'BEARISH') confidenceAdjustment -= 5;
+  if (newsSentiment.signal === 'BULLISH') {
+    confidenceAdjustment += 5;
+    adjustmentReasons.push('+5% confidence: Bullish news sentiment');
+  } else if (newsSentiment.signal === 'BEARISH') {
+    confidenceAdjustment -= 5;
+    adjustmentReasons.push('-5% confidence: Bearish news sentiment');
+  }
   
   // Analyst consensus adjustment (-5 to +5)
-  if (analystRating.buyPercent >= 70) confidenceAdjustment += 5;
-  else if (analystRating.buyPercent <= 30) confidenceAdjustment -= 5;
+  if (analystRating.buyPercent >= 70) {
+    confidenceAdjustment += 5;
+    adjustmentReasons.push(`+5% confidence: Strong analyst support (${analystRating.buyPercent}% bullish)`);
+  } else if (analystRating.buyPercent <= 30) {
+    confidenceAdjustment -= 5;
+    adjustmentReasons.push(`-5% confidence: Weak analyst support (${analystRating.buyPercent}% bullish)`);
+  }
   
-  // Insider activity adjustment (-5 to +5)
-  // Note: Insiders often sell for personal reasons (taxes, diversification)
-  // so we weight this less heavily
-  if (insiderActivity.netActivity === 'BUYING') confidenceAdjustment += 3;
-  else if (insiderActivity.netActivity === 'SELLING') confidenceAdjustment -= 2;
+  // Insider activity adjustment
+  if (insiderActivity.netActivity === 'BUYING') {
+    confidenceAdjustment += 3;
+    adjustmentReasons.push('+3% confidence: Insider buying detected');
+  } else if (insiderActivity.netActivity === 'SELLING') {
+    confidenceAdjustment -= 2;
+    adjustmentReasons.push('-2% confidence: Insider selling (often for personal reasons)');
+  }
   
   // Price target adjustment
-  if (analystRating.targetUpside > 20) confidenceAdjustment += 5;
-  else if (analystRating.targetUpside < -10) confidenceAdjustment -= 5;
+  if (analystRating.targetUpside > 20) {
+    confidenceAdjustment += 5;
+    adjustmentReasons.push(`+5% confidence: High upside potential (${analystRating.targetUpside.toFixed(1)}%)`);
+  } else if (analystRating.targetUpside < -10) {
+    confidenceAdjustment -= 5;
+    adjustmentReasons.push(`-5% confidence: Negative price target (${analystRating.targetUpside.toFixed(1)}%)`);
+  }
   
-  // MAIN RECOMMENDATION based on combined score (deterministic)
+  // MAIN RECOMMENDATION based on combined score
   let mainType: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
   let strategy = 'Hold - Mixed Signals';
   let baseConfidence = 50;
@@ -469,45 +491,111 @@ function generateSuggestions(
   if (combinedScore >= 14) {
     mainType = 'BUY';
     strategy = 'Strong Buy - Excellent Fundamentals & Technicals';
-    baseConfidence = 75 + (combinedScore - 14) * 5; // 75-95%
+    baseConfidence = 75 + (combinedScore - 14) * 5;
   } else if (combinedScore >= 11) {
     mainType = 'BUY';
     strategy = 'Buy - Favorable Conditions';
-    baseConfidence = 60 + (combinedScore - 11) * 5; // 60-75%
+    baseConfidence = 60 + (combinedScore - 11) * 5;
   } else if (combinedScore >= 7) {
     mainType = 'HOLD';
     strategy = 'Hold - Wait for Better Entry';
-    baseConfidence = 40 + (combinedScore - 7) * 5; // 40-60%
+    baseConfidence = 40 + (combinedScore - 7) * 5;
   } else if (combinedScore >= 4) {
     mainType = 'SELL';
     strategy = 'Sell - Weak Signals';
-    baseConfidence = 55 + (7 - combinedScore) * 5; // 55-70%
+    baseConfidence = 55 + (7 - combinedScore) * 5;
   } else {
     mainType = 'SELL';
     strategy = 'Strong Sell - Multiple Red Flags';
-    baseConfidence = 70 + (4 - combinedScore) * 5; // 70-90%
+    baseConfidence = 70 + (4 - combinedScore) * 5;
   }
   
-  // Apply confidence adjustment (but keep within bounds)
   const finalConfidence = Math.min(95, Math.max(25, baseConfidence + confidenceAdjustment));
   
-  const reasoning = [
-    `Combined Score: ${combinedScore}/18 (Fundamental ${fundamentalScore}/9 + Technical ${technicalScore}/9)`,
-    `News Sentiment: ${newsSentiment.signal} (${newsSentiment.score}%)`,
-    `Analyst Consensus: ${analystRating.consensus} (${analystRating.buyPercent}% bullish)`,
-    `Insider Activity: ${insiderActivity.netActivity}`,
-  ];
+  // Build detailed explanation
+  const passedFundamentals = fundamentalFactors.filter(f => f.passed);
+  const failedFundamentals = fundamentalFactors.filter(f => !f.passed);
+  const passedTechnicals = technicalFactors.filter(f => f.passed);
+  const failedTechnicals = technicalFactors.filter(f => !f.passed);
   
-  if (analystRating.targetUpside !== 0) {
-    reasoning.push(`Price Target: ${analystRating.targetUpside >= 0 ? '+' : ''}${analystRating.targetUpside.toFixed(1)}% upside`);
-  }
+  const detailedExplanation = {
+    summary: `Based on a combined analysis score of ${combinedScore}/18, this stock receives a ${mainType} recommendation with ${finalConfidence}% confidence.`,
+    
+    scoreBreakdown: {
+      fundamental: {
+        score: fundamentalScore,
+        maxScore: 9,
+        interpretation: fundamentalScore >= 7 ? 'Strong fundamentals' : fundamentalScore >= 5 ? 'Decent fundamentals' : 'Weak fundamentals',
+        passed: passedFundamentals.map(f => `✓ ${f.name}: ${f.value}`),
+        failed: failedFundamentals.map(f => `✗ ${f.name}: ${f.value} (needs ${f.threshold})`),
+      },
+      technical: {
+        score: technicalScore,
+        maxScore: 9,
+        interpretation: technicalScore >= 7 ? 'Strong technicals - uptrend' : technicalScore >= 5 ? 'Mixed technicals' : 'Weak technicals - downtrend',
+        passed: passedTechnicals.map(f => `✓ ${f.name}: ${f.value}`),
+        failed: failedTechnicals.map(f => `✗ ${f.name}: ${f.value} (needs ${f.threshold})`),
+      },
+    },
+    
+    keyMetrics: {
+      valuation: `P/E: ${fundamentals.pe?.toFixed(1) || 'N/A'} | P/B: ${fundamentals.pb?.toFixed(2) || 'N/A'}`,
+      profitability: `ROE: ${fundamentals.roe?.toFixed(1)}% | Profit Margin: ${fundamentals.profitMargin?.toFixed(1)}%`,
+      financial_health: `Debt/Equity: ${fundamentals.debtEquity?.toFixed(2)} | Current Ratio: ${fundamentals.currentRatio?.toFixed(2)}`,
+      momentum: `RSI: ${technicals.rsi} | vs 50 SMA: ${technicals.priceVsSma50?.toFixed(1)}%`,
+      trend: `Price: $${price.toFixed(2)} | Support: $${technicals.support?.toFixed(2)} | Resistance: $${technicals.resistance?.toFixed(2)}`,
+    },
+    
+    confidenceFactors: {
+      baseConfidence: `${baseConfidence}% (from score ${combinedScore}/18)`,
+      adjustments: adjustmentReasons,
+      finalConfidence: `${finalConfidence}%`,
+    },
+    
+    marketContext: {
+      news: `${newsSentiment.signal} sentiment (${newsSentiment.score}%)`,
+      analysts: `${analystRating.consensus} - ${analystRating.buyPercent}% recommend buying`,
+      insiders: insiderActivity.netActivity,
+      priceTarget: analystRating.targetUpside !== 0 ? `${analystRating.targetUpside >= 0 ? '+' : ''}${analystRating.targetUpside.toFixed(1)}% to target` : 'N/A',
+    },
+    
+    reasoning: mainType === 'BUY' 
+      ? [
+          `The stock scores ${combinedScore}/18 on our combined analysis, indicating ${combinedScore >= 14 ? 'excellent' : 'favorable'} conditions.`,
+          `Fundamental analysis shows ${fundamentalScore}/9 factors passing, suggesting ${fundamentalScore >= 7 ? 'strong' : 'adequate'} company health.`,
+          `Technical analysis shows ${technicalScore}/9 factors passing, indicating ${technicalScore >= 7 ? 'strong upward momentum' : 'positive price action'}.`,
+          technicals.rsi < 70 ? `RSI at ${technicals.rsi} is not overbought, suggesting room for upside.` : `Caution: RSI at ${technicals.rsi} is overbought.`,
+          technicals.priceVsSma50 > 0 ? `Price is ${technicals.priceVsSma50.toFixed(1)}% above 50-day SMA, confirming uptrend.` : `Price is below 50-day SMA, watch for breakout.`,
+        ]
+      : mainType === 'SELL'
+      ? [
+          `The stock scores only ${combinedScore}/18, indicating significant weakness.`,
+          `Fundamental analysis shows only ${fundamentalScore}/9 factors passing - ${9 - fundamentalScore} red flags.`,
+          `Technical analysis shows only ${technicalScore}/9 factors passing - price action is weak.`,
+          technicals.rsi > 70 ? `RSI at ${technicals.rsi} is overbought - potential pullback.` : technicals.rsi < 30 ? `RSI at ${technicals.rsi} is oversold but no reversal signal yet.` : '',
+          technicals.priceVsSma50 < 0 ? `Price is ${Math.abs(technicals.priceVsSma50).toFixed(1)}% below 50-day SMA, confirming downtrend.` : '',
+        ].filter(Boolean)
+      : [
+          `The stock scores ${combinedScore}/18 - mixed signals suggest caution.`,
+          `Fundamental analysis shows ${fundamentalScore}/9 factors - neither strong nor weak.`,
+          `Technical analysis shows ${technicalScore}/9 factors - no clear trend.`,
+          `Wait for a clearer signal before entering a position.`,
+        ],
+  };
   
   suggestions.push({
     type: mainType,
     strategy,
     confidence: finalConfidence,
-    reasoning,
+    reasoning: [
+      `Combined Score: ${combinedScore}/18 (Fundamental ${fundamentalScore}/9 + Technical ${technicalScore}/9)`,
+      `News Sentiment: ${newsSentiment.signal} (${newsSentiment.score}%)`,
+      `Analyst Consensus: ${analystRating.consensus} (${analystRating.buyPercent}% bullish)`,
+      `Insider Activity: ${insiderActivity.netActivity}`,
+      analystRating.targetUpside !== 0 ? `Price Target: ${analystRating.targetUpside >= 0 ? '+' : ''}${analystRating.targetUpside.toFixed(1)}% upside` : '',
+    ].filter(Boolean),
     riskLevel: combinedScore >= 12 ? 'LOW' : combinedScore >= 8 ? 'MEDIUM' : 'HIGH',
+    detailedExplanation,
   });
   
   // Earnings alert
@@ -530,7 +618,7 @@ function generateSuggestions(
     }
   }
   
-  // Only show divergence alert if it's extreme
+  // Only show divergence alert if extreme
   if (Math.abs(fundamentalScore - technicalScore) >= 5) {
     suggestions.push({
       type: 'ALERT',
@@ -663,7 +751,24 @@ export async function GET(
     newsAnalysis,
     analystAnalysis,
     insiderAnalysis,
-    earnings
+    earnings,
+    fundamentalAnalysis.factors,
+    technicalAnalysis.factors,
+    price,
+    {
+      rsi: Math.round(rsi),
+      priceVsSma50: Math.round(((price / sma50 - 1) * 100) * 100) / 100,
+      support: Math.round(support * 100) / 100,
+      resistance: Math.round(resistance * 100) / 100,
+    },
+    {
+      pe: fundamentalMetrics.pe,
+      pb: fundamentalMetrics.pb,
+      roe: fundamentalMetrics.roe,
+      profitMargin: fundamentalMetrics.profitMargin,
+      debtEquity: fundamentalMetrics.debtEquity,
+      currentRatio: fundamentalMetrics.currentRatio,
+    }
   );
 
   return NextResponse.json({

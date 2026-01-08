@@ -527,6 +527,23 @@ function generateSuggestions(
     const c = best.contract;
     const s = best.score;
     
+    const callExplanation = {
+      summary: `This ${c.dte}-day call option at $${c.strike} strike scores ${s.total}/12, making it ${s.total >= 8 ? 'an excellent' : s.total >= 5 ? 'a good' : 'a speculative'} ${trend === 'BULLISH' ? 'directional play' : 'speculative bet'}.`,
+      scoreBreakdown: {
+        delta: { score: s.delta, max: 2, reason: `Delta ${c.delta.toFixed(2)} - ${Math.abs(c.delta) >= 0.35 && Math.abs(c.delta) <= 0.65 ? 'optimal range for directional exposure' : 'outside optimal 0.35-0.65 range'}` },
+        iv: { score: s.iv, max: 2, reason: `IV ${(c.iv * 100).toFixed(0)}% vs avg ${ivAnalysis.atmIV.toFixed(0)}% - ${c.iv * 100 < ivAnalysis.atmIV ? 'below average = cheaper option' : 'at or above average'}` },
+        liquidity: { score: s.liquidity, max: 2, reason: `Spread ${c.spreadPercent.toFixed(1)}%, Volume ${c.volume} - ${c.spreadPercent < 5 && c.volume > 100 ? 'excellent liquidity' : 'moderate liquidity'}` },
+        timing: { score: s.timing, max: 2, reason: `${c.dte} DTE - ${c.dte >= 21 && c.dte <= 45 ? 'optimal 21-45 day window' : c.dte < 21 ? 'short-dated, high theta decay' : 'longer-dated, lower theta'}` },
+        technical: { score: s.technical, max: 2, reason: `Trend: ${trend} - ${trend === 'BULLISH' ? 'aligned with call direction' : 'neutral trend, speculative'}` },
+        unusual: { score: s.unusual, max: 2, reason: c.isUnusual ? 'Unusual activity detected - institutional interest' : 'Normal activity levels' },
+      },
+      whyThisStrike: `$${c.strike} strike has ${Math.round(Math.abs(c.delta) * 100)}% probability of expiring ITM. ${c.itm ? 'Currently in-the-money with intrinsic value.' : 'Out-of-the-money, pure time value.'}`,
+      riskReward: `Max risk: $${(c.ask * 100).toFixed(0)} per contract. Breakeven at $${(c.strike + c.ask).toFixed(2)} at expiration.`,
+      marketContext: trend === 'BULLISH' 
+        ? 'Current uptrend supports bullish thesis. Call is trend-aligned.'
+        : 'Current trend is neutral. This is a speculative play - manage position size accordingly.',
+    };
+    
     suggestions.push({
       type: 'CALL',
       strategy: trend === 'BULLISH' ? 'Long Call (Trend Aligned)' : 'Long Call (Speculative)',
@@ -542,6 +559,7 @@ function generateSuggestions(
       warnings: s.total < 6 ? ['Lower confidence - manage size'] : [],
       confidence: Math.round((s.total / 12) * 100),
       riskLevel: s.total >= 8 ? 'LOW' : s.total >= 5 ? 'MEDIUM' : 'HIGH',
+      detailedExplanation: callExplanation,
     });
   }
 
@@ -550,6 +568,23 @@ function generateSuggestions(
     const best = scoredPuts[0];
     const p = best.contract;
     const s = best.score;
+    
+    const putExplanation = {
+      summary: `This ${p.dte}-day put option at $${p.strike} strike scores ${s.total}/12, making it ${s.total >= 8 ? 'an excellent' : s.total >= 5 ? 'a good' : 'a speculative'} ${trend === 'BEARISH' ? 'directional play' : 'hedge'}.`,
+      scoreBreakdown: {
+        delta: { score: s.delta, max: 2, reason: `Delta ${p.delta.toFixed(2)} - ${Math.abs(p.delta) >= 0.35 && Math.abs(p.delta) <= 0.65 ? 'optimal range for directional exposure' : 'outside optimal 0.35-0.65 range'}` },
+        iv: { score: s.iv, max: 2, reason: `IV ${(p.iv * 100).toFixed(0)}% vs avg ${ivAnalysis.atmIV.toFixed(0)}% - ${p.iv * 100 < ivAnalysis.atmIV ? 'below average = cheaper option' : 'at or above average'}` },
+        liquidity: { score: s.liquidity, max: 2, reason: `Spread ${p.spreadPercent.toFixed(1)}%, Volume ${p.volume} - ${p.spreadPercent < 5 && p.volume > 100 ? 'excellent liquidity' : 'moderate liquidity'}` },
+        timing: { score: s.timing, max: 2, reason: `${p.dte} DTE - ${p.dte >= 21 && p.dte <= 45 ? 'optimal 21-45 day window' : p.dte < 21 ? 'short-dated, high theta decay' : 'longer-dated, lower theta'}` },
+        technical: { score: s.technical, max: 2, reason: `Trend: ${trend} - ${trend === 'BEARISH' ? 'aligned with put direction' : 'counter-trend, use as hedge'}` },
+        unusual: { score: s.unusual, max: 2, reason: p.isUnusual ? 'Unusual activity detected - institutional interest' : 'Normal activity levels' },
+      },
+      whyThisStrike: `$${p.strike} strike has ${Math.round(Math.abs(p.delta) * 100)}% probability of expiring ITM. ${p.itm ? 'Currently in-the-money with intrinsic value.' : 'Out-of-the-money, pure time value.'}`,
+      riskReward: `Max risk: $${(p.ask * 100).toFixed(0)} per contract. Breakeven at $${(p.strike - p.ask).toFixed(2)} at expiration.`,
+      marketContext: trend === 'BEARISH' 
+        ? 'Current downtrend supports bearish thesis. Put is trend-aligned.'
+        : 'Current trend is not bearish. This put serves better as portfolio protection than directional bet.',
+    };
     
     suggestions.push({
       type: 'PUT',
@@ -566,12 +601,27 @@ function generateSuggestions(
       warnings: trend !== 'BEARISH' ? ['Counter-trend - use as hedge'] : [],
       confidence: Math.round((s.total / 12) * 100),
       riskLevel: s.total >= 8 ? 'LOW' : s.total >= 5 ? 'MEDIUM' : 'HIGH',
+      detailedExplanation: putExplanation,
     });
   }
 
   // Unusual activity alert
   if (unusualActivity.length > 0) {
     const topUnusual = unusualActivity[0];
+    const unusualExplanation = {
+      summary: `Unusual options activity detected on ${topUnusual.contract.type.toUpperCase()} $${topUnusual.contract.strike} - this often indicates institutional positioning.`,
+      whyUnusual: [
+        `Volume: ${topUnusual.contract.volume.toLocaleString()} contracts traded today`,
+        `Open Interest: ${topUnusual.contract.openInterest.toLocaleString()} existing contracts`,
+        `Volume/OI Ratio: ${topUnusual.contract.volumeOIRatio.toFixed(1)}x - ${topUnusual.contract.volumeOIRatio >= 3 ? 'very high, likely new positions' : 'elevated activity'}`,
+        `Premium Flow: $${Math.round(topUnusual.premiumValue).toLocaleString()} in premium`,
+      ],
+      interpretation: topUnusual.sentiment === 'BULLISH'
+        ? 'Heavy call buying suggests institutional traders expect upward movement.'
+        : 'Heavy put buying suggests institutional traders expect downward movement or are hedging.',
+      caveat: 'Unusual activity is a signal, not a guarantee. Institutions may be hedging existing positions rather than making directional bets.',
+    };
+    
     suggestions.push({
       type: 'ALERT',
       strategy: `🔥 Unusual Activity: ${topUnusual.contract.type.toUpperCase()} $${topUnusual.contract.strike}`,
@@ -581,6 +631,7 @@ function generateSuggestions(
       confidence: topUnusual.score,
       riskLevel: 'WARNING',
       sentiment: topUnusual.sentiment,
+      detailedExplanation: unusualExplanation,
     });
   }
 
