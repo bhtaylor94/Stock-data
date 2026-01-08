@@ -440,28 +440,43 @@ function OptionsTab({ data, loading }: { data: any; loading: boolean }) {
       {/* Unusual Options Activity */}
       {data.unusualActivity?.length > 0 && (
         <div className="p-5 rounded-2xl border border-orange-500/30 bg-gradient-to-br from-orange-950/20 to-red-950/10">
-          <h2 className="text-lg font-semibold text-orange-400 mb-4">🔥 Unusual Options Activity</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-orange-400">🔥 Unusual Options Activity</h2>
+            <span className="text-xs text-slate-500">10-180 DTE • Smart Money Tracking</span>
+          </div>
           <div className="space-y-3">
             {data.unusualActivity.slice(0, 5).map((u: any, i: number) => (
               <div key={i} className={`p-3 rounded-xl border ${u.sentiment === 'BULLISH' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-bold text-white">{u.type === 'call' ? '📈' : '📉'} ${u.strike} {u.type?.toUpperCase()}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white">{u.contract?.type === 'call' ? '📈' : '📉'} ${u.contract?.strike} {u.contract?.type?.toUpperCase()}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded ${
+                      u.convictionLevel === 'HIGH' ? 'bg-orange-500/30 text-orange-300' :
+                      u.convictionLevel === 'MEDIUM' ? 'bg-amber-500/20 text-amber-400' :
+                      'bg-slate-500/20 text-slate-400'
+                    }`}>{u.convictionLevel} CONVICTION</span>
+                  </div>
                   <span className={`text-xs px-2 py-0.5 rounded ${u.sentiment === 'BULLISH' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{u.sentiment}</span>
                 </div>
-                <div className="grid grid-cols-4 gap-2 text-xs mb-2">
-                  <div><span className="text-slate-400">Vol:</span> <span className="text-amber-400 font-bold">{u.volume?.toLocaleString()}</span></div>
-                  <div><span className="text-slate-400">OI:</span> <span className="text-white">{u.openInterest?.toLocaleString()}</span></div>
-                  <div><span className="text-slate-400">V/OI:</span> <span className="text-orange-400 font-bold">{u.volumeOIRatio}x</span></div>
-                  <div><span className="text-slate-400">Exp:</span> <span className="text-white">{u.expiration}</span></div>
+                <div className="grid grid-cols-5 gap-2 text-xs mb-2">
+                  <div><span className="text-slate-400">Vol:</span> <span className="text-amber-400 font-bold">{u.contract?.volume?.toLocaleString()}</span></div>
+                  <div><span className="text-slate-400">OI:</span> <span className="text-white">{u.contract?.openInterest?.toLocaleString()}</span></div>
+                  <div><span className="text-slate-400">V/OI:</span> <span className="text-orange-400 font-bold">{u.contract?.volumeOIRatio}x</span></div>
+                  <div><span className="text-slate-400">DTE:</span> <span className="text-white">{u.contract?.dte}d</span></div>
+                  <div><span className="text-slate-400">$:</span> <span className="text-emerald-400">{u.premiumValue >= 1000000 ? `$${(u.premiumValue/1e6).toFixed(1)}M` : `$${(u.premiumValue/1e3).toFixed(0)}K`}</span></div>
                 </div>
-                <div className="flex flex-wrap gap-1">
-                  {u.signals?.map((s: string, j: number) => (
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {u.signals?.slice(0, 4).map((s: string, j: number) => (
                     <span key={j} className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300">{s}</span>
                   ))}
                 </div>
+                {u.interpretation && (
+                  <p className="text-xs text-slate-400 italic border-t border-slate-700/50 pt-2 mt-2">💡 {u.interpretation}</p>
+                )}
               </div>
             ))}
           </div>
+          <p className="text-xs text-slate-500 mt-3">⚠️ Note: Large trades may be hedges, not directional bets. Always verify with price action.</p>
         </div>
       )}
 

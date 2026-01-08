@@ -352,6 +352,12 @@ function parseOptionsChain(chainData: any, currentPrice: number): {
 
 // ============================================================
 // DETECT UNUSUAL OPTIONS ACTIVITY
+// Based on professional smart money tracking:
+// - Focus on 10-180 DTE (institutional conviction, not hedges)
+// - Volume/OI ratio > 1.5x is primary signal
+// - Premium size indicates institutional activity
+// - OTM options with high volume are more significant
+// - Multiple signals = higher conviction
 // ============================================================
 interface UnusualActivity {
   contract: OptionContract;
@@ -359,64 +365,132 @@ interface UnusualActivity {
   score: number;
   sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
   premiumValue: number;
+  convictionLevel: 'HIGH' | 'MEDIUM' | 'LOW';
+  interpretation: string;
 }
 
-function detectUnusualActivity(calls: OptionContract[], puts: OptionContract[]): UnusualActivity[] {
+function detectUnusualActivity(calls: OptionContract[], puts: OptionContract[], currentPrice: number): UnusualActivity[] {
   const unusual: UnusualActivity[] = [];
   
   const analyzeContract = (c: OptionContract) => {
-    if (!c.isUnusual && c.unusualScore < 40) return;
+    // CRITICAL: Only look at 10-180 DTE for institutional conviction plays
+    // Near-dated (< 10 DTE) are often hedges or lottery tickets
+    // Very long-dated (> 180 DTE) have less actionable signals
+    if (c.dte < 10 || c.dte > 180) return;
+    
+    // Must have meaningful activity
+    if (c.volume < 50 || c.openInterest < 10) return;
     
     const signals: string[] = [];
+    let unusualScore = 0;
     
-    // Volume/OI ratio signals
-    if (c.volumeOIRatio >= 3) {
+    // === PRIMARY SIGNAL: Volume/OI Ratio ===
+    // This is THE key indicator of unusual activity
+    if (c.volumeOIRatio >= 5) {
+      signals.push(`🔥🔥 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Extreme - Likely new positions)`);
+      unusualScore += 40;
+    } else if (c.volumeOIRatio >= 3) {
       signals.push(`🔥 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Very High)`);
+      unusualScore += 30;
     } else if (c.volumeOIRatio >= 1.5) {
       signals.push(`📈 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Elevated)`);
+      unusualScore += 15;
+    } else {
+      return; // Skip if Vol/OI is below 1.5x - not unusual
     }
     
-    // Volume signals
-    if (c.volume >= 5000) {
-      signals.push(`🐋 Volume: ${c.volume.toLocaleString()} (Whale Activity)`);
-    } else if (c.volume >= 1000) {
-      signals.push(`📊 Volume: ${c.volume.toLocaleString()} (High)`);
-    }
-    
-    // New positions indicator
-    if (c.volume >= c.openInterest && c.openInterest > 100) {
-      signals.push(`🆕 New Positions Opening (Vol > OI)`);
-    }
-    
-    // Premium value
+    // === PREMIUM VALUE (Institutional Size) ===
     const premiumValue = c.mark * c.volume * 100;
-    if (premiumValue >= 500000) {
-      signals.push(`💰 Premium: $${(premiumValue / 1e6).toFixed(2)}M (Institutional)`);
+    if (premiumValue >= 1000000) {
+      signals.push(`🐋 Premium: $${(premiumValue / 1e6).toFixed(2)}M (Whale Activity)`);
+      unusualScore += 35;
+    } else if (premiumValue >= 500000) {
+      signals.push(`💰 Premium: $${(premiumValue / 1e3).toFixed(0)}K (Institutional Size)`);
+      unusualScore += 25;
     } else if (premiumValue >= 100000) {
       signals.push(`💵 Premium: $${(premiumValue / 1e3).toFixed(0)}K`);
+      unusualScore += 15;
+    } else if (premiumValue >= 50000) {
+      signals.push(`💲 Premium: $${(premiumValue / 1e3).toFixed(0)}K`);
+      unusualScore += 5;
     }
     
-    // Tight spread = institutional interest
-    if (c.spreadPercent < 5 && c.volume > 100) {
-      signals.push(`🎯 Tight Spread: ${c.spreadPercent.toFixed(1)}%`);
+    // === NEW POSITIONS INDICATOR ===
+    if (c.volume >= c.openInterest && c.openInterest > 100) {
+      signals.push(`🆕 New Positions Opening (Vol > OI)`);
+      unusualScore += 20;
     }
     
-    if (signals.length === 0) return;
+    // === VOLUME SIGNALS ===
+    if (c.volume >= 10000) {
+      signals.push(`📊 Volume: ${c.volume.toLocaleString()} (Massive)`);
+      unusualScore += 20;
+    } else if (c.volume >= 5000) {
+      signals.push(`📊 Volume: ${c.volume.toLocaleString()} (High)`);
+      unusualScore += 10;
+    } else if (c.volume >= 1000) {
+      signals.push(`📊 Volume: ${c.volume.toLocaleString()}`);
+      unusualScore += 5;
+    }
+    
+    // === OTM PREMIUM ===
+    // OTM options with high activity = more significant (not hedges)
+    const otmPercent = c.type === 'call' 
+      ? ((c.strike - currentPrice) / currentPrice) * 100
+      : ((currentPrice - c.strike) / currentPrice) * 100;
+    
+    if (!c.itm && otmPercent > 5 && otmPercent < 20) {
+      signals.push(`🎯 Slightly OTM (${otmPercent.toFixed(1)}%) - High conviction`);
+      unusualScore += 15;
+    } else if (!c.itm && otmPercent >= 20) {
+      signals.push(`🎰 Deep OTM (${otmPercent.toFixed(1)}%) - Speculative`);
+      unusualScore += 5;
+    }
+    
+    // === DTE WEIGHTING ===
+    // 30-90 DTE is sweet spot for institutional plays
+    if (c.dte >= 30 && c.dte <= 90) {
+      signals.push(`📅 ${c.dte} DTE - Optimal institutional timeframe`);
+      unusualScore += 10;
+    } else if (c.dte >= 90 && c.dte <= 180) {
+      signals.push(`📅 ${c.dte} DTE - LEAPS-style conviction play`);
+      unusualScore += 15;
+    } else {
+      signals.push(`📅 ${c.dte} DTE`);
+    }
+    
+    // === TIGHT SPREAD (Institutional quality execution) ===
+    if (c.spreadPercent < 3 && c.volume > 500) {
+      signals.push(`✅ Tight Spread: ${c.spreadPercent.toFixed(1)}% (Clean execution)`);
+      unusualScore += 10;
+    } else if (c.spreadPercent < 5 && c.volume > 200) {
+      signals.push(`✅ Decent Spread: ${c.spreadPercent.toFixed(1)}%`);
+      unusualScore += 5;
+    }
+    
+    // Minimum score threshold for relevance
+    if (unusualScore < 40) return;
     
     // Determine sentiment
-    let sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
-    if (c.type === 'call') {
-      sentiment = 'BULLISH';
-    } else {
-      sentiment = 'BEARISH';
-    }
+    const sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = c.type === 'call' ? 'BULLISH' : 'BEARISH';
+    
+    // Determine conviction level
+    let convictionLevel: 'HIGH' | 'MEDIUM' | 'LOW';
+    if (unusualScore >= 80) convictionLevel = 'HIGH';
+    else if (unusualScore >= 55) convictionLevel = 'MEDIUM';
+    else convictionLevel = 'LOW';
+    
+    // Generate interpretation
+    const interpretation = generateInterpretation(c, premiumValue, convictionLevel, currentPrice);
     
     unusual.push({
       contract: c,
       signals,
-      score: c.unusualScore,
+      score: unusualScore,
       sentiment,
       premiumValue,
+      convictionLevel,
+      interpretation,
     });
   };
   
@@ -427,6 +501,24 @@ function detectUnusualActivity(calls: OptionContract[], puts: OptionContract[]):
   unusual.sort((a, b) => b.score - a.score);
   
   return unusual.slice(0, 10); // Top 10 unusual
+}
+
+function generateInterpretation(c: OptionContract, premiumValue: number, conviction: string, currentPrice: number): string {
+  const direction = c.type === 'call' ? 'bullish' : 'bearish';
+  const sizeDesc = premiumValue >= 500000 ? 'institutional-sized' : premiumValue >= 100000 ? 'significant' : 'notable';
+  const timeframe = c.dte >= 90 ? 'longer-term' : c.dte >= 45 ? 'medium-term' : 'near-term';
+  
+  const targetMove = c.type === 'call' 
+    ? `to $${c.strike} (+${(((c.strike - currentPrice) / currentPrice) * 100).toFixed(1)}%)`
+    : `to $${c.strike} (${(((c.strike - currentPrice) / currentPrice) * 100).toFixed(1)}%)`;
+  
+  if (conviction === 'HIGH') {
+    return `High conviction ${direction} bet: ${sizeDesc} ${timeframe} positioning suggests smart money expects move ${targetMove} within ${c.dte} days. Multiple signals align - this is worth watching.`;
+  } else if (conviction === 'MEDIUM') {
+    return `${sizeDesc.charAt(0).toUpperCase() + sizeDesc.slice(1)} ${direction} activity detected. ${timeframe.charAt(0).toUpperCase() + timeframe.slice(1)} positioning targeting ${targetMove}. Could be directional bet or part of larger strategy.`;
+  } else {
+    return `Elevated ${direction} interest at $${c.strike} strike. May be speculative or hedging activity. Monitor for follow-through.`;
+  }
 }
 
 // ============================================================
@@ -893,7 +985,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   // Calculate analytics
   const ivAnalysis = analyzeIV(calls, puts, currentPrice);
   const marketMetrics = calculateMarketMetrics(calls, puts, currentPrice);
-  const unusualActivity = detectUnusualActivity(calls, puts);
+  const unusualActivity = detectUnusualActivity(calls, puts, currentPrice);
 
   // Generate suggestions
   const suggestions = generateSuggestions(
