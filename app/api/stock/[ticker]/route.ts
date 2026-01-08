@@ -383,14 +383,16 @@ function analyzeAnalystRatings(recommendations: any[], priceTarget: any): {
 // ============================================================
 // INSIDER ANALYSIS
 // ============================================================
-function analyzeInsiderActivity(transactions: any[]): {
+function analyzeInsiderActivity(transactions: any): {
   netActivity: 'BUYING' | 'SELLING' | 'NEUTRAL';
   recentTransactions: { name: string; shares: number; value: number; type: string; date: string }[];
   buyCount: number;
   sellCount: number;
   netShares: number;
 } {
-  if (!transactions?.data || transactions.data.length === 0) {
+  // Finnhub returns { data: [...] } structure
+  const txData = transactions?.data || transactions || [];
+  if (!Array.isArray(txData) || txData.length === 0) {
     return { netActivity: 'NEUTRAL', recentTransactions: [], buyCount: 0, sellCount: 0, netShares: 0 };
   }
 
@@ -398,7 +400,7 @@ function analyzeInsiderActivity(transactions: any[]): {
   let sellCount = 0;
   let netShares = 0;
   
-  const recent = transactions.data.slice(0, 10);
+  const recent = txData.slice(0, 10);
   const recentTransactions = recent.map((t: any) => {
     const isBuy = t.transactionCode === 'P' || t.change > 0;
     const isSell = t.transactionCode === 'S' || t.change < 0;
