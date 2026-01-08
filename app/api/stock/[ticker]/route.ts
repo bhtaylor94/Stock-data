@@ -1,330 +1,207 @@
 import { NextResponse } from 'next/server';
 
 // ============================================================
-// STOCK ANALYSIS API - Fundamentals + Technical Analysis
+// DETERMINISTIC STOCK ANALYSIS API
+// Uses Piotroski F-Score style binary scoring (no randomness)
+// All scores are 100% reproducible with same input data
 // ============================================================
 
-// Types
-interface StockQuote {
-  c: number;  // Current price
-  d: number;  // Change
-  dp: number; // Percent change
-  h: number;  // High
-  l: number;  // Low
-  o: number;  // Open
-  pc: number; // Previous close
-  t: number;  // Timestamp
-}
+const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
+const SCHWAB_APP_KEY = process.env.SCHWAB_APP_KEY;
+const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
+const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
 
-interface CompanyProfile {
-  name: string;
-  ticker: string;
-  exchange: string;
-  industry: string;
-  marketCapitalization: number;
-  logo: string;
-}
-
-interface BasicFinancials {
-  metric: {
-    '10DayAverageTradingVolume': number;
-    '52WeekHigh': number;
-    '52WeekLow': number;
-    'beta': number;
-    'peBasicExclExtraTTM': number;
-    'peTTM': number;
-    'pbAnnual': number;
-    'psAnnual': number;
-    'dividendYieldIndicatedAnnual': number;
-    'epsBasicExclExtraItemsTTM': number;
-    'roeTTM': number;
-    'roaTTM': number;
-    'currentRatioAnnual': number;
-    'quickRatioAnnual': number;
-    'debtEquityAnnual': number;
-    'netProfitMarginTTM': number;
-    'grossMarginTTM': number;
-    'revenueGrowthTTMYoy': number;
-    'epsGrowthTTMYoy': number;
-  };
+// ============================================================
+// SCHWAB AUTH
+// ============================================================
+async function getSchwabToken(): Promise<string | null> {
+  if (!SCHWAB_APP_KEY || !SCHWAB_APP_SECRET || !SCHWAB_REFRESH_TOKEN) return null;
+  
+  try {
+    const credentials = Buffer.from(`${SCHWAB_APP_KEY}:${SCHWAB_APP_SECRET}`).toString('base64');
+    const response = await fetch('https://api.schwabapi.com/v1/oauth/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${credentials}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: SCHWAB_REFRESH_TOKEN,
+      }).toString(),
+    });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.access_token;
+  } catch { return null; }
 }
 
 // ============================================================
-// FUNDAMENTAL ANALYSIS SCORING LOGIC
-// Based on research: PE, PEG, ROE, Debt/Equity, Profit Margin
+// PIOTROSKI-STYLE FUNDAMENTAL SCORE (0-9 scale, deterministic)
+// Each criterion is BINARY: 1 point if met, 0 if not
 // ============================================================
-function analyzeFundamentals(metrics: BasicFinancials['metric'], price: number) {
-  let bullishPoints = 0;
-  let bearishPoints = 0;
-  const signals: string[] = [];
-  const warnings: string[] = [];
+interface FundamentalMetrics {
+  pe: number;
+  pb: number;
+  roe: number;
+  roa: number;
+  debtEquity: number;
+  currentRatio: number;
+  profitMargin: number;
+  revenueGrowth: number;
+  epsGrowth: number;
+  grossMargin: number;
+}
 
-  // P/E Ratio Analysis
-  const pe = metrics.peTTM || metrics.peBasicExclExtraTTM;
-  if (pe) {
-    if (pe < 15) {
-      bullishPoints += 2;
-      signals.push(`Low P/E (${pe.toFixed(1)}) - potentially undervalued`);
-    } else if (pe < 25) {
-      bullishPoints += 1;
-      signals.push(`Reasonable P/E (${pe.toFixed(1)}) - fairly valued`);
-    } else if (pe > 40) {
-      bearishPoints += 2;
-      warnings.push(`High P/E (${pe.toFixed(1)}) - potentially overvalued`);
-    } else if (pe > 25) {
-      bearishPoints += 1;
-      warnings.push(`Elevated P/E (${pe.toFixed(1)}) - priced for growth`);
-    }
-  }
+function calculateFundamentalScore(metrics: FundamentalMetrics): {
+  score: number;
+  maxScore: number;
+  rating: string;
+  factors: { name: string; passed: boolean; value: string; threshold: string }[];
+} {
+  const factors: { name: string; passed: boolean; value: string; threshold: string }[] = [];
+  
+  // Profitability (3 points max)
+  // 1. Positive ROE (> 0%)
+  const roePass = metrics.roe > 0;
+  factors.push({ name: 'Positive ROE', passed: roePass, value: `${metrics.roe?.toFixed(1)}%`, threshold: '> 0%' });
+  
+  // 2. Positive ROA (> 0%)
+  const roaPass = metrics.roa > 0;
+  factors.push({ name: 'Positive ROA', passed: roaPass, value: `${metrics.roa?.toFixed(1)}%`, threshold: '> 0%' });
+  
+  // 3. Positive Profit Margin (> 0%)
+  const marginPass = metrics.profitMargin > 0;
+  factors.push({ name: 'Positive Margin', passed: marginPass, value: `${metrics.profitMargin?.toFixed(1)}%`, threshold: '> 0%' });
 
-  // ROE Analysis (Return on Equity)
-  const roe = metrics.roeTTM;
-  if (roe) {
-    if (roe > 20) {
-      bullishPoints += 2;
-      signals.push(`Strong ROE (${roe.toFixed(1)}%) - efficient capital use`);
-    } else if (roe > 15) {
-      bullishPoints += 1;
-      signals.push(`Good ROE (${roe.toFixed(1)}%) - above average returns`);
-    } else if (roe < 10) {
-      bearishPoints += 1;
-      warnings.push(`Low ROE (${roe.toFixed(1)}%) - weak profitability`);
-    }
-  }
+  // Leverage/Liquidity (3 points max)
+  // 4. Low Debt/Equity (< 1.0)
+  const debtPass = metrics.debtEquity < 1.0;
+  factors.push({ name: 'Low Debt/Equity', passed: debtPass, value: metrics.debtEquity?.toFixed(2), threshold: '< 1.0' });
+  
+  // 5. Current Ratio > 1 (can pay short-term debts)
+  const currentPass = metrics.currentRatio > 1.0;
+  factors.push({ name: 'Current Ratio > 1', passed: currentPass, value: metrics.currentRatio?.toFixed(2), threshold: '> 1.0' });
+  
+  // 6. Reasonable P/E (< 30)
+  const pePass = metrics.pe > 0 && metrics.pe < 30;
+  factors.push({ name: 'Reasonable P/E', passed: pePass, value: metrics.pe?.toFixed(1), threshold: '0-30' });
 
-  // Debt/Equity Analysis
-  const debtEquity = metrics.debtEquityAnnual;
-  if (debtEquity !== undefined) {
-    if (debtEquity < 0.5) {
-      bullishPoints += 2;
-      signals.push(`Low debt (D/E: ${debtEquity.toFixed(2)}) - financially stable`);
-    } else if (debtEquity < 1) {
-      bullishPoints += 1;
-      signals.push(`Moderate debt (D/E: ${debtEquity.toFixed(2)}) - manageable`);
-    } else if (debtEquity > 2) {
-      bearishPoints += 2;
-      warnings.push(`High debt (D/E: ${debtEquity.toFixed(2)}) - leverage risk`);
-    } else if (debtEquity > 1) {
-      bearishPoints += 1;
-      warnings.push(`Elevated debt (D/E: ${debtEquity.toFixed(2)}) - monitor closely`);
-    }
-  }
+  // Growth (3 points max)
+  // 7. Positive Revenue Growth
+  const revGrowthPass = metrics.revenueGrowth > 0;
+  factors.push({ name: 'Revenue Growing', passed: revGrowthPass, value: `${metrics.revenueGrowth?.toFixed(1)}%`, threshold: '> 0%' });
+  
+  // 8. Positive EPS Growth
+  const epsGrowthPass = metrics.epsGrowth > 0;
+  factors.push({ name: 'EPS Growing', passed: epsGrowthPass, value: `${metrics.epsGrowth?.toFixed(1)}%`, threshold: '> 0%' });
+  
+  // 9. Strong Gross Margin (> 20%)
+  const grossPass = metrics.grossMargin > 20;
+  factors.push({ name: 'Strong Gross Margin', passed: grossPass, value: `${metrics.grossMargin?.toFixed(1)}%`, threshold: '> 20%' });
 
-  // Profit Margin Analysis
-  const profitMargin = metrics.netProfitMarginTTM;
-  if (profitMargin) {
-    if (profitMargin > 20) {
-      bullishPoints += 2;
-      signals.push(`Excellent margins (${profitMargin.toFixed(1)}%) - strong pricing power`);
-    } else if (profitMargin > 10) {
-      bullishPoints += 1;
-      signals.push(`Good margins (${profitMargin.toFixed(1)}%) - healthy business`);
-    } else if (profitMargin < 5) {
-      bearishPoints += 1;
-      warnings.push(`Thin margins (${profitMargin.toFixed(1)}%) - competitive pressure`);
-    }
-  }
+  const score = factors.filter(f => f.passed).length;
+  const maxScore = 9;
+  
+  // Rating based on Piotroski scale
+  let rating: string;
+  if (score >= 8) rating = 'STRONG';
+  else if (score >= 6) rating = 'GOOD';
+  else if (score >= 4) rating = 'FAIR';
+  else if (score >= 2) rating = 'WEAK';
+  else rating = 'POOR';
 
-  // Revenue Growth
-  const revenueGrowth = metrics.revenueGrowthTTMYoy;
-  if (revenueGrowth) {
-    if (revenueGrowth > 20) {
-      bullishPoints += 2;
-      signals.push(`Strong growth (${revenueGrowth.toFixed(1)}% YoY) - expanding business`);
-    } else if (revenueGrowth > 10) {
-      bullishPoints += 1;
-      signals.push(`Solid growth (${revenueGrowth.toFixed(1)}% YoY) - healthy expansion`);
-    } else if (revenueGrowth < 0) {
-      bearishPoints += 2;
-      warnings.push(`Revenue declining (${revenueGrowth.toFixed(1)}% YoY) - concerning`);
-    }
-  }
-
-  // EPS Growth
-  const epsGrowth = metrics.epsGrowthTTMYoy;
-  if (epsGrowth) {
-    if (epsGrowth > 25) {
-      bullishPoints += 2;
-      signals.push(`Strong EPS growth (${epsGrowth.toFixed(1)}% YoY)`);
-    } else if (epsGrowth > 10) {
-      bullishPoints += 1;
-      signals.push(`Solid EPS growth (${epsGrowth.toFixed(1)}% YoY)`);
-    } else if (epsGrowth < -10) {
-      bearishPoints += 2;
-      warnings.push(`EPS declining (${epsGrowth.toFixed(1)}% YoY)`);
-    }
-  }
-
-  // Price to Book
-  const pb = metrics.pbAnnual;
-  if (pb) {
-    if (pb < 1) {
-      bullishPoints += 1;
-      signals.push(`Trading below book value (P/B: ${pb.toFixed(2)})`);
-    } else if (pb > 10) {
-      bearishPoints += 1;
-      warnings.push(`High P/B ratio (${pb.toFixed(2)}) - premium valuation`);
-    }
-  }
-
-  // 52-Week Position
-  const high52 = metrics['52WeekHigh'];
-  const low52 = metrics['52WeekLow'];
-  if (high52 && low52 && price) {
-    const position = ((price - low52) / (high52 - low52)) * 100;
-    if (position < 30) {
-      bullishPoints += 1;
-      signals.push(`Near 52-week low (${position.toFixed(0)}% of range) - potential value`);
-    } else if (position > 90) {
-      warnings.push(`Near 52-week high (${position.toFixed(0)}% of range) - extended`);
-    }
-  }
-
-  const totalPoints = bullishPoints + bearishPoints;
-  const score = totalPoints > 0 ? Math.round((bullishPoints / totalPoints) * 100) : 50;
-
-  let fundamentalRating: 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL';
-  if (score >= 75) fundamentalRating = 'STRONG_BUY';
-  else if (score >= 60) fundamentalRating = 'BUY';
-  else if (score >= 40) fundamentalRating = 'HOLD';
-  else if (score >= 25) fundamentalRating = 'SELL';
-  else fundamentalRating = 'STRONG_SELL';
-
-  return {
-    score,
-    rating: fundamentalRating,
-    bullishPoints,
-    bearishPoints,
-    signals,
-    warnings
-  };
+  return { score, maxScore, rating, factors };
 }
 
 // ============================================================
-// TECHNICAL ANALYSIS SCORING LOGIC
-// Based on research: RSI, MACD, Moving Averages, Golden/Death Cross
+// TECHNICAL SCORE (0-9 scale, deterministic)
+// Each criterion is BINARY: 1 point if met, 0 if not
 // ============================================================
-function analyzeTechnicals(
-  price: number,
-  sma50: number,
-  sma200: number,
-  rsi: number,
-  macdLine: number,
-  macdSignal: number,
-  previousClose: number
-) {
-  let bullishPoints = 0;
-  let bearishPoints = 0;
-  const signals: string[] = [];
-  const warnings: string[] = [];
+interface TechnicalMetrics {
+  price: number;
+  sma20: number;
+  sma50: number;
+  sma200: number;
+  rsi: number;
+  previousClose: number;
+  high52Week: number;
+  low52Week: number;
+}
 
-  // Moving Average Analysis
-  if (sma50 && sma200) {
-    // Golden Cross / Death Cross
-    if (sma50 > sma200) {
-      bullishPoints += 2;
-      signals.push('Golden Cross active (50 SMA > 200 SMA) - bullish trend');
-    } else {
-      bearishPoints += 2;
-      warnings.push('Death Cross active (50 SMA < 200 SMA) - bearish trend');
-    }
+function calculateTechnicalScore(metrics: TechnicalMetrics): {
+  score: number;
+  maxScore: number;
+  rating: string;
+  factors: { name: string; passed: boolean; value: string; threshold: string }[];
+} {
+  const factors: { name: string; passed: boolean; value: string; threshold: string }[] = [];
+  const { price, sma20, sma50, sma200, rsi, previousClose, high52Week, low52Week } = metrics;
 
-    // Price vs Moving Averages
-    if (price > sma50 && price > sma200) {
-      bullishPoints += 2;
-      signals.push('Price above both SMAs - strong uptrend');
-    } else if (price < sma50 && price < sma200) {
-      bearishPoints += 2;
-      warnings.push('Price below both SMAs - strong downtrend');
-    } else if (price > sma50) {
-      bullishPoints += 1;
-      signals.push('Price above 50 SMA - short-term bullish');
-    } else if (price > sma200) {
-      bullishPoints += 1;
-      signals.push('Price above 200 SMA - long-term support holding');
-    }
-  }
+  // Trend (3 points max)
+  // 1. Price above 20 SMA (short-term trend)
+  const above20 = price > sma20;
+  factors.push({ name: 'Above 20 SMA', passed: above20, value: `$${price.toFixed(2)}`, threshold: `> $${sma20.toFixed(2)}` });
+  
+  // 2. Price above 50 SMA (medium-term trend)
+  const above50 = price > sma50;
+  factors.push({ name: 'Above 50 SMA', passed: above50, value: `$${price.toFixed(2)}`, threshold: `> $${sma50.toFixed(2)}` });
+  
+  // 3. Price above 200 SMA (long-term trend)
+  const above200 = price > sma200;
+  factors.push({ name: 'Above 200 SMA', passed: above200, value: `$${price.toFixed(2)}`, threshold: `> $${sma200.toFixed(2)}` });
 
-  // RSI Analysis
-  if (rsi) {
-    if (rsi < 30) {
-      bullishPoints += 2;
-      signals.push(`RSI oversold (${rsi.toFixed(0)}) - potential bounce`);
-    } else if (rsi < 40) {
-      bullishPoints += 1;
-      signals.push(`RSI approaching oversold (${rsi.toFixed(0)})`);
-    } else if (rsi > 70) {
-      bearishPoints += 2;
-      warnings.push(`RSI overbought (${rsi.toFixed(0)}) - potential pullback`);
-    } else if (rsi > 60) {
-      bearishPoints += 1;
-      warnings.push(`RSI elevated (${rsi.toFixed(0)}) - momentum strong but watch for reversal`);
-    } else {
-      signals.push(`RSI neutral (${rsi.toFixed(0)}) - no extreme`);
-    }
-  }
+  // Momentum (3 points max)
+  // 4. Golden Cross (50 SMA > 200 SMA)
+  const goldenCross = sma50 > sma200;
+  factors.push({ name: 'Golden Cross', passed: goldenCross, value: `50SMA: $${sma50.toFixed(2)}`, threshold: `> 200SMA: $${sma200.toFixed(2)}` });
+  
+  // 5. RSI not overbought (< 70)
+  const rsiNotOverbought = rsi < 70;
+  factors.push({ name: 'RSI < 70', passed: rsiNotOverbought, value: rsi.toFixed(0), threshold: '< 70' });
+  
+  // 6. RSI not oversold (> 30)
+  const rsiNotOversold = rsi > 30;
+  factors.push({ name: 'RSI > 30', passed: rsiNotOversold, value: rsi.toFixed(0), threshold: '> 30' });
 
-  // MACD Analysis
-  if (macdLine !== undefined && macdSignal !== undefined) {
-    if (macdLine > macdSignal) {
-      bullishPoints += 2;
-      signals.push('MACD bullish crossover - momentum increasing');
-    } else {
-      bearishPoints += 2;
-      warnings.push('MACD bearish crossover - momentum decreasing');
-    }
+  // Position (3 points max)
+  // 7. Positive daily change
+  const positiveDay = price > previousClose;
+  const dailyChange = ((price - previousClose) / previousClose) * 100;
+  factors.push({ name: 'Positive Day', passed: positiveDay, value: `${dailyChange >= 0 ? '+' : ''}${dailyChange.toFixed(2)}%`, threshold: '> 0%' });
+  
+  // 8. Above 52-week midpoint
+  const midpoint = (high52Week + low52Week) / 2;
+  const aboveMid = price > midpoint;
+  factors.push({ name: 'Above 52w Mid', passed: aboveMid, value: `$${price.toFixed(2)}`, threshold: `> $${midpoint.toFixed(2)}` });
+  
+  // 9. Within 20% of 52-week high
+  const nearHigh = price >= high52Week * 0.8;
+  const pctFromHigh = ((price - high52Week) / high52Week) * 100;
+  factors.push({ name: 'Near 52w High', passed: nearHigh, value: `${pctFromHigh.toFixed(1)}%`, threshold: '> -20%' });
 
-    if (macdLine > 0) {
-      bullishPoints += 1;
-      signals.push('MACD above zero line - bullish territory');
-    } else {
-      bearishPoints += 1;
-      warnings.push('MACD below zero line - bearish territory');
-    }
-  }
+  const score = factors.filter(f => f.passed).length;
+  const maxScore = 9;
+  
+  let rating: string;
+  if (score >= 8) rating = 'STRONG_BUY';
+  else if (score >= 6) rating = 'BUY';
+  else if (score >= 4) rating = 'HOLD';
+  else if (score >= 2) rating = 'SELL';
+  else rating = 'STRONG_SELL';
 
-  // Daily Change Momentum
-  if (previousClose && price) {
-    const dailyChange = ((price - previousClose) / previousClose) * 100;
-    if (dailyChange > 3) {
-      bullishPoints += 1;
-      signals.push(`Strong daily gain (+${dailyChange.toFixed(1)}%)`);
-    } else if (dailyChange < -3) {
-      bearishPoints += 1;
-      warnings.push(`Strong daily loss (${dailyChange.toFixed(1)}%)`);
-    }
-  }
-
-  const totalPoints = bullishPoints + bearishPoints;
-  const score = totalPoints > 0 ? Math.round((bullishPoints / totalPoints) * 100) : 50;
-
-  let technicalRating: 'STRONG_BUY' | 'BUY' | 'HOLD' | 'SELL' | 'STRONG_SELL';
-  if (score >= 75) technicalRating = 'STRONG_BUY';
-  else if (score >= 60) technicalRating = 'BUY';
-  else if (score >= 40) technicalRating = 'HOLD';
-  else if (score >= 25) technicalRating = 'SELL';
-  else technicalRating = 'STRONG_SELL';
-
-  return {
-    score,
-    rating: technicalRating,
-    bullishPoints,
-    bearishPoints,
-    signals,
-    warnings
-  };
+  return { score, maxScore, rating, factors };
 }
 
 // ============================================================
-// GENERATE TRADE SUGGESTIONS
+// GENERATE DETERMINISTIC SUGGESTIONS
 // ============================================================
 function generateSuggestions(
   fundamentalScore: number,
   technicalScore: number,
-  price: number,
-  ticker: string
+  fundamentalFactors: { name: string; passed: boolean }[],
+  technicalFactors: { name: string; passed: boolean }[]
 ) {
-  const combinedScore = (fundamentalScore + technicalScore) / 2;
   const suggestions: Array<{
     type: 'BUY' | 'SELL' | 'HOLD' | 'ALERT';
     strategy: string;
@@ -333,78 +210,100 @@ function generateSuggestions(
     riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
   }> = [];
 
-  if (combinedScore >= 70) {
+  const combinedScore = fundamentalScore + technicalScore; // 0-18
+  const bullishFactors = fundamentalFactors.filter(f => f.passed).map(f => f.name);
+  const bearishFactors = fundamentalFactors.filter(f => !f.passed).map(f => f.name);
+  const techBullish = technicalFactors.filter(f => f.passed).map(f => f.name);
+  const techBearish = technicalFactors.filter(f => !f.passed).map(f => f.name);
+
+  // Strong Buy: 14+ points (78%+)
+  if (combinedScore >= 14) {
     suggestions.push({
       type: 'BUY',
-      strategy: 'Strong Buy Signal',
-      confidence: Math.min(combinedScore, 95),
+      strategy: 'Strong Buy',
+      confidence: Math.round((combinedScore / 18) * 100),
       reasoning: [
-        'Fundamentals and technicals aligned bullish',
-        `Combined score: ${combinedScore.toFixed(0)}%`,
-        'Consider entering position'
+        `Fundamental Score: ${fundamentalScore}/9`,
+        `Technical Score: ${technicalScore}/9`,
+        `Combined: ${combinedScore}/18 (${Math.round((combinedScore/18)*100)}%)`,
+        `Key Strengths: ${bullishFactors.slice(0, 3).join(', ')}`,
       ],
       riskLevel: 'LOW'
     });
-  } else if (combinedScore >= 55) {
+  }
+  // Buy: 11-13 points (61-72%)
+  else if (combinedScore >= 11) {
     suggestions.push({
       type: 'BUY',
-      strategy: 'Moderate Buy Signal',
-      confidence: combinedScore,
+      strategy: 'Buy',
+      confidence: Math.round((combinedScore / 18) * 100),
       reasoning: [
-        'Slightly bullish bias overall',
-        `Combined score: ${combinedScore.toFixed(0)}%`,
-        'Consider smaller position size'
-      ],
-      riskLevel: 'MEDIUM'
-    });
-  } else if (combinedScore <= 30) {
-    suggestions.push({
-      type: 'SELL',
-      strategy: 'Strong Sell Signal',
-      confidence: 100 - combinedScore,
-      reasoning: [
-        'Both fundamentals and technicals bearish',
-        `Combined score: ${combinedScore.toFixed(0)}%`,
-        'Consider reducing exposure'
-      ],
-      riskLevel: 'HIGH'
-    });
-  } else if (combinedScore <= 45) {
-    suggestions.push({
-      type: 'SELL',
-      strategy: 'Moderate Sell Signal',
-      confidence: 100 - combinedScore,
-      reasoning: [
-        'Slightly bearish bias overall',
-        `Combined score: ${combinedScore.toFixed(0)}%`,
-        'Consider taking profits'
-      ],
-      riskLevel: 'MEDIUM'
-    });
-  } else {
-    suggestions.push({
-      type: 'HOLD',
-      strategy: 'Neutral - Hold Position',
-      confidence: 50,
-      reasoning: [
-        'Mixed signals - no clear direction',
-        `Combined score: ${combinedScore.toFixed(0)}%`,
-        'Wait for clearer setup'
+        `Fundamental Score: ${fundamentalScore}/9`,
+        `Technical Score: ${technicalScore}/9`,
+        `Combined: ${combinedScore}/18 (${Math.round((combinedScore/18)*100)}%)`,
+        `Watch: ${bearishFactors.slice(0, 2).join(', ') || 'None'}`,
       ],
       riskLevel: 'MEDIUM'
     });
   }
+  // Hold: 7-10 points (39-56%)
+  else if (combinedScore >= 7) {
+    suggestions.push({
+      type: 'HOLD',
+      strategy: 'Hold / Neutral',
+      confidence: Math.round((combinedScore / 18) * 100),
+      reasoning: [
+        `Fundamental Score: ${fundamentalScore}/9`,
+        `Technical Score: ${technicalScore}/9`,
+        `Mixed signals - wait for clearer direction`,
+        `Concerns: ${bearishFactors.slice(0, 2).join(', ')}`,
+      ],
+      riskLevel: 'MEDIUM'
+    });
+  }
+  // Sell: 4-6 points (22-33%)
+  else if (combinedScore >= 4) {
+    suggestions.push({
+      type: 'SELL',
+      strategy: 'Sell / Reduce',
+      confidence: Math.round(((18 - combinedScore) / 18) * 100),
+      reasoning: [
+        `Fundamental Score: ${fundamentalScore}/9`,
+        `Technical Score: ${technicalScore}/9`,
+        `Multiple warning signs present`,
+        `Issues: ${bearishFactors.slice(0, 3).join(', ')}`,
+      ],
+      riskLevel: 'HIGH'
+    });
+  }
+  // Strong Sell: 0-3 points (<22%)
+  else {
+    suggestions.push({
+      type: 'SELL',
+      strategy: 'Strong Sell',
+      confidence: Math.round(((18 - combinedScore) / 18) * 100),
+      reasoning: [
+        `Fundamental Score: ${fundamentalScore}/9`,
+        `Technical Score: ${technicalScore}/9`,
+        `Severe fundamental and technical weakness`,
+        `Major Issues: ${bearishFactors.slice(0, 3).join(', ')}`,
+      ],
+      riskLevel: 'HIGH'
+    });
+  }
 
-  // Add divergence alert if applicable
-  if (Math.abs(fundamentalScore - technicalScore) > 30) {
+  // Add divergence alert if scores differ significantly
+  if (Math.abs(fundamentalScore - technicalScore) >= 4) {
     suggestions.push({
       type: 'ALERT',
-      strategy: 'Fundamental/Technical Divergence',
+      strategy: 'Divergence Warning',
       confidence: 0,
       reasoning: [
-        `Fundamentals: ${fundamentalScore}% vs Technicals: ${technicalScore}%`,
-        'Significant divergence detected',
-        'Exercise extra caution'
+        `Fundamental: ${fundamentalScore}/9 vs Technical: ${technicalScore}/9`,
+        fundamentalScore > technicalScore 
+          ? 'Fundamentals strong but price action weak'
+          : 'Price action strong but fundamentals weak',
+        'Consider both factors before trading',
       ],
       riskLevel: 'HIGH'
     });
@@ -414,235 +313,243 @@ function generateSuggestions(
 }
 
 // ============================================================
-// MOCK DATA GENERATOR (for when APIs are unavailable)
+// FETCH LIVE DATA FROM SCHWAB
 // ============================================================
-function generateMockData(ticker: string) {
-  const basePrice = ticker === 'AAPL' ? 260.33 : ticker === 'TSLA' ? 248.50 : ticker === 'NVDA' ? 138.25 : ticker === 'MSFT' ? 420.15 : ticker === 'GOOGL' ? 175.80 : 100 + Math.random() * 200;
-  const change = (Math.random() * 10 - 5);
-  const price = basePrice + change;
+async function fetchSchwabQuote(token: string, symbol: string) {
+  try {
+    const res = await fetch(`https://api.schwabapi.com/marketdata/v1/quotes?symbols=${symbol}&indicative=false`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data[symbol];
+  } catch { return null; }
+}
 
-  // Generate realistic technical indicators
-  const sma50 = price * (0.95 + Math.random() * 0.1);
-  const sma200 = price * (0.9 + Math.random() * 0.2);
-  const rsi = 30 + Math.random() * 40;
-  const macdLine = (Math.random() - 0.5) * 5;
-  const macdSignal = macdLine + (Math.random() - 0.5) * 2;
-
-  // Generate realistic fundamentals
-  const metrics = {
-    peTTM: 15 + Math.random() * 25,
-    pbAnnual: 2 + Math.random() * 8,
-    psAnnual: 3 + Math.random() * 7,
-    roeTTM: 10 + Math.random() * 20,
-    roaTTM: 5 + Math.random() * 15,
-    debtEquityAnnual: Math.random() * 2,
-    netProfitMarginTTM: 5 + Math.random() * 20,
-    grossMarginTTM: 20 + Math.random() * 40,
-    revenueGrowthTTMYoy: -5 + Math.random() * 30,
-    epsGrowthTTMYoy: -10 + Math.random() * 40,
-    '52WeekHigh': price * 1.2,
-    '52WeekLow': price * 0.7,
-    beta: 0.8 + Math.random() * 0.8,
-    dividendYieldIndicatedAnnual: Math.random() * 3,
-    epsBasicExclExtraItemsTTM: 3 + Math.random() * 10,
-    currentRatioAnnual: 1 + Math.random() * 2,
-    quickRatioAnnual: 0.8 + Math.random() * 1.5,
-  };
-
-  const fundamentalAnalysis = analyzeFundamentals(metrics as any, price);
-  const technicalAnalysis = analyzeTechnicals(price, sma50, sma200, rsi, macdLine, macdSignal, basePrice);
-  const suggestions = generateSuggestions(fundamentalAnalysis.score, technicalAnalysis.score, price, ticker);
-
-  return {
-    ticker,
-    name: ticker === 'AAPL' ? 'Apple Inc.' : ticker === 'TSLA' ? 'Tesla, Inc.' : ticker === 'NVDA' ? 'NVIDIA Corporation' : ticker === 'MSFT' ? 'Microsoft Corporation' : ticker === 'GOOGL' ? 'Alphabet Inc.' : `${ticker} Corporation`,
-    exchange: 'NASDAQ',
-    price: parseFloat(price.toFixed(2)),
-    change: parseFloat(change.toFixed(2)),
-    changePercent: parseFloat(((change / basePrice) * 100).toFixed(2)),
-    high: parseFloat((price * 1.02).toFixed(2)),
-    low: parseFloat((price * 0.98).toFixed(2)),
-    open: parseFloat(basePrice.toFixed(2)),
-    previousClose: parseFloat(basePrice.toFixed(2)),
-    volume: Math.floor(50000000 + Math.random() * 50000000),
-    marketCap: Math.floor(1000000000 + Math.random() * 3000000000000),
-
-    // Fundamentals
-    fundamentals: {
-      pe: parseFloat(metrics.peTTM.toFixed(2)),
-      pb: parseFloat(metrics.pbAnnual.toFixed(2)),
-      ps: parseFloat(metrics.psAnnual.toFixed(2)),
-      roe: parseFloat(metrics.roeTTM.toFixed(2)),
-      roa: parseFloat(metrics.roaTTM.toFixed(2)),
-      debtEquity: parseFloat(metrics.debtEquityAnnual.toFixed(2)),
-      profitMargin: parseFloat(metrics.netProfitMarginTTM.toFixed(2)),
-      grossMargin: parseFloat(metrics.grossMarginTTM.toFixed(2)),
-      revenueGrowth: parseFloat(metrics.revenueGrowthTTMYoy.toFixed(2)),
-      epsGrowth: parseFloat(metrics.epsGrowthTTMYoy.toFixed(2)),
-      eps: parseFloat(metrics.epsBasicExclExtraItemsTTM.toFixed(2)),
-      beta: parseFloat(metrics.beta.toFixed(2)),
-      dividendYield: parseFloat(metrics.dividendYieldIndicatedAnnual.toFixed(2)),
-      high52Week: parseFloat(metrics['52WeekHigh'].toFixed(2)),
-      low52Week: parseFloat(metrics['52WeekLow'].toFixed(2)),
-      currentRatio: parseFloat(metrics.currentRatioAnnual.toFixed(2)),
-      quickRatio: parseFloat(metrics.quickRatioAnnual.toFixed(2)),
-    },
-
-    // Technicals
-    technicals: {
-      sma50: parseFloat(sma50.toFixed(2)),
-      sma200: parseFloat(sma200.toFixed(2)),
-      rsi: parseFloat(rsi.toFixed(2)),
-      macdLine: parseFloat(macdLine.toFixed(4)),
-      macdSignal: parseFloat(macdSignal.toFixed(4)),
-      macdHistogram: parseFloat((macdLine - macdSignal).toFixed(4)),
-      goldenCross: sma50 > sma200,
-      priceVsSma50: parseFloat(((price / sma50 - 1) * 100).toFixed(2)),
-      priceVsSma200: parseFloat(((price / sma200 - 1) * 100).toFixed(2)),
-    },
-
-    // Analysis Results
-    analysis: {
-      fundamental: fundamentalAnalysis,
-      technical: technicalAnalysis,
-      combined: {
-        score: Math.round((fundamentalAnalysis.score + technicalAnalysis.score) / 2),
-        rating: fundamentalAnalysis.score + technicalAnalysis.score >= 120 ? 'STRONG_BUY' :
-                fundamentalAnalysis.score + technicalAnalysis.score >= 100 ? 'BUY' :
-                fundamentalAnalysis.score + technicalAnalysis.score >= 80 ? 'HOLD' :
-                fundamentalAnalysis.score + technicalAnalysis.score >= 60 ? 'SELL' : 'STRONG_SELL'
-      }
-    },
-
-    suggestions,
-
-    // Metadata
-    lastUpdated: new Date().toISOString(),
-    dataSource: 'mock'
-  };
+async function fetchSchwabPriceHistory(token: string, symbol: string): Promise<number[]> {
+  try {
+    const res = await fetch(`https://api.schwabapi.com/marketdata/v1/pricehistory?symbol=${symbol}&periodType=year&period=1&frequencyType=daily&frequency=1`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.candles || []).map((c: any) => c.close);
+  } catch { return []; }
 }
 
 // ============================================================
-// API HANDLER
+// CALCULATE SMAs FROM PRICE HISTORY
+// ============================================================
+function calculateSMA(prices: number[], period: number): number {
+  if (prices.length < period) return prices[prices.length - 1] || 0;
+  const slice = prices.slice(-period);
+  return slice.reduce((a, b) => a + b, 0) / period;
+}
+
+function calculateRSI(prices: number[], period = 14): number {
+  if (prices.length < period + 1) return 50;
+  
+  const changes = [];
+  for (let i = prices.length - period; i < prices.length; i++) {
+    changes.push(prices[i] - prices[i - 1]);
+  }
+  
+  let gains = 0, losses = 0;
+  for (const change of changes) {
+    if (change > 0) gains += change;
+    else losses += Math.abs(change);
+  }
+  
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+  
+  if (avgLoss === 0) return 100;
+  const rs = avgGain / avgLoss;
+  return 100 - (100 / (1 + rs));
+}
+
+// ============================================================
+// MAIN API HANDLER
 // ============================================================
 export async function GET(
   request: Request,
   { params }: { params: { ticker: string } }
 ) {
   const ticker = params.ticker.toUpperCase();
-  const finnhubKey = process.env.FINNHUB_API_KEY;
+  
+  let dataSource = 'none';
+  let quote: any = null;
+  let priceHistory: number[] = [];
+  let fundamentalsData: any = null;
 
-  // If no API key, return mock data
-  if (!finnhubKey) {
-    const data = generateMockData(ticker);
-    return NextResponse.json(data);
+  // Try Schwab first for real-time data
+  const schwabToken = await getSchwabToken();
+  if (schwabToken) {
+    quote = await fetchSchwabQuote(schwabToken, ticker);
+    priceHistory = await fetchSchwabPriceHistory(schwabToken, ticker);
+    if (quote) dataSource = 'schwab';
   }
 
-  try {
-    // Fetch real data from Finnhub
-    const [quoteRes, profileRes, metricsRes] = await Promise.all([
-      fetch(`https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${finnhubKey}`),
-      fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${ticker}&token=${finnhubKey}`),
-      fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${ticker}&metric=all&token=${finnhubKey}`)
-    ]);
+  // Fallback to Finnhub for fundamentals
+  if (FINNHUB_KEY) {
+    try {
+      const [quoteRes, metricsRes, profileRes] = await Promise.all([
+        !quote ? fetch(`https://finnhub.io/api/v1/quote?symbol=${ticker}&token=${FINNHUB_KEY}`) : Promise.resolve(null),
+        fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${ticker}&metric=all&token=${FINNHUB_KEY}`),
+        fetch(`https://finnhub.io/api/v1/stock/profile2?symbol=${ticker}&token=${FINNHUB_KEY}`),
+      ]);
 
-    if (!quoteRes.ok) {
-      throw new Error('Failed to fetch quote');
-    }
-
-    const quote: StockQuote = await quoteRes.json();
-    const profile: CompanyProfile = await profileRes.json();
-    const metricsData: BasicFinancials = await metricsRes.json();
-
-    // If quote is empty (invalid ticker), return error
-    if (!quote.c) {
-      return NextResponse.json({ error: 'Invalid ticker or no data available' }, { status: 404 });
-    }
-
-    const price = quote.c;
-    const metrics = metricsData.metric || {};
-
-    // Generate technical indicators (mock for now - would need separate API)
-    const sma50 = price * (0.95 + Math.random() * 0.1);
-    const sma200 = price * (0.9 + Math.random() * 0.2);
-    const rsi = 30 + Math.random() * 40;
-    const macdLine = (Math.random() - 0.5) * 5;
-    const macdSignal = macdLine + (Math.random() - 0.5) * 2;
-
-    const fundamentalAnalysis = analyzeFundamentals(metrics as any, price);
-    const technicalAnalysis = analyzeTechnicals(price, sma50, sma200, rsi, macdLine, macdSignal, quote.pc);
-    const suggestions = generateSuggestions(fundamentalAnalysis.score, technicalAnalysis.score, price, ticker);
-
-    const data = {
-      ticker,
-      name: profile.name || `${ticker}`,
-      exchange: profile.exchange || 'UNKNOWN',
-      price: quote.c,
-      change: quote.d,
-      changePercent: quote.dp,
-      high: quote.h,
-      low: quote.l,
-      open: quote.o,
-      previousClose: quote.pc,
-      volume: metrics['10DayAverageTradingVolume'] ? Math.floor(metrics['10DayAverageTradingVolume'] * 1000000) : 0,
-      marketCap: profile.marketCapitalization ? profile.marketCapitalization * 1000000 : 0,
-
-      fundamentals: {
-        pe: metrics.peTTM || metrics.peBasicExclExtraTTM || 0,
-        pb: metrics.pbAnnual || 0,
-        ps: metrics.psAnnual || 0,
-        roe: metrics.roeTTM || 0,
-        roa: metrics.roaTTM || 0,
-        debtEquity: metrics.debtEquityAnnual || 0,
-        profitMargin: metrics.netProfitMarginTTM || 0,
-        grossMargin: metrics.grossMarginTTM || 0,
-        revenueGrowth: metrics.revenueGrowthTTMYoy || 0,
-        epsGrowth: metrics.epsGrowthTTMYoy || 0,
-        eps: metrics.epsBasicExclExtraItemsTTM || 0,
-        beta: metrics.beta || 0,
-        dividendYield: metrics.dividendYieldIndicatedAnnual || 0,
-        high52Week: metrics['52WeekHigh'] || 0,
-        low52Week: metrics['52WeekLow'] || 0,
-        currentRatio: metrics.currentRatioAnnual || 0,
-        quickRatio: metrics.quickRatioAnnual || 0,
-      },
-
-      technicals: {
-        sma50: parseFloat(sma50.toFixed(2)),
-        sma200: parseFloat(sma200.toFixed(2)),
-        rsi: parseFloat(rsi.toFixed(2)),
-        macdLine: parseFloat(macdLine.toFixed(4)),
-        macdSignal: parseFloat(macdSignal.toFixed(4)),
-        macdHistogram: parseFloat((macdLine - macdSignal).toFixed(4)),
-        goldenCross: sma50 > sma200,
-        priceVsSma50: parseFloat(((price / sma50 - 1) * 100).toFixed(2)),
-        priceVsSma200: parseFloat(((price / sma200 - 1) * 100).toFixed(2)),
-      },
-
-      analysis: {
-        fundamental: fundamentalAnalysis,
-        technical: technicalAnalysis,
-        combined: {
-          score: Math.round((fundamentalAnalysis.score + technicalAnalysis.score) / 2),
-          rating: fundamentalAnalysis.score + technicalAnalysis.score >= 120 ? 'STRONG_BUY' :
-                  fundamentalAnalysis.score + technicalAnalysis.score >= 100 ? 'BUY' :
-                  fundamentalAnalysis.score + technicalAnalysis.score >= 80 ? 'HOLD' :
-                  fundamentalAnalysis.score + technicalAnalysis.score >= 60 ? 'SELL' : 'STRONG_SELL'
+      if (quoteRes && quoteRes.ok && !quote) {
+        const data = await quoteRes.json();
+        if (data.c > 0) {
+          quote = {
+            quote: {
+              lastPrice: data.c,
+              netChange: data.d,
+              netPercentChange: data.dp,
+              highPrice: data.h,
+              lowPrice: data.l,
+              openPrice: data.o,
+              closePrice: data.pc,
+            }
+          };
+          dataSource = 'finnhub';
         }
-      },
+      }
 
-      suggestions,
-
-      lastUpdated: new Date().toISOString(),
-      dataSource: 'finnhub'
-    };
-
-    return NextResponse.json(data);
-
-  } catch (error) {
-    console.error('Error fetching stock data:', error);
-    // Fallback to mock data on error
-    const data = generateMockData(ticker);
-    return NextResponse.json(data);
+      if (metricsRes.ok) {
+        fundamentalsData = await metricsRes.json();
+      }
+    } catch (e) {
+      console.log('Finnhub error:', e);
+    }
   }
+
+  // If no data at all, return error
+  if (!quote || !quote.quote) {
+    return NextResponse.json({
+      error: 'Unable to fetch stock data',
+      ticker,
+      instructions: [
+        'Ensure SCHWAB_APP_KEY, SCHWAB_APP_SECRET, SCHWAB_REFRESH_TOKEN are set',
+        'Or ensure FINNHUB_API_KEY is set',
+        'Refresh tokens expire every 7 days',
+      ],
+    }, { status: 200 });
+  }
+
+  const q = quote.quote;
+  const price = q.lastPrice || q.mark || 0;
+  const previousClose = q.closePrice || price;
+  
+  // Calculate technical indicators from price history
+  const sma20 = priceHistory.length >= 20 ? calculateSMA(priceHistory, 20) : price * 0.98;
+  const sma50 = priceHistory.length >= 50 ? calculateSMA(priceHistory, 50) : price * 0.95;
+  const sma200 = priceHistory.length >= 200 ? calculateSMA(priceHistory, 200) : price * 0.90;
+  const rsi = priceHistory.length >= 15 ? calculateRSI(priceHistory) : 50;
+  const high52Week = priceHistory.length > 0 ? Math.max(...priceHistory) : price * 1.2;
+  const low52Week = priceHistory.length > 0 ? Math.min(...priceHistory) : price * 0.7;
+
+  // Get fundamentals
+  const metrics = fundamentalsData?.metric || {};
+  const fundamentalMetrics: FundamentalMetrics = {
+    pe: metrics.peTTM || metrics.peBasicExclExtraTTM || 0,
+    pb: metrics.pbAnnual || 0,
+    roe: metrics.roeTTM || 0,
+    roa: metrics.roaTTM || 0,
+    debtEquity: metrics.totalDebtToEquityAnnual || metrics.debtEquityAnnual || 0,
+    currentRatio: metrics.currentRatioAnnual || 0,
+    profitMargin: metrics.netProfitMarginTTM || 0,
+    revenueGrowth: metrics.revenueGrowthTTMYoy || 0,
+    epsGrowth: metrics.epsGrowthTTMYoy || 0,
+    grossMargin: metrics.grossMarginTTM || 0,
+  };
+
+  const technicalMetrics: TechnicalMetrics = {
+    price,
+    sma20,
+    sma50,
+    sma200,
+    rsi,
+    previousClose,
+    high52Week,
+    low52Week,
+  };
+
+  // Calculate scores
+  const fundamentalAnalysis = calculateFundamentalScore(fundamentalMetrics);
+  const technicalAnalysis = calculateTechnicalScore(technicalMetrics);
+  const suggestions = generateSuggestions(
+    fundamentalAnalysis.score,
+    technicalAnalysis.score,
+    fundamentalAnalysis.factors,
+    technicalAnalysis.factors
+  );
+
+  // Build response
+  return NextResponse.json({
+    ticker,
+    name: quote.reference?.description || `${ticker}`,
+    exchange: quote.reference?.exchange || 'NASDAQ',
+    price: parseFloat(price.toFixed(2)),
+    change: parseFloat((q.netChange || 0).toFixed(2)),
+    changePercent: parseFloat((q.netPercentChange || 0).toFixed(2)),
+
+    fundamentals: {
+      pe: parseFloat(fundamentalMetrics.pe.toFixed(2)),
+      pb: parseFloat(fundamentalMetrics.pb.toFixed(2)),
+      roe: parseFloat(fundamentalMetrics.roe.toFixed(2)),
+      roa: parseFloat(fundamentalMetrics.roa.toFixed(2)),
+      debtEquity: parseFloat(fundamentalMetrics.debtEquity.toFixed(2)),
+      profitMargin: parseFloat(fundamentalMetrics.profitMargin.toFixed(2)),
+      revenueGrowth: parseFloat(fundamentalMetrics.revenueGrowth.toFixed(2)),
+      epsGrowth: parseFloat(fundamentalMetrics.epsGrowth.toFixed(2)),
+      high52Week: parseFloat(high52Week.toFixed(2)),
+      low52Week: parseFloat(low52Week.toFixed(2)),
+      beta: parseFloat((metrics.beta || 1).toFixed(2)),
+    },
+
+    technicals: {
+      sma50: parseFloat(sma50.toFixed(2)),
+      sma200: parseFloat(sma200.toFixed(2)),
+      rsi: parseFloat(rsi.toFixed(2)),
+      macdLine: 0,
+      macdSignal: 0,
+      goldenCross: sma50 > sma200,
+      priceVsSma50: parseFloat(((price / sma50 - 1) * 100).toFixed(2)),
+      priceVsSma200: parseFloat(((price / sma200 - 1) * 100).toFixed(2)),
+    },
+
+    analysis: {
+      fundamental: {
+        score: fundamentalAnalysis.score,
+        maxScore: fundamentalAnalysis.maxScore,
+        rating: fundamentalAnalysis.rating,
+        factors: fundamentalAnalysis.factors,
+        signals: fundamentalAnalysis.factors.filter(f => f.passed).map(f => `✓ ${f.name}: ${f.value}`),
+        warnings: fundamentalAnalysis.factors.filter(f => !f.passed).map(f => `✗ ${f.name}: ${f.value} (needs ${f.threshold})`),
+      },
+      technical: {
+        score: technicalAnalysis.score,
+        maxScore: technicalAnalysis.maxScore,
+        rating: technicalAnalysis.rating,
+        factors: technicalAnalysis.factors,
+        signals: technicalAnalysis.factors.filter(f => f.passed).map(f => `✓ ${f.name}: ${f.value}`),
+        warnings: technicalAnalysis.factors.filter(f => !f.passed).map(f => `✗ ${f.name}: ${f.value} (needs ${f.threshold})`),
+      },
+      combined: {
+        score: fundamentalAnalysis.score + technicalAnalysis.score,
+        maxScore: 18,
+        rating: fundamentalAnalysis.score + technicalAnalysis.score >= 14 ? 'STRONG_BUY' :
+                fundamentalAnalysis.score + technicalAnalysis.score >= 11 ? 'BUY' :
+                fundamentalAnalysis.score + technicalAnalysis.score >= 7 ? 'HOLD' :
+                fundamentalAnalysis.score + technicalAnalysis.score >= 4 ? 'SELL' : 'STRONG_SELL',
+      }
+    },
+
+    suggestions,
+
+    lastUpdated: new Date().toISOString(),
+    dataSource,
+  });
 }

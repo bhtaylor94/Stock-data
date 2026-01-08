@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 // ============================================================
-// LIVE OPTIONS DATA API - SCHWAB MARKET DATA PRODUCTION
-// Real-time options chains with Greeks, IV analysis, and trade suggestions
+// LIVE OPTIONS API - SCHWAB MARKET DATA
+// Deterministic scoring, no randomness
 // ============================================================
 
 const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
@@ -10,121 +10,17 @@ const SCHWAB_APP_KEY = process.env.SCHWAB_APP_KEY;
 const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
 const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
 
-// Schwab API Base URLs
-const SCHWAB_TOKEN_URL = 'https://api.schwabapi.com/v1/oauth/token';
-const SCHWAB_MARKET_DATA_BASE = 'https://api.schwabapi.com/marketdata/v1';
-
 // ============================================================
-// TYPES
+// SCHWAB AUTH
 // ============================================================
-interface OptionContract {
-  strike: number;
-  bid: number;
-  ask: number;
-  last: number;
-  delta: number;
-  gamma: number;
-  theta: number;
-  vega: number;
-  rho: number;
-  volume: number;
-  openInterest: number;
-  impliedVolatility: number;
-  expiration: string;
-  dte: number;
-  inTheMoney: boolean;
-  intrinsicValue: number;
-  extrinsicValue: number;
-  bidAskSpread: number;
-  midPrice: number;
-  symbol?: string;
-}
-
-interface TechnicalSignals {
-  trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-  trendStrength: number;
-  rsi: number;
-  rsiSignal: 'OVERSOLD' | 'OVERBOUGHT' | 'NEUTRAL';
-  macdSignal: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-  priceVsSMA20: 'ABOVE' | 'BELOW' | 'AT';
-  priceVsSMA50: 'ABOVE' | 'BELOW' | 'AT';
-  support: number;
-  resistance: number;
-  nearSupport: boolean;
-  nearResistance: boolean;
-  volumeSignal: 'HIGH' | 'NORMAL' | 'LOW';
-}
-
-interface IVAnalysis {
-  currentIV: number;
-  ivRank: number;
-  ivPercentile: number;
-  ivSignal: 'HIGH' | 'ELEVATED' | 'NORMAL' | 'LOW';
-  hvRatio: number;
-  recommendation: 'BUY_PREMIUM' | 'SELL_PREMIUM' | 'NEUTRAL';
-}
-
-interface EarningsInfo {
-  date: string;
-  daysUntil: number;
-  expectedMove: number;
-  historicalAvgMove: number;
-  ivCrushRisk: 'HIGH' | 'MODERATE' | 'LOW' | 'NONE';
-}
-
-interface SetupScore {
-  total: number;
-  technicalScore: number;
-  ivScore: number;
-  greeksScore: number;
-  timingScore: number;
-  riskRewardScore: number;
-}
-
-interface TradeSuggestion {
-  type: 'CALL' | 'PUT' | 'SPREAD' | 'ALERT';
-  strategy: string;
-  strike?: number;
-  expiration?: string;
-  dte?: number;
-  bid?: number;
-  ask?: number;
-  midPrice?: number;
-  delta?: number;
-  gamma?: number;
-  theta?: number;
-  vega?: number;
-  iv?: number;
-  maxRisk: string;
-  maxReward: string;
-  breakeven: string;
-  probabilityITM: number;
-  probabilityProfit: number;
-  riskRewardRatio: string;
-  setupScore: SetupScore;
-  reasoning: string[];
-  warnings: string[];
-  entryTriggers: string[];
-  riskLevel: 'AGGRESSIVE' | 'MODERATE' | 'CONSERVATIVE' | 'WARNING';
-  confidence: number;
-  timeframe: string;
-}
-
-// ============================================================
-// SCHWAB OAUTH TOKEN - Get fresh access token
-// ============================================================
-async function getSchwabAccessToken(): Promise<{ token: string | null; error: string | null }> {
+async function getSchwabToken(): Promise<{ token: string | null; error: string | null }> {
   if (!SCHWAB_APP_KEY || !SCHWAB_APP_SECRET || !SCHWAB_REFRESH_TOKEN) {
-    return { 
-      token: null, 
-      error: 'Missing Schwab credentials. Set SCHWAB_APP_KEY, SCHWAB_APP_SECRET, and SCHWAB_REFRESH_TOKEN in .env.local' 
-    };
+    return { token: null, error: 'Missing Schwab credentials' };
   }
-
+  
   try {
     const credentials = Buffer.from(`${SCHWAB_APP_KEY}:${SCHWAB_APP_SECRET}`).toString('base64');
-    
-    const response = await fetch(SCHWAB_TOKEN_URL, {
+    const response = await fetch('https://api.schwabapi.com/v1/oauth/token', {
       method: 'POST',
       headers: {
         'Authorization': `Basic ${credentials}`,
@@ -137,551 +33,352 @@ async function getSchwabAccessToken(): Promise<{ token: string | null; error: st
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Schwab token error:', response.status, errorText);
-      return { 
-        token: null, 
-        error: `Schwab auth failed (${response.status}): ${errorText}. Refresh token may be expired (expires every 7 days).` 
-      };
+      const text = await response.text();
+      return { token: null, error: `Auth failed (${response.status}): Token may be expired` };
     }
-
     const data = await response.json();
-    console.log('✅ Schwab token refreshed successfully');
     return { token: data.access_token, error: null };
   } catch (err) {
-    console.error('Schwab token exception:', err);
-    return { token: null, error: `Token request failed: ${err}` };
+    return { token: null, error: `Auth error: ${err}` };
   }
 }
 
 // ============================================================
 // FETCH SCHWAB OPTIONS CHAIN
 // ============================================================
-async function fetchSchwabOptionsChain(token: string, symbol: string): Promise<{ data: any; error: string | null }> {
-  const url = `${SCHWAB_MARKET_DATA_BASE}/chains?symbol=${symbol}&contractType=ALL&strikeCount=20&includeUnderlyingQuote=true&range=ALL`;
-  
-  console.log('📊 Fetching Schwab options chain:', url);
+async function fetchOptionsChain(token: string, symbol: string) {
+  const url = `https://api.schwabapi.com/marketdata/v1/chains?symbol=${symbol}&contractType=ALL&strikeCount=30&includeUnderlyingQuote=true`;
   
   try {
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json',
-      },
+    const res = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${token}` },
     });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Schwab chains error:', response.status, errorText);
-      return { data: null, error: `Options chain request failed (${response.status}): ${errorText}` };
+    
+    if (!res.ok) {
+      const text = await res.text();
+      return { data: null, error: `Chain fetch failed (${res.status})` };
     }
-
-    const data = await response.json();
-    console.log('✅ Schwab options chain received, underlying price:', data.underlyingPrice);
-    return { data, error: null };
+    
+    return { data: await res.json(), error: null };
   } catch (err) {
-    console.error('Schwab chains exception:', err);
-    return { data: null, error: `Options chain request exception: ${err}` };
+    return { data: null, error: `Chain error: ${err}` };
   }
 }
 
 // ============================================================
-// FETCH SCHWAB QUOTE (for current price)
+// FETCH PRICE HISTORY FOR TECHNICALS
 // ============================================================
-async function fetchSchwabQuote(token: string, symbol: string): Promise<{ price: number | null; error: string | null }> {
-  const url = `${SCHWAB_MARKET_DATA_BASE}/quotes?symbols=${symbol}&indicative=false`;
-  
+async function fetchPriceHistory(token: string, symbol: string): Promise<number[]> {
   try {
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json',
-      },
+    const res = await fetch(`https://api.schwabapi.com/marketdata/v1/pricehistory?symbol=${symbol}&periodType=month&period=2&frequencyType=daily&frequency=1`, {
+      headers: { 'Authorization': `Bearer ${token}` },
     });
-
-    if (!response.ok) {
-      return { price: null, error: `Quote request failed (${response.status})` };
-    }
-
-    const data = await response.json();
-    const quote = data[symbol]?.quote;
-    const price = quote?.lastPrice || quote?.mark || quote?.bidPrice;
-    console.log('✅ Schwab quote received:', symbol, price);
-    return { price, error: null };
-  } catch (err) {
-    return { price: null, error: `Quote exception: ${err}` };
-  }
-}
-
-// ============================================================
-// FETCH SCHWAB PRICE HISTORY (for technicals)
-// ============================================================
-async function fetchSchwabPriceHistory(token: string, symbol: string): Promise<number[]> {
-  const url = `${SCHWAB_MARKET_DATA_BASE}/pricehistory?symbol=${symbol}&periodType=month&period=3&frequencyType=daily&frequency=1`;
-  
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json',
-      },
-    });
-
-    if (!response.ok) return [];
-
-    const data = await response.json();
+    if (!res.ok) return [];
+    const data = await res.json();
     return (data.candles || []).map((c: any) => c.close);
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
 // ============================================================
-// PARSE SCHWAB OPTIONS DATA INTO OUR FORMAT
+// PARSE OPTIONS CHAIN INTO STRUCTURED FORMAT
 // ============================================================
-function parseSchwabOptionsData(chainData: any, currentPrice: number): { calls: OptionContract[], puts: OptionContract[] } {
+interface OptionContract {
+  symbol: string;
+  strike: number;
+  expiration: string;
+  dte: number;
+  type: 'call' | 'put';
+  bid: number;
+  ask: number;
+  last: number;
+  mark: number;
+  volume: number;
+  openInterest: number;
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+  iv: number;
+  itm: boolean;
+  intrinsicValue: number;
+  extrinsicValue: number;
+}
+
+function parseOptionsChain(chainData: any, currentPrice: number): {
+  calls: OptionContract[];
+  puts: OptionContract[];
+  expirations: string[];
+} {
   const calls: OptionContract[] = [];
   const puts: OptionContract[] = [];
+  const expirationSet = new Set<string>();
 
-  // Schwab returns callExpDateMap and putExpDateMap
-  // Format: { "2024-01-19:5": { "150.0": [{ contract data }] } }
-  
-  const parseExpDateMap = (expDateMap: any, type: 'call' | 'put'): OptionContract[] => {
-    const options: OptionContract[] = [];
-    if (!expDateMap) return options;
-
-    // Get first 3 expirations for relevant data
-    const expirations = Object.keys(expDateMap).sort().slice(0, 4);
+  const parseMap = (expDateMap: any, type: 'call' | 'put') => {
+    if (!expDateMap) return;
     
-    for (const expKey of expirations) {
-      const strikes = expDateMap[expKey];
-      if (!strikes) continue;
-
-      for (const [strikeStr, contractArray] of Object.entries(strikes)) {
-        const contracts = contractArray as any[];
-        if (!contracts || contracts.length === 0) continue;
+    for (const [expKey, strikes] of Object.entries(expDateMap)) {
+      const expDate = expKey.split(':')[0];
+      expirationSet.add(expDate);
+      
+      for (const [strikeStr, contracts] of Object.entries(strikes as any)) {
+        const contractArr = contracts as any[];
+        if (!contractArr || contractArr.length === 0) continue;
         
-        const c = contracts[0]; // First contract at this strike
+        const c = contractArr[0];
         const strike = parseFloat(strikeStr);
         
-        // Filter to reasonable range around current price (within 15%)
-        const pctFromPrice = Math.abs(strike - currentPrice) / currentPrice;
-        if (pctFromPrice > 0.15) continue;
+        // Only include strikes within 20% of current price
+        if (Math.abs(strike - currentPrice) / currentPrice > 0.20) continue;
         
         const bid = c.bid || 0;
         const ask = c.ask || 0;
-        const mid = (bid + ask) / 2;
-        const isITM = type === 'call' ? strike < currentPrice : strike > currentPrice;
+        const mark = (bid + ask) / 2;
+        const itm = type === 'call' ? strike < currentPrice : strike > currentPrice;
         const intrinsic = type === 'call' 
-          ? Math.max(0, currentPrice - strike) 
+          ? Math.max(0, currentPrice - strike)
           : Math.max(0, strike - currentPrice);
-
-        options.push({
+        
+        const contract: OptionContract = {
+          symbol: c.symbol || '',
           strike,
+          expiration: expDate,
+          dte: c.daysToExpiration || 0,
+          type,
           bid,
           ask,
-          last: c.last || mid,
+          last: c.last || mark,
+          mark,
+          volume: c.totalVolume || 0,
+          openInterest: c.openInterest || 0,
           delta: c.delta || 0,
           gamma: c.gamma || 0,
           theta: c.theta || 0,
           vega: c.vega || 0,
-          rho: c.rho || 0,
-          volume: c.totalVolume || 0,
-          openInterest: c.openInterest || 0,
-          impliedVolatility: (c.volatility || 30) / 100, // Schwab returns as percentage
-          expiration: expKey.split(':')[0],
-          dte: c.daysToExpiration || 0,
-          inTheMoney: isITM,
+          iv: (c.volatility || 0) / 100, // Schwab returns as percentage
+          itm,
           intrinsicValue: intrinsic,
-          extrinsicValue: Math.max(0, mid - intrinsic),
-          bidAskSpread: ask - bid,
-          midPrice: mid,
-          symbol: c.symbol,
-        });
+          extrinsicValue: Math.max(0, mark - intrinsic),
+        };
+        
+        if (type === 'call') calls.push(contract);
+        else puts.push(contract);
       }
     }
-
-    return options.sort((a, b) => a.strike - b.strike || a.dte - b.dte);
   };
 
+  parseMap(chainData.callExpDateMap, 'call');
+  parseMap(chainData.putExpDateMap, 'put');
+
+  // Sort by strike, then by DTE
+  const sortFn = (a: OptionContract, b: OptionContract) => a.strike - b.strike || a.dte - b.dte;
+  
   return {
-    calls: parseExpDateMap(chainData.callExpDateMap, 'call'),
-    puts: parseExpDateMap(chainData.putExpDateMap, 'put'),
+    calls: calls.sort(sortFn),
+    puts: puts.sort(sortFn),
+    expirations: Array.from(expirationSet).sort(),
   };
 }
 
 // ============================================================
-// TECHNICAL ANALYSIS
+// CALCULATE TECHNICAL INDICATORS
 // ============================================================
 function calculateRSI(prices: number[], period = 14): number {
   if (prices.length < period + 1) return 50;
-  
-  const changes = [];
-  for (let i = 1; i < prices.length; i++) {
-    changes.push(prices[i] - prices[i - 1]);
-  }
-  
-  const recentChanges = changes.slice(-period);
-  let gains = 0, losses = 0;
-  
-  for (const change of recentChanges) {
-    if (change > 0) gains += change;
-    else losses += Math.abs(change);
-  }
-  
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - (100 / (1 + rs));
+  const changes = prices.slice(-period - 1).map((p, i, arr) => i > 0 ? p - arr[i-1] : 0).slice(1);
+  const gains = changes.filter(c => c > 0).reduce((a, b) => a + b, 0) / period;
+  const losses = Math.abs(changes.filter(c => c < 0).reduce((a, b) => a + b, 0)) / period;
+  if (losses === 0) return 100;
+  return 100 - (100 / (1 + gains / losses));
 }
 
 function calculateSMA(prices: number[], period: number): number {
   if (prices.length < period) return prices[prices.length - 1] || 0;
-  const slice = prices.slice(-period);
-  return slice.reduce((a, b) => a + b, 0) / period;
-}
-
-function analyzeTechnicals(priceHistory: number[], currentPrice: number): TechnicalSignals {
-  const prices = priceHistory.length > 0 ? priceHistory : [currentPrice];
-  const rsi = calculateRSI(prices);
-  const sma20 = calculateSMA(prices, 20);
-  const sma50 = calculateSMA(prices, 50);
-  
-  // Trend analysis
-  const recentPrices = prices.slice(-20);
-  const oldPrice = recentPrices[0] || currentPrice;
-  const priceChange = (currentPrice - oldPrice) / oldPrice * 100;
-  
-  let trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
-  if (priceChange > 3) trend = 'BULLISH';
-  else if (priceChange < -3) trend = 'BEARISH';
-  
-  // Support/Resistance from recent high/low
-  const high20 = Math.max(...recentPrices);
-  const low20 = Math.min(...recentPrices);
-  
-  return {
-    trend,
-    trendStrength: Math.min(100, Math.abs(priceChange) * 10),
-    rsi,
-    rsiSignal: rsi < 30 ? 'OVERSOLD' : rsi > 70 ? 'OVERBOUGHT' : 'NEUTRAL',
-    macdSignal: currentPrice > sma20 ? 'BULLISH' : 'BEARISH',
-    priceVsSMA20: currentPrice > sma20 * 1.01 ? 'ABOVE' : currentPrice < sma20 * 0.99 ? 'BELOW' : 'AT',
-    priceVsSMA50: currentPrice > sma50 * 1.01 ? 'ABOVE' : currentPrice < sma50 * 0.99 ? 'BELOW' : 'AT',
-    support: low20,
-    resistance: high20,
-    nearSupport: currentPrice < low20 * 1.02,
-    nearResistance: currentPrice > high20 * 0.98,
-    volumeSignal: 'NORMAL',
-  };
+  return prices.slice(-period).reduce((a, b) => a + b, 0) / period;
 }
 
 // ============================================================
-// IV ANALYSIS
+// DETERMINISTIC OPTIONS SCORING (0-10 scale)
 // ============================================================
-function analyzeIV(options: OptionContract[]): IVAnalysis {
-  if (options.length === 0) {
-    return {
-      currentIV: 30,
-      ivRank: 50,
-      ivPercentile: 50,
-      ivSignal: 'NORMAL',
-      hvRatio: 1,
-      recommendation: 'NEUTRAL',
-    };
-  }
-
-  // Get average IV from ATM options
-  const ivs = options.filter(o => o.impliedVolatility > 0).map(o => o.impliedVolatility * 100);
-  const avgIV = ivs.length > 0 ? ivs.reduce((a, b) => a + b, 0) / ivs.length : 30;
-  
-  // Estimate IV rank (would need historical IV data for accuracy)
-  // For now, use heuristics based on typical IV ranges
-  const typicalLowIV = avgIV * 0.6;
-  const typicalHighIV = avgIV * 1.5;
-  const ivRank = Math.min(100, Math.max(0, ((avgIV - typicalLowIV) / (typicalHighIV - typicalLowIV)) * 100));
-  
-  let ivSignal: 'HIGH' | 'ELEVATED' | 'NORMAL' | 'LOW' = 'NORMAL';
-  if (ivRank > 70) ivSignal = 'HIGH';
-  else if (ivRank > 50) ivSignal = 'ELEVATED';
-  else if (ivRank < 30) ivSignal = 'LOW';
-
-  let recommendation: 'BUY_PREMIUM' | 'SELL_PREMIUM' | 'NEUTRAL' = 'NEUTRAL';
-  if (ivRank < 30) recommendation = 'BUY_PREMIUM';
-  else if (ivRank > 70) recommendation = 'SELL_PREMIUM';
-
-  return {
-    currentIV: Math.round(avgIV * 10) / 10,
-    ivRank: Math.round(ivRank),
-    ivPercentile: Math.round(ivRank), // Simplified
-    ivSignal,
-    hvRatio: 1.1,
-    recommendation,
-  };
+interface OptionScore {
+  total: number;
+  delta: number;      // 0-2: Is delta in optimal range?
+  iv: number;         // 0-2: Is IV favorable?
+  liquidity: number;  // 0-2: Good bid-ask spread and volume?
+  timing: number;     // 0-2: Is DTE in sweet spot?
+  technical: number;  // 0-2: Does trend support this trade?
 }
 
-// ============================================================
-// NEWS SENTIMENT
-// ============================================================
-function analyzeNewsSentiment(headlines: string[]): { sentiment: string; score: number; keywords: string[] } {
-  const bullishWords = ['beat', 'surge', 'growth', 'record', 'upgrade', 'buy', 'bullish', 'strong', 'profit', 'gain'];
-  const bearishWords = ['miss', 'decline', 'concern', 'downgrade', 'sell', 'bearish', 'weak', 'loss', 'drop', 'fall'];
+function scoreOption(
+  option: OptionContract,
+  trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL',
+  avgIV: number,
+): OptionScore {
+  let deltaScore = 0;
+  let ivScore = 0;
+  let liquidityScore = 0;
+  let timingScore = 0;
+  let technicalScore = 0;
+
+  const absDelta = Math.abs(option.delta);
   
-  let score = 0;
-  const keywords: string[] = [];
-  
-  for (const headline of headlines) {
-    const lower = headline.toLowerCase();
-    for (const word of bullishWords) {
-      if (lower.includes(word)) { score++; keywords.push(`+${word}`); }
-    }
-    for (const word of bearishWords) {
-      if (lower.includes(word)) { score--; keywords.push(`-${word}`); }
-    }
-  }
-  
+  // Delta score: Best is 0.40-0.60 for directional plays
+  if (absDelta >= 0.40 && absDelta <= 0.60) deltaScore = 2;
+  else if (absDelta >= 0.30 && absDelta <= 0.70) deltaScore = 1;
+  else deltaScore = 0;
+
+  // IV score: Compare to average IV
+  const ivRatio = option.iv / (avgIV || 0.30);
+  if (ivRatio < 0.9) ivScore = 2;  // IV below average = cheap options
+  else if (ivRatio < 1.1) ivScore = 1;  // Near average
+  else ivScore = 0;  // High IV = expensive
+
+  // Liquidity score: Bid-ask spread and volume
+  const spread = option.ask - option.bid;
+  const spreadPct = option.mark > 0 ? spread / option.mark : 1;
+  if (spreadPct < 0.05 && option.volume > 100) liquidityScore = 2;
+  else if (spreadPct < 0.10 && option.volume > 50) liquidityScore = 1;
+  else liquidityScore = 0;
+
+  // Timing score: DTE sweet spot is 21-45 days
+  if (option.dte >= 21 && option.dte <= 45) timingScore = 2;
+  else if (option.dte >= 14 && option.dte <= 60) timingScore = 1;
+  else timingScore = 0;
+
+  // Technical alignment score
+  if (option.type === 'call' && trend === 'BULLISH') technicalScore = 2;
+  else if (option.type === 'put' && trend === 'BEARISH') technicalScore = 2;
+  else if (trend === 'NEUTRAL') technicalScore = 1;
+  else technicalScore = 0;
+
   return {
-    sentiment: score > 1 ? 'BULLISH' : score < -1 ? 'BEARISH' : 'NEUTRAL',
-    score,
-    keywords: keywords.slice(0, 6),
+    total: deltaScore + ivScore + liquidityScore + timingScore + technicalScore,
+    delta: deltaScore,
+    iv: ivScore,
+    liquidity: liquidityScore,
+    timing: timingScore,
+    technical: technicalScore,
   };
 }
 
 // ============================================================
 // GENERATE TRADE SUGGESTIONS
 // ============================================================
+interface TradeSuggestion {
+  type: 'CALL' | 'PUT' | 'ALERT';
+  strategy: string;
+  contract?: OptionContract;
+  score?: OptionScore;
+  reasoning: string[];
+  warnings: string[];
+  confidence: number;
+  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'WARNING';
+}
+
 function generateSuggestions(
   calls: OptionContract[],
   puts: OptionContract[],
+  trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL',
+  rsi: number,
+  avgIV: number,
   currentPrice: number,
-  technicals: TechnicalSignals,
-  ivAnalysis: IVAnalysis,
-  earnings: EarningsInfo,
-  sentiment: { sentiment: string; score: number },
 ): TradeSuggestion[] {
   const suggestions: TradeSuggestion[] = [];
 
-  // Find good call options (delta 0.40-0.60 range)
-  const goodCalls = calls.filter(c => 
-    c.dte >= 14 && c.dte <= 45 && 
-    c.delta >= 0.35 && c.delta <= 0.65 &&
-    c.bid > 0 && c.ask > 0
-  );
+  // Filter to options with good DTE (14-60 days)
+  const validCalls = calls.filter(c => c.dte >= 14 && c.dte <= 60 && c.bid > 0);
+  const validPuts = puts.filter(p => p.dte >= 14 && p.dte <= 60 && p.bid > 0);
 
-  const goodPuts = puts.filter(p => 
-    p.dte >= 14 && p.dte <= 45 && 
-    Math.abs(p.delta) >= 0.35 && Math.abs(p.delta) <= 0.65 &&
-    p.bid > 0 && p.ask > 0
-  );
+  // Score all valid options
+  const scoredCalls = validCalls.map(c => ({ contract: c, score: scoreOption(c, trend, avgIV) }));
+  const scoredPuts = validPuts.map(p => ({ contract: p, score: scoreOption(p, trend, avgIV) }));
 
-  // Calculate setup score
-  const calculateScore = (option: OptionContract, type: 'call' | 'put'): SetupScore => {
-    let technicalScore = 0;
-    let ivScore = 0;
-    let greeksScore = 0;
-    let timingScore = 0;
-    let riskRewardScore = 0;
+  // Sort by score descending
+  scoredCalls.sort((a, b) => b.score.total - a.score.total);
+  scoredPuts.sort((a, b) => b.score.total - a.score.total);
 
-    // Technical score
-    if (type === 'call' && technicals.trend === 'BULLISH') technicalScore += 20;
-    if (type === 'put' && technicals.trend === 'BEARISH') technicalScore += 20;
-    if (type === 'call' && technicals.rsiSignal === 'OVERSOLD') technicalScore += 15;
-    if (type === 'put' && technicals.rsiSignal === 'OVERBOUGHT') technicalScore += 15;
-    if (technicals.macdSignal === (type === 'call' ? 'BULLISH' : 'BEARISH')) technicalScore += 10;
-
-    // IV score - favor buying when IV is low
-    if (ivAnalysis.ivRank < 30) ivScore = 20;
-    else if (ivAnalysis.ivRank < 50) ivScore = 15;
-    else if (ivAnalysis.ivRank > 70) ivScore = 5;
-    else ivScore = 10;
-
-    // Greeks score
-    const absDelta = Math.abs(option.delta);
-    if (absDelta >= 0.40 && absDelta <= 0.60) greeksScore += 20;
-    else if (absDelta >= 0.30 && absDelta <= 0.70) greeksScore += 10;
-    if (option.gamma > 0.03) greeksScore += 5;
-
-    // Timing score
-    if (option.dte >= 21 && option.dte <= 45) timingScore += 20;
-    else if (option.dte >= 14) timingScore += 10;
-    if (earnings.daysUntil < 7) timingScore -= 15;
-
-    // Risk/Reward score
-    const spreadPct = option.bidAskSpread / option.midPrice;
-    if (spreadPct < 0.05) riskRewardScore += 15;
-    else if (spreadPct < 0.10) riskRewardScore += 10;
-    if (option.volume > option.openInterest * 0.1) riskRewardScore += 5;
-
-    const total = Math.min(100, technicalScore + ivScore + greeksScore + timingScore + riskRewardScore);
+  // Best call suggestion (if bullish or neutral)
+  if (scoredCalls.length > 0 && (trend === 'BULLISH' || trend === 'NEUTRAL')) {
+    const best = scoredCalls[0];
+    const c = best.contract;
+    const s = best.score;
     
-    return { total, technicalScore, ivScore, greeksScore, timingScore, riskRewardScore };
-  };
-
-  // Generate call suggestions if bullish
-  if (goodCalls.length > 0 && (technicals.trend === 'BULLISH' || technicals.rsiSignal === 'OVERSOLD')) {
-    const bestCall = goodCalls.sort((a, b) => {
-      const scoreA = calculateScore(a, 'call').total;
-      const scoreB = calculateScore(b, 'call').total;
-      return scoreB - scoreA;
-    })[0];
-
-    if (bestCall) {
-      const score = calculateScore(bestCall, 'call');
-      const maxRisk = (bestCall.ask * 100).toFixed(2);
-      const breakeven = (bestCall.strike + bestCall.ask).toFixed(2);
-      const probITM = Math.round(Math.abs(bestCall.delta) * 100);
-
-      suggestions.push({
-        type: 'CALL',
-        strategy: 'Long Call',
-        strike: bestCall.strike,
-        expiration: bestCall.expiration,
-        dte: bestCall.dte,
-        bid: bestCall.bid,
-        ask: bestCall.ask,
-        midPrice: bestCall.midPrice,
-        delta: bestCall.delta,
-        gamma: bestCall.gamma,
-        theta: bestCall.theta,
-        vega: bestCall.vega,
-        iv: bestCall.impliedVolatility * 100,
-        maxRisk,
-        maxReward: 'Unlimited',
-        breakeven,
-        probabilityITM: probITM,
-        probabilityProfit: Math.round(probITM * 0.85),
-        riskRewardRatio: '1:∞',
-        setupScore: score,
-        reasoning: [
-          `Trend: ${technicals.trend} (${technicals.trendStrength.toFixed(0)}% strength)`,
-          `RSI: ${technicals.rsi.toFixed(0)} (${technicals.rsiSignal})`,
-          `Delta: ${bestCall.delta.toFixed(2)} (${probITM}% ITM probability)`,
-          `IV Rank: ${ivAnalysis.ivRank}% (${ivAnalysis.recommendation === 'BUY_PREMIUM' ? 'favorable' : 'elevated'})`,
-          `DTE: ${bestCall.dte} days (optimal range)`,
-        ],
-        warnings: earnings.daysUntil < 14 ? [`⚠️ Earnings in ${earnings.daysUntil} days - IV crush risk`] : [],
-        entryTriggers: [
-          technicals.nearSupport ? '✓ Near support level' : 'Wait for pullback to support',
-          technicals.rsiSignal === 'OVERSOLD' ? '✓ RSI oversold' : 'RSI neutral',
-        ],
-        riskLevel: score.total >= 60 ? 'MODERATE' : 'AGGRESSIVE',
-        confidence: score.total,
-        timeframe: `${bestCall.dte} days`,
-      });
-    }
-  }
-
-  // Generate put suggestions if bearish
-  if (goodPuts.length > 0 && (technicals.trend === 'BEARISH' || technicals.rsiSignal === 'OVERBOUGHT')) {
-    const bestPut = goodPuts.sort((a, b) => {
-      const scoreA = calculateScore(a, 'put').total;
-      const scoreB = calculateScore(b, 'put').total;
-      return scoreB - scoreA;
-    })[0];
-
-    if (bestPut) {
-      const score = calculateScore(bestPut, 'put');
-      const maxRisk = (bestPut.ask * 100).toFixed(2);
-      const breakeven = (bestPut.strike - bestPut.ask).toFixed(2);
-      const probITM = Math.round(Math.abs(bestPut.delta) * 100);
-
-      suggestions.push({
-        type: 'PUT',
-        strategy: 'Long Put / Hedge',
-        strike: bestPut.strike,
-        expiration: bestPut.expiration,
-        dte: bestPut.dte,
-        bid: bestPut.bid,
-        ask: bestPut.ask,
-        midPrice: bestPut.midPrice,
-        delta: bestPut.delta,
-        gamma: bestPut.gamma,
-        theta: bestPut.theta,
-        vega: bestPut.vega,
-        iv: bestPut.impliedVolatility * 100,
-        maxRisk,
-        maxReward: breakeven,
-        breakeven,
-        probabilityITM: probITM,
-        probabilityProfit: Math.round(probITM * 0.85),
-        riskRewardRatio: `1:${(bestPut.strike / bestPut.ask).toFixed(1)}`,
-        setupScore: score,
-        reasoning: [
-          `Trend: ${technicals.trend} (${technicals.trendStrength.toFixed(0)}% strength)`,
-          `RSI: ${technicals.rsi.toFixed(0)} (${technicals.rsiSignal})`,
-          `Delta: ${bestPut.delta.toFixed(2)} (${probITM}% ITM probability)`,
-          `IV Rank: ${ivAnalysis.ivRank}%`,
-          `Good for hedging existing long positions`,
-        ],
-        warnings: earnings.daysUntil < 14 ? [`⚠️ Earnings in ${earnings.daysUntil} days`] : [],
-        entryTriggers: [
-          technicals.nearResistance ? '✓ Near resistance level' : 'Wait for rally to resistance',
-        ],
-        riskLevel: score.total >= 60 ? 'MODERATE' : 'AGGRESSIVE',
-        confidence: score.total,
-        timeframe: `${bestPut.dte} days`,
-      });
-    }
-  }
-
-  // Add earnings alert if applicable
-  if (earnings.daysUntil <= 14 && earnings.daysUntil > 0) {
     suggestions.push({
-      type: 'ALERT',
-      strategy: `⚠️ Earnings in ${earnings.daysUntil} Days`,
-      maxRisk: 'N/A',
-      maxReward: 'N/A',
-      breakeven: 'N/A',
-      probabilityITM: 0,
-      probabilityProfit: 0,
-      riskRewardRatio: 'N/A',
-      setupScore: { total: 0, technicalScore: 0, ivScore: 0, greeksScore: 0, timingScore: 0, riskRewardScore: 0 },
+      type: 'CALL',
+      strategy: trend === 'BULLISH' ? 'Long Call (Trend Aligned)' : 'Long Call (Speculative)',
+      contract: c,
+      score: s,
       reasoning: [
-        `Earnings date: ${earnings.date}`,
-        `Expected move: ±${earnings.expectedMove.toFixed(1)}%`,
-        `IV typically drops 20-40% after earnings (IV crush)`,
-        `Consider waiting until after earnings for directional plays`,
+        `Delta: ${c.delta.toFixed(2)} (${Math.round(Math.abs(c.delta) * 100)}% ITM probability)`,
+        `IV: ${(c.iv * 100).toFixed(0)}% ${c.iv < avgIV ? '(below avg - cheap)' : '(elevated)'}`,
+        `DTE: ${c.dte} days ${c.dte >= 21 && c.dte <= 45 ? '(optimal)' : ''}`,
+        `Trend: ${trend} | RSI: ${rsi.toFixed(0)}`,
+        `Score: ${s.total}/10`,
       ],
-      warnings: [
-        'High IV crush risk if holding through earnings',
-        'Consider selling premium strategies instead',
-      ],
-      entryTriggers: [],
-      riskLevel: 'WARNING',
-      confidence: 0,
-      timeframe: 'Current',
+      warnings: s.total < 6 ? ['Lower confidence setup - manage risk'] : [],
+      confidence: s.total * 10,
+      riskLevel: s.total >= 7 ? 'LOW' : s.total >= 5 ? 'MEDIUM' : 'HIGH',
     });
   }
 
-  // Add high IV alert
-  if (ivAnalysis.ivRank > 70) {
+  // Best put suggestion (if bearish or as hedge)
+  if (scoredPuts.length > 0) {
+    const best = scoredPuts[0];
+    const p = best.contract;
+    const s = best.score;
+    
+    const strategy = trend === 'BEARISH' ? 'Long Put (Trend Aligned)' : 'Protective Put (Hedge)';
+    
+    suggestions.push({
+      type: 'PUT',
+      strategy,
+      contract: p,
+      score: s,
+      reasoning: [
+        `Delta: ${p.delta.toFixed(2)} (${Math.round(Math.abs(p.delta) * 100)}% ITM probability)`,
+        `IV: ${(p.iv * 100).toFixed(0)}% ${p.iv < avgIV ? '(below avg)' : '(elevated)'}`,
+        `DTE: ${p.dte} days`,
+        `Trend: ${trend} | RSI: ${rsi.toFixed(0)}`,
+        `Score: ${s.total}/10`,
+      ],
+      warnings: trend !== 'BEARISH' ? ['Counter-trend trade - use as hedge only'] : [],
+      confidence: s.total * 10,
+      riskLevel: s.total >= 7 ? 'LOW' : s.total >= 5 ? 'MEDIUM' : 'HIGH',
+    });
+  }
+
+  // High IV warning
+  if (avgIV > 0.40) {
     suggestions.push({
       type: 'ALERT',
-      strategy: '⚠️ HIGH IV ENVIRONMENT',
-      maxRisk: 'N/A',
-      maxReward: 'N/A',
-      breakeven: 'N/A',
-      probabilityITM: 0,
-      probabilityProfit: 0,
-      riskRewardRatio: 'N/A',
-      setupScore: { total: 0, technicalScore: 0, ivScore: 0, greeksScore: 0, timingScore: 0, riskRewardScore: 0 },
+      strategy: `High IV Environment (${(avgIV * 100).toFixed(0)}%)`,
       reasoning: [
-        `IV Rank: ${ivAnalysis.ivRank}% (options expensive)`,
-        `IV Percentile: ${ivAnalysis.ivPercentile}%`,
-        `Consider selling strategies: covered calls, credit spreads`,
-        `Buying premium is NOT recommended`,
+        'Options are expensive relative to typical levels',
+        'Consider selling premium instead of buying',
+        'Or use spreads to reduce vega exposure',
       ],
       warnings: [],
-      entryTriggers: [],
-      riskLevel: 'WARNING',
       confidence: 0,
-      timeframe: 'Current',
+      riskLevel: 'WARNING',
     });
   }
 
-  return suggestions.sort((a, b) => b.confidence - a.confidence);
+  // RSI extreme warning
+  if (rsi > 70 || rsi < 30) {
+    suggestions.push({
+      type: 'ALERT',
+      strategy: rsi > 70 ? 'RSI Overbought Warning' : 'RSI Oversold Warning',
+      reasoning: [
+        `RSI: ${rsi.toFixed(0)} - ${rsi > 70 ? 'overbought' : 'oversold'}`,
+        rsi > 70 ? 'Be cautious with calls - potential pullback' : 'Be cautious with puts - potential bounce',
+        'Consider waiting for RSI to normalize',
+      ],
+      warnings: [],
+      confidence: 0,
+      riskLevel: 'WARNING',
+    });
+  }
+
+  return suggestions;
 }
 
 // ============================================================
@@ -690,202 +387,135 @@ function generateSuggestions(
 export async function GET(request: NextRequest, { params }: { params: { ticker: string } }) {
   const ticker = params.ticker.toUpperCase();
   const startTime = Date.now();
+
+  // Get Schwab token
+  const { token, error: tokenError } = await getSchwabToken();
   
-  console.log(`\n${'='.repeat(60)}`);
-  console.log(`📈 OPTIONS API REQUEST: ${ticker}`);
-  console.log(`⏰ Time: ${new Date().toISOString()}`);
-  console.log(`${'='.repeat(60)}`);
-
-  try {
-    let calls: OptionContract[] = [];
-    let puts: OptionContract[] = [];
-    let currentPrice = 0;
-    let priceHistory: number[] = [];
-    let dataSource = 'none';
-    const errors: string[] = [];
-
-    // Step 1: Get Schwab access token
-    const { token: schwabToken, error: tokenError } = await getSchwabAccessToken();
-    
-    if (tokenError) {
-      errors.push(tokenError);
-      console.log('⚠️ Schwab token error:', tokenError);
-    }
-
-    // Step 2: Fetch live data from Schwab
-    if (schwabToken) {
-      // Fetch options chain
-      const { data: chainData, error: chainError } = await fetchSchwabOptionsChain(schwabToken, ticker);
-      
-      if (chainError) {
-        errors.push(chainError);
-      } else if (chainData) {
-        currentPrice = chainData.underlyingPrice || 0;
-        const parsed = parseSchwabOptionsData(chainData, currentPrice);
-        calls = parsed.calls;
-        puts = parsed.puts;
-        dataSource = 'schwab-live';
-        console.log(`✅ Parsed ${calls.length} calls, ${puts.length} puts`);
-      }
-
-      // Fetch price history for technicals
-      priceHistory = await fetchSchwabPriceHistory(schwabToken, ticker);
-      if (priceHistory.length > 0) {
-        console.log(`✅ Fetched ${priceHistory.length} days of price history`);
-      }
-
-      // If no underlying price from chains, try quote endpoint
-      if (currentPrice === 0) {
-        const { price } = await fetchSchwabQuote(schwabToken, ticker);
-        if (price) currentPrice = price;
-      }
-    }
-
-    // Log data status
-    console.log(`📊 Data Source: ${dataSource}`);
-    console.log(`💰 Current Price: $${currentPrice}`);
-    console.log(`📈 Calls: ${calls.length}, Puts: ${puts.length}`);
-    if (errors.length > 0) {
-      console.log(`⚠️ Errors:`, errors);
-    }
-
-    // If no live data, return error with instructions
-    if (calls.length === 0 && puts.length === 0) {
-      return NextResponse.json({
-        error: 'No live options data available',
-        ticker,
-        currentPrice,
-        dataSource: 'none',
-        errors,
-        instructions: [
-          '1. Ensure SCHWAB_APP_KEY is set in .env.local',
-          '2. Ensure SCHWAB_APP_SECRET is set in .env.local',
-          '3. Ensure SCHWAB_REFRESH_TOKEN is set in .env.local',
-          '4. Refresh tokens expire every 7 days - you may need to re-authenticate',
-          '5. Ensure your Schwab app has Market Data Production access',
-        ],
-        lastUpdated: new Date().toISOString(),
-      }, { status: 200 }); // Return 200 so frontend can display the error
-    }
-
-    // Fetch supplementary data from Finnhub
-    let headlines: string[] = [];
-    let earningsData = { date: '', daysUntil: 30 };
-    let analystRating = { consensus: 'hold', buyPercent: 55 };
-
-    if (FINNHUB_KEY) {
-      try {
-        const [newsRes, earningsRes] = await Promise.all([
-          fetch(`https://finnhub.io/api/v1/company-news?symbol=${ticker}&from=${new Date(Date.now() - 7*24*60*60*1000).toISOString().split('T')[0]}&to=${new Date().toISOString().split('T')[0]}&token=${FINNHUB_KEY}`),
-          fetch(`https://finnhub.io/api/v1/calendar/earnings?symbol=${ticker}&token=${FINNHUB_KEY}`),
-        ]);
-
-        if (newsRes.ok) {
-          const data = await newsRes.json();
-          headlines = (data || []).slice(0, 5).map((n: any) => n.headline);
-        }
-        
-        if (earningsRes.ok) {
-          const data = await earningsRes.json();
-          const upcoming = data.earningsCalendar?.find((e: any) => new Date(e.date) > new Date());
-          if (upcoming) {
-            earningsData = {
-              date: upcoming.date,
-              daysUntil: Math.ceil((new Date(upcoming.date).getTime() - Date.now()) / (1000*60*60*24)),
-            };
-          }
-        }
-      } catch (e) {
-        console.log('Finnhub error (non-critical):', e);
-      }
-    }
-
-    if (headlines.length === 0) {
-      headlines = [`${ticker} market analysis`, `Options activity for ${ticker}`];
-    }
-
-    // Run analysis
-    const technicals = analyzeTechnicals(priceHistory, currentPrice);
-    const allOptions = [...calls, ...puts].filter(o => o.dte > 0);
-    const ivAnalysis = analyzeIV(allOptions);
-    const sentiment = analyzeNewsSentiment(headlines);
-
-    // Calculate expected move
-    const avgIV = ivAnalysis.currentIV / 100;
-    const nearestDTE = calls.length > 0 ? Math.min(...calls.map(c => c.dte)) : 30;
-    const expectedMove = avgIV * Math.sqrt(nearestDTE / 365) * 100;
-
-    const earnings: EarningsInfo = {
-      date: earningsData.date || 'TBD',
-      daysUntil: earningsData.daysUntil,
-      expectedMove: Math.round(expectedMove * 10) / 10,
-      historicalAvgMove: Math.round(expectedMove * 0.8 * 10) / 10,
-      ivCrushRisk: earningsData.daysUntil <= 7 ? 'HIGH' : earningsData.daysUntil <= 14 ? 'MODERATE' : 'LOW',
-    };
-
-    // Generate suggestions
-    const suggestions = generateSuggestions(calls, puts, currentPrice, technicals, ivAnalysis, earnings, sentiment);
-
-    // Calculate metrics
-    const totalCallVolume = calls.reduce((sum, c) => sum + c.volume, 0);
-    const totalPutVolume = puts.reduce((sum, p) => sum + p.volume, 0);
-    const putCallRatio = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 1;
-
-    const responseTime = Date.now() - startTime;
-    console.log(`✅ Response ready in ${responseTime}ms`);
-
+  if (!token) {
     return NextResponse.json({
+      error: 'Schwab authentication failed',
+      details: tokenError,
       ticker,
-      currentPrice: Math.round(currentPrice * 100) / 100,
+      instructions: [
+        'Set SCHWAB_APP_KEY in Vercel environment variables',
+        'Set SCHWAB_APP_SECRET in Vercel environment variables', 
+        'Set SCHWAB_REFRESH_TOKEN in Vercel environment variables',
+        'Note: Refresh tokens expire every 7 days',
+      ],
       lastUpdated: new Date().toISOString(),
-      dataSource,
-      responseTimeMs: responseTime,
-
-      technicals,
-      ivAnalysis,
-      earnings,
-
-      sentiment: {
-        sentiment: sentiment.sentiment,
-        score: sentiment.score,
-        keywords: sentiment.keywords,
-        recentHeadlines: headlines,
-      },
-
-      analystRating,
-
-      metrics: {
-        putCallRatio: putCallRatio.toFixed(2),
-        totalCallVolume,
-        totalPutVolume,
-        avgIV: ivAnalysis.currentIV.toFixed(1),
-        ivRank: ivAnalysis.ivRank.toFixed(0),
-        ivPercentile: ivAnalysis.ivPercentile.toFixed(0),
-      },
-
-      suggestions,
-
-      optionsChain: {
-        calls: calls.slice(0, 15),
-        puts: puts.slice(0, 15),
-      },
-
-      debug: {
-        schwabConnected: !!schwabToken,
-        callsCount: calls.length,
-        putsCount: puts.length,
-        priceHistoryDays: priceHistory.length,
-        errors: errors.length > 0 ? errors : undefined,
-      },
+      dataSource: 'none',
     });
+  }
 
-  } catch (error) {
-    console.error('❌ Options API error:', error);
-    return NextResponse.json({ 
-      error: 'Failed to fetch options data',
-      details: String(error),
+  // Fetch options chain
+  const { data: chainData, error: chainError } = await fetchOptionsChain(token, ticker);
+  
+  if (!chainData || chainError) {
+    return NextResponse.json({
+      error: 'Failed to fetch options chain',
+      details: chainError,
       ticker,
       lastUpdated: new Date().toISOString(),
-    }, { status: 500 });
+      dataSource: 'none',
+    });
   }
+
+  const currentPrice = chainData.underlyingPrice || 0;
+  
+  if (currentPrice === 0) {
+    return NextResponse.json({
+      error: 'Invalid underlying price',
+      ticker,
+      lastUpdated: new Date().toISOString(),
+      dataSource: 'none',
+    });
+  }
+
+  // Parse options chain
+  const { calls, puts, expirations } = parseOptionsChain(chainData, currentPrice);
+
+  // Fetch price history for technicals
+  const priceHistory = await fetchPriceHistory(token, ticker);
+  
+  // Calculate technicals
+  const rsi = priceHistory.length > 14 ? calculateRSI(priceHistory) : 50;
+  const sma20 = priceHistory.length > 20 ? calculateSMA(priceHistory, 20) : currentPrice;
+  const sma50 = priceHistory.length > 50 ? calculateSMA(priceHistory, 50) : currentPrice * 0.95;
+  
+  // Determine trend
+  let trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+  if (currentPrice > sma20 && currentPrice > sma50) trend = 'BULLISH';
+  else if (currentPrice < sma20 && currentPrice < sma50) trend = 'BEARISH';
+
+  // Calculate average IV
+  const allIVs = [...calls, ...puts].filter(o => o.iv > 0).map(o => o.iv);
+  const avgIV = allIVs.length > 0 ? allIVs.reduce((a, b) => a + b, 0) / allIVs.length : 0.30;
+
+  // Calculate IV rank (simplified - would need historical IV for accuracy)
+  const ivRank = Math.min(100, Math.max(0, ((avgIV - 0.15) / 0.45) * 100));
+
+  // Calculate put/call ratio
+  const totalCallVol = calls.reduce((sum, c) => sum + c.volume, 0);
+  const totalPutVol = puts.reduce((sum, p) => sum + p.volume, 0);
+  const putCallRatio = totalCallVol > 0 ? totalPutVol / totalCallVol : 1;
+
+  // Generate suggestions
+  const suggestions = generateSuggestions(calls, puts, trend, rsi, avgIV, currentPrice);
+
+  // Get nearest expiration data for display
+  const nearestExp = expirations[0] || '';
+  const callsNearExp = calls.filter(c => c.expiration === nearestExp);
+  const putsNearExp = puts.filter(p => p.expiration === nearestExp);
+
+  return NextResponse.json({
+    ticker,
+    currentPrice: Math.round(currentPrice * 100) / 100,
+    lastUpdated: new Date().toISOString(),
+    dataSource: 'schwab-live',
+    responseTimeMs: Date.now() - startTime,
+
+    // Expirations available
+    expirations,
+    selectedExpiration: nearestExp,
+
+    // Technical context
+    technicals: {
+      trend,
+      rsi: Math.round(rsi),
+      sma20: Math.round(sma20 * 100) / 100,
+      sma50: Math.round(sma50 * 100) / 100,
+      support: Math.round(Math.min(...priceHistory.slice(-20)) * 100) / 100 || currentPrice * 0.95,
+      resistance: Math.round(Math.max(...priceHistory.slice(-20)) * 100) / 100 || currentPrice * 1.05,
+    },
+
+    // IV Analysis
+    ivAnalysis: {
+      currentIV: Math.round(avgIV * 1000) / 10,
+      ivRank: Math.round(ivRank),
+      ivSignal: ivRank > 70 ? 'HIGH' : ivRank > 50 ? 'ELEVATED' : ivRank < 30 ? 'LOW' : 'NORMAL',
+      recommendation: ivRank < 30 ? 'BUY_PREMIUM' : ivRank > 70 ? 'SELL_PREMIUM' : 'NEUTRAL',
+    },
+
+    // Metrics
+    metrics: {
+      putCallRatio: putCallRatio.toFixed(2),
+      totalCallVolume: totalCallVol,
+      totalPutVolume: totalPutVol,
+      avgIV: (avgIV * 100).toFixed(1),
+      ivRank: ivRank.toFixed(0),
+    },
+
+    // Trade suggestions with scores
+    suggestions,
+
+    // Full options chain for display
+    optionsChain: {
+      calls: callsNearExp.slice(0, 20),
+      puts: putsNearExp.slice(0, 20),
+    },
+
+    // All expirations data
+    allCalls: calls,
+    allPuts: puts,
+  });
 }
