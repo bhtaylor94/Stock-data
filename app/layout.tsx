@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'AI Hedge Fund',
-  description: 'Multi-agent investment analysis with options intelligence',
+  title: 'AI Hedge Fund - Stock & Options Analysis',
+  description: 'Real-time stock analysis with fundamentals, technical indicators, and options intelligence',
 }
 
 export default function RootLayout({
@@ -13,7 +13,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body className="bg-slate-950 text-slate-100">{children}</body>
     </html>
   )
 }
