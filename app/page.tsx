@@ -323,70 +323,180 @@ function StockTab({ data, loading }: { data: any; loading: boolean }) {
         </div>
       </div>
 
-      {/* Data Verification & Confidence */}
+      {/* Trust Score & Analysis Quality */}
       {data.verification && (
-        <div className="p-4 rounded-2xl border border-cyan-500/30 bg-gradient-to-br from-cyan-950/20 to-blue-950/10">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-md font-semibold text-cyan-400">🔒 Data Verification</h3>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-400">Completeness:</span>
-              <span className={`text-sm font-bold ${
+        <div className="p-5 rounded-2xl border border-cyan-500/30 bg-gradient-to-br from-cyan-950/20 to-blue-950/10">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-cyan-400">🎯 Should You Trust This Analysis?</h3>
+          </div>
+          
+          {/* Main Trust Score */}
+          <div className={`p-4 rounded-xl mb-4 ${
+            data.verification.completenessScore >= 80 && data.verification.signalAlignment.agreementCount >= 4 
+              ? 'bg-emerald-500/10 border border-emerald-500/30' 
+              : data.verification.completenessScore >= 60 && data.verification.signalAlignment.agreementCount >= 3
+              ? 'bg-amber-500/10 border border-amber-500/30'
+              : 'bg-red-500/10 border border-red-500/30'
+          }`}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-white font-bold text-lg">
+                {data.verification.completenessScore >= 80 && data.verification.signalAlignment.agreementCount >= 4 
+                  ? '✅ HIGH CONFIDENCE' 
+                  : data.verification.completenessScore >= 60 && data.verification.signalAlignment.agreementCount >= 3
+                  ? '⚠️ MODERATE CONFIDENCE'
+                  : '❌ LOW CONFIDENCE - DO MORE RESEARCH'}
+              </span>
+              <span className={`text-2xl font-bold ${
                 data.verification.completenessScore >= 80 ? 'text-emerald-400' :
                 data.verification.completenessScore >= 60 ? 'text-amber-400' : 'text-red-400'
               }`}>{data.verification.completenessScore}%</span>
             </div>
+            <p className="text-sm text-slate-300">
+              {data.verification.completenessScore >= 80 && data.verification.signalAlignment.agreementCount >= 4 
+                ? 'Strong data quality + multiple indicators agree. This analysis is well-supported.'
+                : data.verification.completenessScore >= 60 && data.verification.signalAlignment.agreementCount >= 3
+                ? 'Decent data but some signals conflict. Consider smaller position size.'
+                : 'Missing data or conflicting signals. Not recommended for real money without further research.'}
+            </p>
+          </div>
+
+          {/* What the indicators are telling us */}
+          <div className="mb-4">
+            <h4 className="text-sm font-semibold text-white mb-3">📊 What Are 5 Independent Sources Saying?</h4>
+            <div className="space-y-2">
+              {/* Fundamentals */}
+              <div className={`flex items-center justify-between p-2 rounded-lg ${data.verification.signalAlignment.details?.fundamentalsBullish ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-lg ${data.verification.signalAlignment.details?.fundamentalsBullish ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {data.verification.signalAlignment.details?.fundamentalsBullish ? '✓' : '✗'}
+                  </span>
+                  <div>
+                    <p className="text-sm text-white font-medium">Company Fundamentals</p>
+                    <p className="text-xs text-slate-400">P/E, ROE, debt levels, profit margins</p>
+                  </div>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded ${data.verification.signalAlignment.details?.fundamentalsBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                  {data.verification.signalAlignment.details?.fundamentalsBullish ? 'BULLISH' : 'BEARISH'}
+                </span>
+              </div>
+              
+              {/* Technicals */}
+              <div className={`flex items-center justify-between p-2 rounded-lg ${data.verification.signalAlignment.details?.technicalsBullish ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-lg ${data.verification.signalAlignment.details?.technicalsBullish ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {data.verification.signalAlignment.details?.technicalsBullish ? '✓' : '✗'}
+                  </span>
+                  <div>
+                    <p className="text-sm text-white font-medium">Price Action & Technicals</p>
+                    <p className="text-xs text-slate-400">Trend, RSI, moving averages, support/resistance</p>
+                  </div>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded ${data.verification.signalAlignment.details?.technicalsBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                  {data.verification.signalAlignment.details?.technicalsBullish ? 'BULLISH' : 'BEARISH'}
+                </span>
+              </div>
+              
+              {/* News */}
+              <div className={`flex items-center justify-between p-2 rounded-lg ${data.verification.signalAlignment.details?.newsBullish ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-lg ${data.verification.signalAlignment.details?.newsBullish ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {data.verification.signalAlignment.details?.newsBullish ? '✓' : '✗'}
+                  </span>
+                  <div>
+                    <p className="text-sm text-white font-medium">Recent News Sentiment</p>
+                    <p className="text-xs text-slate-400">Headlines from past 7 days analyzed</p>
+                  </div>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded ${data.verification.signalAlignment.details?.newsBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                  {data.verification.signalAlignment.details?.newsBullish ? 'BULLISH' : 'BEARISH'}
+                </span>
+              </div>
+              
+              {/* Analysts */}
+              <div className={`flex items-center justify-between p-2 rounded-lg ${data.verification.signalAlignment.details?.analystsBullish ? 'bg-emerald-500/10' : 'bg-red-500/10'}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-lg ${data.verification.signalAlignment.details?.analystsBullish ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {data.verification.signalAlignment.details?.analystsBullish ? '✓' : '✗'}
+                  </span>
+                  <div>
+                    <p className="text-sm text-white font-medium">Wall Street Analysts</p>
+                    <p className="text-xs text-slate-400">Buy/sell ratings from professional analysts</p>
+                  </div>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded ${data.verification.signalAlignment.details?.analystsBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                  {data.verification.signalAlignment.details?.analystsBullish ? 'BULLISH' : 'BEARISH'}
+                </span>
+              </div>
+              
+              {/* Insiders */}
+              <div className={`flex items-center justify-between p-2 rounded-lg ${data.verification.signalAlignment.details?.insidersBullish ? 'bg-emerald-500/10' : 'bg-slate-500/10'}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-lg ${data.verification.signalAlignment.details?.insidersBullish ? 'text-emerald-400' : 'text-slate-400'}`}>
+                    {data.verification.signalAlignment.details?.insidersBullish ? '✓' : '—'}
+                  </span>
+                  <div>
+                    <p className="text-sm text-white font-medium">Insider Activity</p>
+                    <p className="text-xs text-slate-400">Executives buying or selling shares</p>
+                  </div>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded ${data.verification.signalAlignment.details?.insidersBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/20 text-slate-400'}`}>
+                  {data.verification.signalAlignment.details?.insidersBullish ? 'BUYING' : 'NEUTRAL/SELLING'}
+                </span>
+              </div>
+            </div>
+            
+            <div className="mt-3 p-2 rounded-lg bg-slate-800/50 text-center">
+              <span className="text-sm text-white font-bold">
+                {data.verification.signalAlignment.agreementCount}/5 indicators agree
+              </span>
+              <span className="text-sm text-slate-400"> → </span>
+              <span className={`text-sm font-bold ${
+                data.verification.signalAlignment.aligned === 'STRONG' ? 'text-emerald-400' :
+                data.verification.signalAlignment.aligned === 'MODERATE' ? 'text-blue-400' :
+                data.verification.signalAlignment.aligned === 'CONFLICTING' ? 'text-amber-400' :
+                'text-red-400'
+              }`}>
+                {data.verification.signalAlignment.aligned === 'STRONG' ? 'Strong consensus! ✓' :
+                 data.verification.signalAlignment.aligned === 'MODERATE' ? 'Moderate consensus' :
+                 data.verification.signalAlignment.aligned === 'CONFLICTING' ? 'Mixed signals ⚠️' :
+                 'Weak/No consensus ⚠️'}
+              </span>
+            </div>
           </div>
           
-          {/* Signal Alignment */}
-          <div className="p-3 rounded-xl bg-slate-800/50 mb-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-slate-400">Signal Alignment:</span>
-              <span className={`text-xs px-2 py-0.5 rounded font-medium ${
-                data.verification.signalAlignment.aligned === 'STRONG' ? 'bg-emerald-500/20 text-emerald-400' :
-                data.verification.signalAlignment.aligned === 'MODERATE' ? 'bg-blue-500/20 text-blue-400' :
-                data.verification.signalAlignment.aligned === 'CONFLICTING' ? 'bg-amber-500/20 text-amber-400' :
-                'bg-red-500/20 text-red-400'
-              }`}>{data.verification.signalAlignment.aligned}</span>
-            </div>
-            <div className="grid grid-cols-5 gap-1 text-xs">
-              <div className={`p-1.5 rounded text-center ${data.verification.signalAlignment.details?.fundamentalsBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                {data.verification.signalAlignment.details?.fundamentalsBullish ? '✓' : '✗'} Fund
-              </div>
-              <div className={`p-1.5 rounded text-center ${data.verification.signalAlignment.details?.technicalsBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                {data.verification.signalAlignment.details?.technicalsBullish ? '✓' : '✗'} Tech
-              </div>
-              <div className={`p-1.5 rounded text-center ${data.verification.signalAlignment.details?.newsBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                {data.verification.signalAlignment.details?.newsBullish ? '✓' : '✗'} News
-              </div>
-              <div className={`p-1.5 rounded text-center ${data.verification.signalAlignment.details?.analystsBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                {data.verification.signalAlignment.details?.analystsBullish ? '✓' : '✗'} Anlst
-              </div>
-              <div className={`p-1.5 rounded text-center ${data.verification.signalAlignment.details?.insidersBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                {data.verification.signalAlignment.details?.insidersBullish ? '✓' : '✗'} Insd
-              </div>
-            </div>
-            <p className="text-xs text-slate-500 mt-2 text-center">
-              {data.verification.signalAlignment.agreementCount}/{data.verification.signalAlignment.totalSignals} indicators bullish
+          {/* Bottom Line */}
+          <div className="p-3 rounded-lg bg-slate-800/70 border border-slate-700">
+            <p className="text-sm font-medium text-white mb-1">💡 Bottom Line:</p>
+            <p className="text-sm text-slate-300">
+              {data.verification.completenessScore >= 80 && data.verification.signalAlignment.agreementCount >= 4 
+                ? `This analysis has ${data.verification.completenessScore}% data completeness with ${data.verification.signalAlignment.agreementCount}/5 indicators in agreement. The recommendation is well-supported - suitable for trading with proper risk management.`
+                : data.verification.completenessScore >= 60 && data.verification.signalAlignment.agreementCount >= 3
+                ? `Data is ${data.verification.completenessScore}% complete with ${data.verification.signalAlignment.agreementCount}/5 indicators agreeing. Consider a smaller position or wait for more confirmation before committing capital.`
+                : `Only ${data.verification.completenessScore}% data completeness and ${data.verification.signalAlignment.agreementCount}/5 indicator agreement. NOT RECOMMENDED for real money. Do additional research or wait for better setup.`}
             </p>
           </div>
           
-          {/* Data Checks */}
-          <div className="grid grid-cols-5 gap-1 text-xs mb-3">
-            {data.verification.checks && Object.entries(data.verification.checks).map(([key, passed]: [string, any]) => (
-              <div key={key} className={`p-1.5 rounded text-center ${passed ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
-                {passed ? '✓' : '✗'} {key.replace(/([A-Z])/g, ' $1').trim().slice(0, 8)}
+          {/* Expandable Details */}
+          <details className="mt-3 text-xs">
+            <summary className="text-slate-500 cursor-pointer hover:text-slate-400">📋 View data sources & limitations</summary>
+            <div className="mt-2 p-2 rounded bg-slate-800/50 space-y-2">
+              <div>
+                <p className="text-slate-400 font-medium">Data Sources:</p>
+                <p className="text-slate-500">• Price: {data.dataSource === 'schwab' ? 'Schwab (real-time)' : 'Finnhub'}</p>
+                <p className="text-slate-500">• Fundamentals: Finnhub (quarterly reports)</p>
+                <p className="text-slate-500">• News: Finnhub (last 7 days)</p>
+                <p className="text-slate-500">• Analysts: Finnhub (latest consensus)</p>
               </div>
-            ))}
-          </div>
-          
-          {/* Caveats */}
-          <details className="text-xs">
-            <summary className="text-slate-500 cursor-pointer hover:text-slate-400">⚠️ Important Caveats</summary>
-            <ul className="mt-2 space-y-1 text-slate-400">
-              {data.verification.caveats?.map((c: string, i: number) => (
-                <li key={i}>• {c}</li>
-              ))}
-            </ul>
+              <div>
+                <p className="text-slate-400 font-medium">Important Limitations:</p>
+                <ul className="text-slate-500">
+                  <li>• Fundamentals may be 1-3 months old</li>
+                  <li>• News sentiment is AI-analyzed, not human-reviewed</li>
+                  <li>• Analyst ratings can lag market conditions</li>
+                  <li>• Past performance ≠ future results</li>
+                </ul>
+              </div>
+            </div>
           </details>
         </div>
       )}
@@ -449,21 +559,21 @@ function OptionsTab({ data, loading }: { data: any; loading: boolean }) {
               <div key={i} className={`p-3 rounded-xl border ${u.sentiment === 'BULLISH' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-white">{u.contract?.type === 'call' ? '📈' : '📉'} ${u.contract?.strike} {u.contract?.type?.toUpperCase()}</span>
+                    <span className="font-bold text-white">{u.type === 'call' ? '📈' : '📉'} ${u.strike} {u.type?.toUpperCase()}</span>
                     <span className={`text-xs px-2 py-0.5 rounded ${
                       u.convictionLevel === 'HIGH' ? 'bg-orange-500/30 text-orange-300' :
                       u.convictionLevel === 'MEDIUM' ? 'bg-amber-500/20 text-amber-400' :
                       'bg-slate-500/20 text-slate-400'
-                    }`}>{u.convictionLevel} CONVICTION</span>
+                    }`}>{u.convictionLevel || 'MEDIUM'} CONVICTION</span>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded ${u.sentiment === 'BULLISH' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{u.sentiment}</span>
                 </div>
                 <div className="grid grid-cols-5 gap-2 text-xs mb-2">
-                  <div><span className="text-slate-400">Vol:</span> <span className="text-amber-400 font-bold">{u.contract?.volume?.toLocaleString()}</span></div>
-                  <div><span className="text-slate-400">OI:</span> <span className="text-white">{u.contract?.openInterest?.toLocaleString()}</span></div>
-                  <div><span className="text-slate-400">V/OI:</span> <span className="text-orange-400 font-bold">{u.contract?.volumeOIRatio}x</span></div>
-                  <div><span className="text-slate-400">DTE:</span> <span className="text-white">{u.contract?.dte}d</span></div>
-                  <div><span className="text-slate-400">$:</span> <span className="text-emerald-400">{u.premiumValue >= 1000000 ? `$${(u.premiumValue/1e6).toFixed(1)}M` : `$${(u.premiumValue/1e3).toFixed(0)}K`}</span></div>
+                  <div><span className="text-slate-400">Vol:</span> <span className="text-amber-400 font-bold">{u.volume?.toLocaleString()}</span></div>
+                  <div><span className="text-slate-400">OI:</span> <span className="text-white">{u.openInterest?.toLocaleString()}</span></div>
+                  <div><span className="text-slate-400">V/OI:</span> <span className="text-orange-400 font-bold">{u.volumeOIRatio?.toFixed(1)}x</span></div>
+                  <div><span className="text-slate-400">DTE:</span> <span className="text-white">{u.dte}d</span></div>
+                  <div><span className="text-slate-400">$:</span> <span className="text-emerald-400">{u.premiumFormatted || `$${(u.premium/1000).toFixed(0)}K`}</span></div>
                 </div>
                 <div className="flex flex-wrap gap-1 mb-2">
                   {u.signals?.slice(0, 4).map((s: string, j: number) => (

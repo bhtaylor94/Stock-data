@@ -1045,10 +1045,19 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       volume: u.contract.volume,
       openInterest: u.contract.openInterest,
       volumeOIRatio: u.contract.volumeOIRatio,
+      delta: u.contract.delta,
+      iv: u.contract.iv,
+      bid: u.contract.bid,
+      ask: u.contract.ask,
       premium: Math.round(u.premiumValue),
+      premiumFormatted: u.premiumValue >= 1000000 
+        ? `$${(u.premiumValue / 1e6).toFixed(2)}M` 
+        : `$${(u.premiumValue / 1e3).toFixed(0)}K`,
       signals: u.signals,
       score: u.score,
       sentiment: u.sentiment,
+      convictionLevel: u.convictionLevel,
+      interpretation: u.interpretation,
     })),
 
     // Trade suggestions
