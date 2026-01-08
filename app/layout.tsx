@@ -1,19 +1,19 @@
-import type { Metadata } from 'next';
-import './globals.css';
+import type { Metadata } from 'next'
+import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'AI Hedge Fund | Multi-Agent Investment Analysis',
-  description: 'Real-time multi-agent investment analysis with 12 legendary investor personalities, live market data, and Greeks-based options intelligence.',
-};
+  title: 'AI Hedge Fund',
+  description: 'Multi-agent investment analysis with options intelligence',
+}
 
 export default function RootLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: React.ReactNode
 }) {
   return (
     <html lang="en">
-      <body className="antialiased">{children}</body>
+      <body>{children}</body>
     </html>
-  );
+  )
 }
