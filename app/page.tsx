@@ -578,6 +578,27 @@ function OptionsTab({ data, loading }: { data: any; loading: boolean }) {
 }
 
 // ============================================================
+// POPULAR TICKERS
+// ============================================================
+const POPULAR_TICKERS = [
+  { symbol: 'AAPL', name: 'Apple' },
+  { symbol: 'NVDA', name: 'NVIDIA' },
+  { symbol: 'MSFT', name: 'Microsoft' },
+  { symbol: 'GOOGL', name: 'Google' },
+  { symbol: 'AMZN', name: 'Amazon' },
+  { symbol: 'META', name: 'Meta' },
+  { symbol: 'TSLA', name: 'Tesla' },
+  { symbol: 'AMD', name: 'AMD' },
+  { symbol: 'NFLX', name: 'Netflix' },
+  { symbol: 'JPM', name: 'JPMorgan' },
+  { symbol: 'SPY', name: 'S&P 500 ETF' },
+  { symbol: 'QQQ', name: 'Nasdaq ETF' },
+  { symbol: 'IWM', name: 'Russell 2000' },
+  { symbol: 'GLD', name: 'Gold ETF' },
+  { symbol: 'TLT', name: 'Treasury ETF' },
+];
+
+// ============================================================
 // MAIN APP
 // ============================================================
 export default function Home() {
@@ -589,14 +610,15 @@ export default function Home() {
   const [loadingStock, setLoadingStock] = useState(false);
   const [loadingOptions, setLoadingOptions] = useState(false);
 
-  const handleSearch = async () => {
-    if (!ticker.trim()) return;
-    const sym = ticker.toUpperCase().trim();
-    setSearchedTicker(sym);
+  const handleSearch = async (sym?: string) => {
+    const searchSym = (sym || ticker).toUpperCase().trim();
+    if (!searchSym) return;
+    setTicker(searchSym);
+    setSearchedTicker(searchSym);
     setLoadingStock(true);
     setLoadingOptions(true);
     try {
-      const [stockRes, optionsRes] = await Promise.all([fetch(`/api/stock/${sym}`), fetch(`/api/options/${sym}`)]);
+      const [stockRes, optionsRes] = await Promise.all([fetch(`/api/stock/${searchSym}`), fetch(`/api/options/${searchSym}`)]);
       if (stockRes.ok) setStockData(await stockRes.json());
       if (optionsRes.ok) setOptionsData(await optionsRes.json());
     } catch (err) { console.error(err); }
@@ -628,9 +650,32 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="mb-6 flex gap-3">
-          <input type="text" value={ticker} onChange={(e) => setTicker(e.target.value.toUpperCase())} onKeyPress={(e) => e.key === 'Enter' && handleSearch()} placeholder="Enter ticker..." className="flex-1 px-4 py-3 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50 font-mono" />
-          <button onClick={handleSearch} disabled={loadingStock || !ticker.trim()} className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 text-white font-medium disabled:opacity-50">{loadingStock ? 'Analyzing...' : 'Analyze'}</button>
+        {/* Search Input */}
+        <div className="mb-4 flex gap-3">
+          <input type="text" value={ticker} onChange={(e) => setTicker(e.target.value.toUpperCase())} onKeyPress={(e) => e.key === 'Enter' && handleSearch()} placeholder="Enter ticker symbol..." className="flex-1 px-4 py-3 rounded-xl bg-slate-800/50 border border-slate-700/50 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50 font-mono" />
+          <button onClick={() => handleSearch()} disabled={loadingStock || !ticker.trim()} className="px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-600 to-blue-600 hover:from-emerald-500 hover:to-blue-500 text-white font-medium disabled:opacity-50">{loadingStock ? 'Analyzing...' : 'Analyze'}</button>
+        </div>
+
+        {/* Popular Tickers */}
+        <div className="mb-6">
+          <p className="text-xs text-slate-500 mb-2">📌 Popular:</p>
+          <div className="flex flex-wrap gap-2">
+            {POPULAR_TICKERS.map((t) => (
+              <button
+                key={t.symbol}
+                onClick={() => handleSearch(t.symbol)}
+                disabled={loadingStock}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  searchedTicker === t.symbol 
+                    ? 'bg-blue-500/30 text-blue-300 border border-blue-500/50' 
+                    : 'bg-slate-800/50 text-slate-400 hover:text-white hover:bg-slate-700/50 border border-slate-700/50'
+                }`}
+              >
+                <span className="font-mono font-bold">{t.symbol}</span>
+                <span className="text-slate-500 ml-1 hidden sm:inline">{t.name}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         {stockData && !stockData.error && (

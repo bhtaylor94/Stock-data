@@ -18,12 +18,32 @@ const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
 const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
 
 // ============================================================
-// SCHWAB AUTH
+// TOKEN CACHE - Schwab access tokens last 30 minutes
+// Cache them to avoid hitting rate limits on the oauth endpoint
+// ============================================================
+interface TokenCache {
+  accessToken: string;
+  expiresAt: number; // Unix timestamp
+}
+
+let tokenCache: TokenCache | null = null;
+
+// ============================================================
+// SCHWAB AUTH WITH CACHING
 // ============================================================
 async function getSchwabToken(): Promise<{ token: string | null; error: string | null; errorCode: number | null }> {
   if (!SCHWAB_APP_KEY || !SCHWAB_APP_SECRET || !SCHWAB_REFRESH_TOKEN) {
     return { token: null, error: 'Missing Schwab credentials in environment variables', errorCode: null };
   }
+  
+  // Check if we have a valid cached token (with 2 minute buffer)
+  const now = Date.now();
+  if (tokenCache && tokenCache.expiresAt > now + 120000) {
+    console.log('[Schwab] Using cached access token');
+    return { token: tokenCache.accessToken, error: null, errorCode: null };
+  }
+  
+  console.log('[Schwab] Requesting new access token via refresh token');
   
   try {
     const credentials = Buffer.from(`${SCHWAB_APP_KEY}:${SCHWAB_APP_SECRET}`).toString('base64');
@@ -41,25 +61,44 @@ async function getSchwabToken(): Promise<{ token: string | null; error: string |
 
     if (!response.ok) {
       const status = response.status;
+      const errorBody = await response.text().catch(() => 'No body');
+      console.error(`[Schwab] Auth failed: ${status} - ${errorBody}`);
+      
+      // Clear cache on auth failure
+      tokenCache = null;
+      
       if (status === 401) {
-        return { token: null, error: 'Refresh token expired - needs renewal (tokens expire every 7 days)', errorCode: 401 };
+        return { token: null, error: 'Refresh token expired or invalid - needs renewal (tokens expire every 7 days). Try generating a new refresh token.', errorCode: 401 };
       } else if (status === 400) {
-        return { token: null, error: 'Invalid credentials or malformed request', errorCode: 400 };
+        return { token: null, error: `Invalid credentials or malformed request: ${errorBody}`, errorCode: 400 };
+      } else if (status === 429) {
+        return { token: null, error: 'Rate limited by Schwab - too many token requests. Wait a minute and try again.', errorCode: 429 };
       }
-      return { token: null, error: `Auth failed with status ${status}`, errorCode: status };
+      return { token: null, error: `Auth failed with status ${status}: ${errorBody}`, errorCode: status };
     }
+    
     const data = await response.json();
+    
+    // Cache the token - expires_in is in seconds (usually 1800 = 30 min)
+    const expiresIn = data.expires_in || 1800;
+    tokenCache = {
+      accessToken: data.access_token,
+      expiresAt: now + (expiresIn * 1000),
+    };
+    
+    console.log(`[Schwab] Got new access token, expires in ${expiresIn}s`);
     return { token: data.access_token, error: null, errorCode: null };
   } catch (err) {
+    console.error('[Schwab] Network error:', err);
     return { token: null, error: `Auth network error: ${err}`, errorCode: null };
+  }
   }
 }
 
 // ============================================================
-// FETCH SCHWAB DATA
+// FETCH SCHWAB DATA WITH RETRY
 // ============================================================
-async function fetchOptionsChain(token: string, symbol: string) {
-  // Fetch with more strikes to get all expirations
+async function fetchOptionsChain(token: string, symbol: string, retryCount = 0): Promise<{ data: any; error: string | null }> {
   const url = `https://api.schwabapi.com/marketdata/v1/chains?symbol=${symbol}&contractType=ALL&strikeCount=50&includeUnderlyingQuote=true&range=ALL`;
   
   try {
@@ -67,10 +106,33 @@ async function fetchOptionsChain(token: string, symbol: string) {
       headers: { 'Authorization': `Bearer ${token}` },
     });
     
-    if (!res.ok) return { data: null, error: `Chain fetch failed (${res.status})` };
+    if (!res.ok) {
+      const status = res.status;
+      const errorText = await res.text().catch(() => 'No details');
+      
+      // If 401 on the data endpoint, token might have expired mid-request
+      // Clear the cache so next request gets a fresh token
+      if (status === 401) {
+        tokenCache = null;
+        return { data: null, error: `Token rejected by market data API (401). This can happen if: 1) Access token expired, 2) Refresh token was invalidated, 3) Schwab API issues. Details: ${errorText}` };
+      }
+      
+      if (status === 429 && retryCount < 2) {
+        // Rate limited - wait and retry
+        await new Promise(r => setTimeout(r, 2000));
+        return fetchOptionsChain(token, symbol, retryCount + 1);
+      }
+      
+      return { data: null, error: `Chain fetch failed (${status}): ${errorText}` };
+    }
     return { data: await res.json(), error: null };
   } catch (err) {
-    return { data: null, error: `Chain error: ${err}` };
+    if (retryCount < 2) {
+      // Network error - retry once
+      await new Promise(r => setTimeout(r, 1000));
+      return fetchOptionsChain(token, symbol, retryCount + 1);
+    }
+    return { data: null, error: `Network error: ${err}` };
   }
 }
 

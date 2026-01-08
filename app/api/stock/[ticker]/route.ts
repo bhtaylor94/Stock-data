@@ -18,10 +18,30 @@ const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
 const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
 
 // ============================================================
-// SCHWAB AUTH
+// TOKEN CACHE - Schwab access tokens last 30 minutes
+// Cache them to avoid hitting rate limits on the oauth endpoint
+// ============================================================
+interface TokenCache {
+  accessToken: string;
+  expiresAt: number; // Unix timestamp
+}
+
+let tokenCache: TokenCache | null = null;
+
+// ============================================================
+// SCHWAB AUTH WITH CACHING
 // ============================================================
 async function getSchwabToken(): Promise<string | null> {
   if (!SCHWAB_APP_KEY || !SCHWAB_APP_SECRET || !SCHWAB_REFRESH_TOKEN) return null;
+  
+  // Check if we have a valid cached token (with 2 minute buffer)
+  const now = Date.now();
+  if (tokenCache && tokenCache.expiresAt > now + 120000) {
+    console.log('[Schwab Stock] Using cached access token');
+    return tokenCache.accessToken;
+  }
+  
+  console.log('[Schwab Stock] Requesting new access token via refresh token');
   
   try {
     const credentials = Buffer.from(`${SCHWAB_APP_KEY}:${SCHWAB_APP_SECRET}`).toString('base64');
@@ -36,10 +56,30 @@ async function getSchwabToken(): Promise<string | null> {
         refresh_token: SCHWAB_REFRESH_TOKEN,
       }).toString(),
     });
-    if (!response.ok) return null;
+    
+    if (!response.ok) {
+      const status = response.status;
+      const errorBody = await response.text().catch(() => '');
+      console.error(`[Schwab Stock] Auth failed: ${status} - ${errorBody}`);
+      tokenCache = null;
+      return null;
+    }
+    
     const data = await response.json();
+    
+    // Cache the token
+    const expiresIn = data.expires_in || 1800;
+    tokenCache = {
+      accessToken: data.access_token,
+      expiresAt: now + (expiresIn * 1000),
+    };
+    
+    console.log(`[Schwab Stock] Got new access token, expires in ${expiresIn}s`);
     return data.access_token;
-  } catch { return null; }
+  } catch (err) {
+    console.error('[Schwab Stock] Auth error:', err);
+    return null;
+  }
 }
 
 async function fetchSchwabQuote(token: string, symbol: string) {
