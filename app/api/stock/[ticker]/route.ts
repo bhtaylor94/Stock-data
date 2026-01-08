@@ -47,6 +47,12 @@ export async function GET(
     const details = polygonDetails?.results || {};
     const prevClose = polygonPrevClose?.results?.[0] || {};
 
+    // Safe number formatting helper
+    const safeNum = (val: any, fallback = 0) => {
+      const num = typeof val === 'string' ? parseFloat(val) : val;
+      return (num !== null && num !== undefined && !isNaN(num)) ? num : fallback;
+    };
+
     // Combine into unified response
     const stockData = {
       ticker,
@@ -55,24 +61,24 @@ export async function GET(
       industry: profile.finnhubIndustry || details.sic_description || 'N/A',
       
       // Price data (prefer Finnhub for real-time)
-      price: quote.c || prevClose.c || 0,
-      change: quote.d || (prevClose.c && prevClose.o ? prevClose.c - prevClose.o : 0),
-      changePercent: quote.dp || 0,
-      open: quote.o || prevClose.o || 0,
-      high: quote.h || prevClose.h || 0,
-      low: quote.l || prevClose.l || 0,
-      previousClose: quote.pc || prevClose.c || 0,
-      volume: prevClose.v || 0,
+      price: safeNum(quote.c) || safeNum(prevClose.c) || 0,
+      change: safeNum(quote.d) || (prevClose.c && prevClose.o ? prevClose.c - prevClose.o : 0),
+      changePercent: safeNum(quote.dp) || 0,
+      open: safeNum(quote.o) || safeNum(prevClose.o) || 0,
+      high: safeNum(quote.h) || safeNum(prevClose.h) || 0,
+      low: safeNum(quote.l) || safeNum(prevClose.l) || 0,
+      previousClose: safeNum(quote.pc) || safeNum(prevClose.c) || 0,
+      volume: safeNum(prevClose.v) || 0,
       
       // 52-week data
-      high52: metrics['52WeekHigh'] || 0,
-      low52: metrics['52WeekLow'] || 0,
+      high52: safeNum(metrics['52WeekHigh']) || 0,
+      low52: safeNum(metrics['52WeekLow']) || 0,
       
       // Fundamentals
-      marketCap: profile.marketCapitalization ? profile.marketCapitalization * 1e6 : details.market_cap || 0,
-      pe: metrics.peBasicExclExtraTTM || metrics.peTTM || 0,
-      eps: metrics.epsBasicExclExtraItemsTTM || metrics.epsTTM || 0,
-      beta: metrics.beta || 0,
+      marketCap: profile.marketCapitalization ? profile.marketCapitalization * 1e6 : safeNum(details.market_cap) || 0,
+      pe: safeNum(metrics.peBasicExclExtraTTM) || safeNum(metrics.peTTM) || 0,
+      eps: safeNum(metrics.epsBasicExclExtraItemsTTM) || safeNum(metrics.epsTTM) || 0,
+      beta: safeNum(metrics.beta) || 1,
       
       // Financials
       roe: metrics.roeTTM ? metrics.roeTTM / 100 : 0,
@@ -84,19 +90,19 @@ export async function GET(
       // Growth & Valuation
       revenueGrowth: metrics.revenueGrowthTTMYoy ? metrics.revenueGrowthTTMYoy / 100 : 0,
       epsGrowth: metrics.epsGrowthTTMYoy ? metrics.epsGrowthTTMYoy / 100 : 0,
-      priceToBook: metrics.pbQuarterly || metrics.pbAnnual || 0,
-      priceToSales: metrics.psTTM || 0,
-      debtToEquity: metrics.totalDebtToEquityQuarterly || metrics.totalDebtToEquityAnnual || 0,
-      currentRatio: metrics.currentRatioQuarterly || metrics.currentRatioAnnual || 0,
+      priceToBook: safeNum(metrics.pbQuarterly) || safeNum(metrics.pbAnnual) || 0,
+      priceToSales: safeNum(metrics.psTTM) || 0,
+      debtToEquity: safeNum(metrics.totalDebtToEquityQuarterly) || safeNum(metrics.totalDebtToEquityAnnual) || 0,
+      currentRatio: safeNum(metrics.currentRatioQuarterly) || safeNum(metrics.currentRatioAnnual) || 0,
       
       // Dividend
-      dividendYield: metrics.dividendYieldIndicatedAnnual || 0,
-      payoutRatio: metrics.payoutRatioTTM || 0,
+      dividendYield: safeNum(metrics.dividendYieldIndicatedAnnual) || 0,
+      payoutRatio: safeNum(metrics.payoutRatioTTM) || 0,
       
       // Analyst targets
-      targetPrice: metrics.targetMeanPrice || 0,
-      targetHigh: metrics.targetHighPrice || 0,
-      targetLow: metrics.targetLowPrice || 0,
+      targetPrice: safeNum(metrics.targetMeanPrice) || 0,
+      targetHigh: safeNum(metrics.targetHighPrice) || 0,
+      targetLow: safeNum(metrics.targetLowPrice) || 0,
       
       // Metadata
       timestamp: new Date().toISOString(),
