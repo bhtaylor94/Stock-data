@@ -916,8 +916,107 @@ export async function GET(
 
     suggestions,
 
+    // ============================================================
+    // DATA VERIFICATION & CONFIDENCE METRICS
+    // This helps you trust the analysis by showing data quality
+    // ============================================================
+    verification: {
+      // Data freshness
+      dataAge: {
+        price: 'real-time',
+        fundamentals: 'quarterly (Finnhub)',
+        news: 'last 7 days',
+        analysts: 'latest available',
+      },
+      
+      // Data completeness score (0-100)
+      completenessScore: calculateCompletenessScore({
+        hasPrice: price > 0,
+        hasFundamentals: fundamentalMetrics.pe > 0 || fundamentalMetrics.roe !== 0,
+        hasTechnicals: priceHistory.length >= 20,
+        hasNews: newsAnalysis.headlines.length > 0,
+        hasAnalysts: analystAnalysis.buyPercent > 0,
+        hasInsiders: insiderAnalysis.buyCount + insiderAnalysis.sellCount > 0,
+        hasEarnings: !!earnings?.earningsCalendar?.[0],
+      }),
+      
+      // Signal alignment (do multiple indicators agree?)
+      signalAlignment: {
+        aligned: checkSignalAlignment(
+          fundamentalAnalysis.score >= 5,
+          technicalAnalysis.score >= 5,
+          newsAnalysis.signal === 'BULLISH',
+          analystAnalysis.buyPercent >= 50
+        ),
+        details: {
+          fundamentalsBullish: fundamentalAnalysis.score >= 5,
+          technicalsBullish: technicalAnalysis.score >= 5,
+          newsBullish: newsAnalysis.signal === 'BULLISH',
+          analystsBullish: analystAnalysis.buyPercent >= 50,
+          insidersBullish: insiderAnalysis.netActivity === 'BUYING',
+        },
+        agreementCount: [
+          fundamentalAnalysis.score >= 5,
+          technicalAnalysis.score >= 5,
+          newsAnalysis.signal === 'BULLISH',
+          analystAnalysis.buyPercent >= 50,
+          insiderAnalysis.netActivity === 'BUYING',
+        ].filter(Boolean).length,
+        totalSignals: 5,
+      },
+      
+      // Known limitations
+      caveats: [
+        'Fundamental data is quarterly and may be 1-3 months old',
+        'Technical indicators are based on daily closing prices',
+        'News sentiment is algorithmic, not human-reviewed',
+        'Analyst ratings may lag actual market conditions',
+        'Past performance does not guarantee future results',
+      ],
+      
+      // Verification checklist
+      checks: {
+        priceVerified: dataSource === 'schwab' || dataSource === 'finnhub',
+        fundamentalsPresent: fundamentalMetrics.pe > 0,
+        sufficientHistory: priceHistory.length >= 50,
+        recentNews: newsAnalysis.headlines.length > 0,
+        analystCoverage: (analystAnalysis.distribution?.strongBuy || 0) + (analystAnalysis.distribution?.buy || 0) + (analystAnalysis.distribution?.hold || 0) > 0,
+      },
+    },
+
     lastUpdated: new Date().toISOString(),
     dataSource,
     responseTimeMs: Date.now() - startTime,
   });
+}
+
+// Helper functions for verification
+function calculateCompletenessScore(checks: Record<string, boolean>): number {
+  const weights: Record<string, number> = {
+    hasPrice: 25,
+    hasFundamentals: 20,
+    hasTechnicals: 20,
+    hasNews: 15,
+    hasAnalysts: 10,
+    hasInsiders: 5,
+    hasEarnings: 5,
+  };
+  
+  let score = 0;
+  for (const [key, passed] of Object.entries(checks)) {
+    if (passed && weights[key]) {
+      score += weights[key];
+    }
+  }
+  return score;
+}
+
+function checkSignalAlignment(...signals: boolean[]): 'STRONG' | 'MODERATE' | 'WEAK' | 'CONFLICTING' {
+  const bullishCount = signals.filter(Boolean).length;
+  const bearishCount = signals.length - bullishCount;
+  
+  if (bullishCount >= 4) return 'STRONG';
+  if (bullishCount >= 3) return 'MODERATE';
+  if (Math.abs(bullishCount - bearishCount) <= 1) return 'CONFLICTING';
+  return 'WEAK';
 }

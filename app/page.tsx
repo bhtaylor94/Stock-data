@@ -323,6 +323,74 @@ function StockTab({ data, loading }: { data: any; loading: boolean }) {
         </div>
       </div>
 
+      {/* Data Verification & Confidence */}
+      {data.verification && (
+        <div className="p-4 rounded-2xl border border-cyan-500/30 bg-gradient-to-br from-cyan-950/20 to-blue-950/10">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-md font-semibold text-cyan-400">🔒 Data Verification</h3>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400">Completeness:</span>
+              <span className={`text-sm font-bold ${
+                data.verification.completenessScore >= 80 ? 'text-emerald-400' :
+                data.verification.completenessScore >= 60 ? 'text-amber-400' : 'text-red-400'
+              }`}>{data.verification.completenessScore}%</span>
+            </div>
+          </div>
+          
+          {/* Signal Alignment */}
+          <div className="p-3 rounded-xl bg-slate-800/50 mb-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-slate-400">Signal Alignment:</span>
+              <span className={`text-xs px-2 py-0.5 rounded font-medium ${
+                data.verification.signalAlignment.aligned === 'STRONG' ? 'bg-emerald-500/20 text-emerald-400' :
+                data.verification.signalAlignment.aligned === 'MODERATE' ? 'bg-blue-500/20 text-blue-400' :
+                data.verification.signalAlignment.aligned === 'CONFLICTING' ? 'bg-amber-500/20 text-amber-400' :
+                'bg-red-500/20 text-red-400'
+              }`}>{data.verification.signalAlignment.aligned}</span>
+            </div>
+            <div className="grid grid-cols-5 gap-1 text-xs">
+              <div className={`p-1.5 rounded text-center ${data.verification.signalAlignment.details?.fundamentalsBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                {data.verification.signalAlignment.details?.fundamentalsBullish ? '✓' : '✗'} Fund
+              </div>
+              <div className={`p-1.5 rounded text-center ${data.verification.signalAlignment.details?.technicalsBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                {data.verification.signalAlignment.details?.technicalsBullish ? '✓' : '✗'} Tech
+              </div>
+              <div className={`p-1.5 rounded text-center ${data.verification.signalAlignment.details?.newsBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                {data.verification.signalAlignment.details?.newsBullish ? '✓' : '✗'} News
+              </div>
+              <div className={`p-1.5 rounded text-center ${data.verification.signalAlignment.details?.analystsBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                {data.verification.signalAlignment.details?.analystsBullish ? '✓' : '✗'} Anlst
+              </div>
+              <div className={`p-1.5 rounded text-center ${data.verification.signalAlignment.details?.insidersBullish ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                {data.verification.signalAlignment.details?.insidersBullish ? '✓' : '✗'} Insd
+              </div>
+            </div>
+            <p className="text-xs text-slate-500 mt-2 text-center">
+              {data.verification.signalAlignment.agreementCount}/{data.verification.signalAlignment.totalSignals} indicators bullish
+            </p>
+          </div>
+          
+          {/* Data Checks */}
+          <div className="grid grid-cols-5 gap-1 text-xs mb-3">
+            {data.verification.checks && Object.entries(data.verification.checks).map(([key, passed]: [string, any]) => (
+              <div key={key} className={`p-1.5 rounded text-center ${passed ? 'bg-emerald-500/10 text-emerald-400' : 'bg-red-500/10 text-red-400'}`}>
+                {passed ? '✓' : '✗'} {key.replace(/([A-Z])/g, ' $1').trim().slice(0, 8)}
+              </div>
+            ))}
+          </div>
+          
+          {/* Caveats */}
+          <details className="text-xs">
+            <summary className="text-slate-500 cursor-pointer hover:text-slate-400">⚠️ Important Caveats</summary>
+            <ul className="mt-2 space-y-1 text-slate-400">
+              {data.verification.caveats?.map((c: string, i: number) => (
+                <li key={i}>• {c}</li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      )}
+
       <p className="text-xs text-center text-slate-500">
         Updated: {data.lastUpdated ? new Date(data.lastUpdated).toLocaleString() : 'N/A'} • Source: {data.dataSource} • {data.responseTimeMs}ms
       </p>
