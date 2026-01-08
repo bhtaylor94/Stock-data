@@ -92,7 +92,6 @@ async function getSchwabToken(): Promise<{ token: string | null; error: string |
     console.error('[Schwab] Network error:', err);
     return { token: null, error: `Auth network error: ${err}`, errorCode: null };
   }
-  }
 }
 
 // ============================================================
