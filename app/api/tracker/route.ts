@@ -220,16 +220,14 @@ export async function GET() {
     const totalPnl = enriched.reduce((sum, s: any) => sum + asNumber(s.pnl, 0), 0);
     const avgPnlPct =
       enriched.length > 0 ? enriched.reduce((sum, s: any) => sum + asNumber(s.pnlPct, 0), 0) / enriched.length : 0;
-
-    
     // Measured accuracy metrics (calibration feedback)
-    function bucketFromConfidence(c: any) {
+    const bucketFromConfidence = (c: any) => {
       const v = asNumber(c, 0);
       if (v >= 75) return 'HIGH';
       if (v >= 60) return 'MED';
       if (v > 0) return 'LOW';
       return 'N/A';
-    }
+    };
 
     const realizedForMetrics = realized.filter(s => typeof s.confidence === 'number' && s.confidence > 0);
 
