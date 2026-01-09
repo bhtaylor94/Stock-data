@@ -232,9 +232,9 @@ function calculateATR(candles: { high: number; low: number; close: number }[], p
 }
 
 // ============================================================
-// PROFESSIONAL CHART PATTERN DETECTION - STRICT VALIDATION
+// PROFESSIONAL CHART PATTERN DETECTION
 // Research-backed patterns with historical success rates
-// ONLY shows CONFIRMED patterns with volume validation
+// More realistic confirmation criteria based on actual market behavior
 // ============================================================
 
 interface PatternCandle {
@@ -247,7 +247,7 @@ interface PatternCandle {
 
 interface PatternResult {
   detected: boolean;
-  confirmed: boolean;  // Breakout/breakdown + volume confirmed
+  confirmed: boolean;  // Breakout/breakdown occurred
   confidence: number;  // 0-100 confidence score
   target?: number;
   stopLoss?: number;
@@ -255,211 +255,127 @@ interface PatternResult {
   downside?: string;
   volumeRatio?: number;  // Current volume vs 20-day avg
   priceAboveBreakout?: number;  // % above breakout level
-  failureReason?: string;
+  status: 'CONFIRMED' | 'FORMING' | 'NOT_DETECTED';
+  statusReason: string;
 }
 
-// Calculate 20-day average volume for validation
+// Calculate average volume
 function getAvgVolume(candles: PatternCandle[], days = 20): number {
   if (candles.length < days) return 0;
   const recentVol = candles.slice(-days).map(c => c.volume);
   return recentVol.reduce((a, b) => a + b, 0) / days;
 }
 
-// STRICT VALIDATION: Volume must be 50%+ above 20-day average for confirmed breakout
+// Volume confirmation - more lenient (25%+ above average is significant)
 function isVolumeConfirmed(currentVolume: number, avgVolume: number): boolean {
-  return avgVolume > 0 && currentVolume >= avgVolume * 1.5;
+  return avgVolume > 0 && currentVolume >= avgVolume * 1.25;
 }
 
-// BULLISH: Cup & Handle (95% success rate, avg +54% gain)
-// STRICT: Requires breakout above handle high + 50% volume surge
+// Calculate volume trend (are recent volumes increasing?)
+function isVolumeIncreasing(candles: PatternCandle[], lookback = 5): boolean {
+  if (candles.length < lookback * 2) return false;
+  const recent = candles.slice(-lookback);
+  const prior = candles.slice(-(lookback * 2), -lookback);
+  const recentAvg = recent.reduce((sum, c) => sum + c.volume, 0) / lookback;
+  const priorAvg = prior.reduce((sum, c) => sum + c.volume, 0) / lookback;
+  return recentAvg > priorAvg * 1.1; // 10% increase
+}
+
+// BULLISH: Cup & Handle (95% success rate)
 function detectCupAndHandle(candles: PatternCandle[]): PatternResult {
-  if (candles.length < 65) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Insufficient data (need 65 days)' };
+  const notDetected: PatternResult = { detected: false, confirmed: false, confidence: 0, status: 'NOT_DETECTED', statusReason: 'Pattern not found' };
   
-  const recent = candles.slice(-65);
+  if (candles.length < 40) return { ...notDetected, statusReason: 'Insufficient data (need 40+ days)' };
+  
+  const recent = candles.slice(-50);
   const prices = recent.map(c => c.close);
   const volumes = recent.map(c => c.volume);
   
-  const cupStart = prices[0];
-  const cupBottom = Math.min(...prices.slice(0, 50));
-  const cupDepth = ((cupStart - cupBottom) / cupStart) * 100;
-  
-  // Cup depth must be 12-33% (research-backed range)
-  if (cupDepth < 12 || cupDepth > 33) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Cup depth out of range (need 12-33%)' };
-  
+  // Find the lowest point (cup bottom)
+  const cupBottom = Math.min(...prices.slice(5, 35));
   const bottomIdx = prices.indexOf(cupBottom);
-  const leftSide = prices.slice(0, bottomIdx);
-  const rightSide = prices.slice(bottomIdx, 50);
   
-  // Both sides must have substantial formation
-  if (leftSide.length < 15 || rightSide.length < 15) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Cup sides too short' };
+  // Cup start should be higher than cup bottom
+  const cupStart = Math.max(...prices.slice(0, Math.max(5, bottomIdx - 5)));
+  const cupEnd = Math.max(...prices.slice(Math.min(bottomIdx + 5, prices.length - 10)));
   
-  // Handle formation
-  const handleStart = 50;
-  const handle = prices.slice(handleStart);
-  if (handle.length < 5) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Handle too short' };
+  // Validate cup shape
+  const cupDepth = ((cupStart - cupBottom) / cupStart) * 100;
+  if (cupDepth < 8 || cupDepth > 35) return { ...notDetected, statusReason: `Cup depth ${cupDepth.toFixed(1)}% outside 8-35% range` };
   
-  const handleHigh = Math.max(...handle.slice(0, 10));
-  const handleLow = Math.min(...handle);
+  // Cup end should recover to near cup start (within 10%)
+  const recovery = (cupEnd / cupStart) * 100;
+  if (recovery < 85) return { ...notDetected, statusReason: `Cup hasn't recovered (${recovery.toFixed(1)}% of start)` };
+  
+  // Handle: Look at last 10 days
+  const handlePrices = prices.slice(-10);
+  const handleHigh = Math.max(...handlePrices.slice(0, 5));
+  const handleLow = Math.min(...handlePrices);
   const handleDepth = ((handleHigh - handleLow) / handleHigh) * 100;
   
-  // Handle depth must be 8-12% (not too deep)
-  if (handleDepth < 5 || handleDepth > 15) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Handle depth out of range (need 5-15%)' };
+  if (handleDepth > 15) return { ...notDetected, statusReason: `Handle too deep (${handleDepth.toFixed(1)}%)` };
   
   const currentPrice = prices[prices.length - 1];
-  const resistance = handleHigh;
+  const resistance = Math.max(cupStart, cupEnd, handleHigh);
   const avgVolume = getAvgVolume(candles);
   const currentVolume = volumes[volumes.length - 1];
-  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 0;
+  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
   
-  // STRICT: Must have broken above resistance
+  // Check for breakout
   const breakout = currentPrice > resistance;
   const priceAboveBreakout = breakout ? ((currentPrice - resistance) / resistance * 100) : 0;
   
-  // STRICT: Volume must confirm (50%+ above average)
-  const volumeConfirmed = isVolumeConfirmed(currentVolume, avgVolume);
-  
-  // Pattern detected but not confirmed
-  if (!breakout) {
-    return { 
-      detected: true, 
-      confirmed: false, 
-      confidence: 30,
-      failureReason: 'Waiting for breakout above resistance',
-      target: resistance + (cupStart - cupBottom),
-      volumeRatio
-    };
-  }
-  
-  // CONFIRMED: Breakout + Volume
-  const confirmed = breakout && volumeConfirmed;
+  // Calculate target
   const target = resistance + (cupStart - cupBottom);
   const stopLoss = handleLow * 0.98;
   
-  // Calculate confidence based on multiple factors
-  let confidence = 50;
-  if (breakout) confidence += 20;
-  if (volumeConfirmed) confidence += 20;
-  if (priceAboveBreakout >= 3) confidence += 5;  // 3%+ above breakout
-  if (cupDepth >= 15 && cupDepth <= 25) confidence += 5;  // Ideal depth
-  
-  return {
-    detected: true,
-    confirmed,
-    confidence: Math.min(95, confidence),
-    target,
-    stopLoss,
-    upside: ((target - currentPrice) / currentPrice * 100).toFixed(1),
-    volumeRatio: Math.round(volumeRatio * 100) / 100,
-    priceAboveBreakout: Math.round(priceAboveBreakout * 100) / 100
-  };
-}
-
-// BULLISH: Inverse Head & Shoulders (89% success rate)
-// STRICT: Requires neckline break + 30% volume increase
-function detectInverseHeadShoulders(candles: PatternCandle[]): PatternResult {
-  if (candles.length < 40) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Insufficient data' };
-  
-  const recent = candles.slice(-40);
-  const prices = recent.map(c => c.close);
-  const volumes = recent.map(c => c.volume);
-  
-  // Find significant lows (potential shoulders and head)
-  const lows: { idx: number; price: number }[] = [];
-  for (let i = 3; i < prices.length - 3; i++) {
-    if (prices[i] < prices[i-1] && prices[i] < prices[i-2] && prices[i] < prices[i-3] &&
-        prices[i] < prices[i+1] && prices[i] < prices[i+2]) {
-      lows.push({ idx: i, price: prices[i] });
-    }
-  }
-  
-  if (lows.length < 3) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Need 3 distinct lows' };
-  
-  // Find the deepest low (head) and validate shoulders
-  let bestPattern: { leftShoulder: any; head: any; rightShoulder: any } | null = null;
-  
-  for (let i = 0; i < lows.length - 2; i++) {
-    for (let j = i + 1; j < lows.length - 1; j++) {
-      for (let k = j + 1; k < lows.length; k++) {
-        const ls = lows[i];
-        const h = lows[j];
-        const rs = lows[k];
-        
-        // Head must be lower than both shoulders
-        if (h.price < ls.price && h.price < rs.price) {
-          // Shoulders should be within 5% of each other
-          const shoulderDiff = Math.abs(ls.price - rs.price) / ls.price;
-          if (shoulderDiff <= 0.05) {
-            // Head should be at least 5% lower than shoulders
-            const headDepth = (ls.price - h.price) / ls.price;
-            if (headDepth >= 0.05) {
-              bestPattern = { leftShoulder: ls, head: h, rightShoulder: rs };
-            }
-          }
-        }
-      }
-    }
-  }
-  
-  if (!bestPattern) return { detected: false, confirmed: false, confidence: 0, failureReason: 'No valid H&S structure' };
-  
-  const { leftShoulder, head, rightShoulder } = bestPattern;
-  
-  // Calculate neckline (connecting highs between shoulders and head)
-  const leftPeak = Math.max(...prices.slice(leftShoulder.idx, head.idx));
-  const rightPeak = Math.max(...prices.slice(head.idx, rightShoulder.idx + 1));
-  const neckline = Math.min(leftPeak, rightPeak);
-  
-  const currentPrice = prices[prices.length - 1];
-  const avgVolume = getAvgVolume(candles);
-  const currentVolume = volumes[volumes.length - 1];
-  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 0;
-  
-  const breakout = currentPrice > neckline;
-  const priceAboveBreakout = breakout ? ((currentPrice - neckline) / neckline * 100) : 0;
-  const volumeConfirmed = currentVolume >= avgVolume * 1.3;  // 30% for H&S per research
-  
-  if (!breakout) {
-    return {
-      detected: true,
-      confirmed: false,
-      confidence: 25,
-      failureReason: 'Waiting for neckline breakout',
-      target: neckline + (neckline - head.price),
-      volumeRatio
-    };
-  }
-  
-  const confirmed = breakout && volumeConfirmed;
-  const target = neckline + (neckline - head.price);
-  const stopLoss = rightShoulder.price * 0.98;
-  
+  // Determine status and confidence
+  let status: 'CONFIRMED' | 'FORMING' | 'NOT_DETECTED' = 'FORMING';
   let confidence = 45;
-  if (breakout) confidence += 25;
-  if (volumeConfirmed) confidence += 20;
-  if (priceAboveBreakout >= 3) confidence += 5;
+  let statusReason = `Forming: Price at $${currentPrice.toFixed(2)}, resistance at $${resistance.toFixed(2)}`;
+  
+  if (breakout) {
+    status = 'CONFIRMED';
+    confidence = 70;
+    statusReason = `CONFIRMED: Broke above $${resistance.toFixed(2)} resistance`;
+    
+    if (priceAboveBreakout >= 2) confidence += 10;
+    if (volumeRatio >= 1.25) confidence += 10;
+    if (isVolumeIncreasing(candles)) confidence += 5;
+  } else {
+    // Still forming - how close to breakout?
+    const proximityToBreakout = ((resistance - currentPrice) / resistance * 100);
+    if (proximityToBreakout < 2) {
+      confidence = 55;
+      statusReason = `Near breakout: ${proximityToBreakout.toFixed(1)}% from resistance`;
+    }
+  }
   
   return {
     detected: true,
-    confirmed,
+    confirmed: breakout,
     confidence: Math.min(95, confidence),
     target,
     stopLoss,
     upside: ((target - currentPrice) / currentPrice * 100).toFixed(1),
     volumeRatio: Math.round(volumeRatio * 100) / 100,
-    priceAboveBreakout: Math.round(priceAboveBreakout * 100) / 100
+    priceAboveBreakout: Math.round(priceAboveBreakout * 100) / 100,
+    status,
+    statusReason,
   };
 }
 
 // BULLISH: Double Bottom (88% success rate)
-// STRICT: Requires breakout above neckline + volume confirmation
 function detectDoubleBottom(candles: PatternCandle[]): PatternResult {
-  if (candles.length < 30) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Insufficient data' };
+  const notDetected: PatternResult = { detected: false, confirmed: false, confidence: 0, status: 'NOT_DETECTED', statusReason: 'Pattern not found' };
+  
+  if (candles.length < 25) return { ...notDetected, statusReason: 'Insufficient data' };
   
   const recent = candles.slice(-30);
   const prices = recent.map(c => c.close);
   const volumes = recent.map(c => c.volume);
   
-  // Find significant lows
+  // Find local minimums
   const lows: { idx: number; price: number }[] = [];
   for (let i = 2; i < prices.length - 2; i++) {
     if (prices[i] < prices[i-1] && prices[i] < prices[i-2] &&
@@ -468,178 +384,79 @@ function detectDoubleBottom(candles: PatternCandle[]): PatternResult {
     }
   }
   
-  if (lows.length < 2) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Need 2 distinct lows' };
+  if (lows.length < 2) return { ...notDetected, statusReason: 'Need 2 distinct lows' };
   
-  // Find two bottoms within 3% of each other (research-backed)
-  let bestPair: { bottom1: any; bottom2: any } | null = null;
-  
+  // Find two bottoms that are close in price (within 4%)
+  let bestPair: { bottom1: typeof lows[0]; bottom2: typeof lows[0] } | null = null;
   for (let i = 0; i < lows.length - 1; i++) {
     for (let j = i + 1; j < lows.length; j++) {
       const diff = Math.abs(lows[i].price - lows[j].price) / lows[i].price;
-      // Bottoms must be within 3% AND separated by at least 10 days
-      if (diff <= 0.03 && (lows[j].idx - lows[i].idx) >= 10) {
+      const distance = lows[j].idx - lows[i].idx;
+      if (diff <= 0.04 && distance >= 7 && distance <= 25) {
         bestPair = { bottom1: lows[i], bottom2: lows[j] };
+        break;
       }
     }
+    if (bestPair) break;
   }
   
-  if (!bestPair) return { detected: false, confirmed: false, confidence: 0, failureReason: 'No matching double bottom' };
+  if (!bestPair) return { ...notDetected, statusReason: 'No matching double bottom found' };
   
   const { bottom1, bottom2 } = bestPair;
   
-  // Find the peak (neckline) between the two bottoms
+  // Find the peak (neckline) between bottoms
   const middleSection = prices.slice(bottom1.idx, bottom2.idx + 1);
-  if (middleSection.length < 5) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Peak too narrow' };
-  
   const neckline = Math.max(...middleSection);
+  
   const currentPrice = prices[prices.length - 1];
   const avgVolume = getAvgVolume(candles);
   const currentVolume = volumes[volumes.length - 1];
-  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 0;
+  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
   
   const breakout = currentPrice > neckline;
   const priceAboveBreakout = breakout ? ((currentPrice - neckline) / neckline * 100) : 0;
-  const volumeConfirmed = isVolumeConfirmed(currentVolume, avgVolume);
   
-  if (!breakout) {
-    return {
-      detected: true,
-      confirmed: false,
-      confidence: 25,
-      failureReason: 'Waiting for neckline breakout',
-      target: neckline + (neckline - bottom1.price),
-      volumeRatio
-    };
-  }
-  
-  const confirmed = breakout && volumeConfirmed;
   const bottomAvg = (bottom1.price + bottom2.price) / 2;
   const target = neckline + (neckline - bottomAvg);
   const stopLoss = bottomAvg * 0.98;
   
+  let status: 'CONFIRMED' | 'FORMING' | 'NOT_DETECTED' = 'FORMING';
   let confidence = 45;
-  if (breakout) confidence += 25;
-  if (volumeConfirmed) confidence += 20;
-  if (priceAboveBreakout >= 3) confidence += 5;
+  let statusReason = `Forming: Neckline at $${neckline.toFixed(2)}`;
+  
+  if (breakout) {
+    status = 'CONFIRMED';
+    confidence = 70;
+    statusReason = `CONFIRMED: Broke above $${neckline.toFixed(2)} neckline`;
+    if (priceAboveBreakout >= 2) confidence += 10;
+    if (volumeRatio >= 1.25) confidence += 10;
+  }
   
   return {
     detected: true,
-    confirmed,
-    confidence: Math.min(95, confidence),
+    confirmed: breakout,
+    confidence: Math.min(90, confidence),
     target,
     stopLoss,
     upside: ((target - currentPrice) / currentPrice * 100).toFixed(1),
     volumeRatio: Math.round(volumeRatio * 100) / 100,
-    priceAboveBreakout: Math.round(priceAboveBreakout * 100) / 100
-  };
-}
-
-// BEARISH: Head & Shoulders (89% success rate)
-// STRICT: Requires neckline breakdown + volume confirmation
-function detectHeadShoulders(candles: PatternCandle[]): PatternResult {
-  if (candles.length < 40) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Insufficient data' };
-  
-  const recent = candles.slice(-40);
-  const prices = recent.map(c => c.close);
-  const volumes = recent.map(c => c.volume);
-  
-  // Find significant highs (potential shoulders and head)
-  const highs: { idx: number; price: number }[] = [];
-  for (let i = 3; i < prices.length - 3; i++) {
-    if (prices[i] > prices[i-1] && prices[i] > prices[i-2] && prices[i] > prices[i-3] &&
-        prices[i] > prices[i+1] && prices[i] > prices[i+2]) {
-      highs.push({ idx: i, price: prices[i] });
-    }
-  }
-  
-  if (highs.length < 3) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Need 3 distinct highs' };
-  
-  // Find the highest high (head) and validate shoulders
-  let bestPattern: { leftShoulder: any; head: any; rightShoulder: any } | null = null;
-  
-  for (let i = 0; i < highs.length - 2; i++) {
-    for (let j = i + 1; j < highs.length - 1; j++) {
-      for (let k = j + 1; k < highs.length; k++) {
-        const ls = highs[i];
-        const h = highs[j];
-        const rs = highs[k];
-        
-        // Head must be higher than both shoulders
-        if (h.price > ls.price && h.price > rs.price) {
-          // Shoulders should be within 5% of each other
-          const shoulderDiff = Math.abs(ls.price - rs.price) / ls.price;
-          if (shoulderDiff <= 0.05) {
-            // Head should be at least 5% higher than shoulders
-            const headHeight = (h.price - ls.price) / ls.price;
-            if (headHeight >= 0.05) {
-              bestPattern = { leftShoulder: ls, head: h, rightShoulder: rs };
-            }
-          }
-        }
-      }
-    }
-  }
-  
-  if (!bestPattern) return { detected: false, confirmed: false, confidence: 0, failureReason: 'No valid H&S structure' };
-  
-  const { leftShoulder, head, rightShoulder } = bestPattern;
-  
-  // Calculate neckline (connecting lows between shoulders and head)
-  const leftTrough = Math.min(...prices.slice(leftShoulder.idx, head.idx));
-  const rightTrough = Math.min(...prices.slice(head.idx, rightShoulder.idx + 1));
-  const neckline = Math.max(leftTrough, rightTrough);
-  
-  const currentPrice = prices[prices.length - 1];
-  const avgVolume = getAvgVolume(candles);
-  const currentVolume = volumes[volumes.length - 1];
-  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 0;
-  
-  const breakdown = currentPrice < neckline;
-  const priceBelowBreakdown = breakdown ? ((neckline - currentPrice) / neckline * 100) : 0;
-  const volumeConfirmed = currentVolume >= avgVolume * 1.3;
-  
-  if (!breakdown) {
-    return {
-      detected: true,
-      confirmed: false,
-      confidence: 25,
-      failureReason: 'Waiting for neckline breakdown',
-      target: neckline - (head.price - neckline),
-      volumeRatio
-    };
-  }
-  
-  const confirmed = breakdown && volumeConfirmed;
-  const target = neckline - (head.price - neckline);
-  const stopLoss = rightShoulder.price * 1.02;
-  
-  let confidence = 45;
-  if (breakdown) confidence += 25;
-  if (volumeConfirmed) confidence += 20;
-  if (priceBelowBreakdown >= 3) confidence += 5;
-  
-  return {
-    detected: true,
-    confirmed,
-    confidence: Math.min(95, confidence),
-    target,
-    stopLoss,
-    downside: ((currentPrice - target) / currentPrice * 100).toFixed(1),
-    volumeRatio: Math.round(volumeRatio * 100) / 100,
-    priceAboveBreakout: -Math.round(priceBelowBreakdown * 100) / 100
+    priceAboveBreakout: Math.round(priceAboveBreakout * 100) / 100,
+    status,
+    statusReason,
   };
 }
 
 // BEARISH: Double Top (75% success rate)
-// STRICT: Requires breakdown below neckline + volume confirmation
 function detectDoubleTop(candles: PatternCandle[]): PatternResult {
-  if (candles.length < 30) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Insufficient data' };
+  const notDetected: PatternResult = { detected: false, confirmed: false, confidence: 0, status: 'NOT_DETECTED', statusReason: 'Pattern not found' };
+  
+  if (candles.length < 25) return { ...notDetected, statusReason: 'Insufficient data' };
   
   const recent = candles.slice(-30);
   const prices = recent.map(c => c.close);
   const volumes = recent.map(c => c.volume);
   
-  // Find significant highs
+  // Find local maximums
   const highs: { idx: number; price: number }[] = [];
   for (let i = 2; i < prices.length - 2; i++) {
     if (prices[i] > prices[i-1] && prices[i] > prices[i-2] &&
@@ -648,72 +465,257 @@ function detectDoubleTop(candles: PatternCandle[]): PatternResult {
     }
   }
   
-  if (highs.length < 2) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Need 2 distinct highs' };
+  if (highs.length < 2) return { ...notDetected, statusReason: 'Need 2 distinct highs' };
   
-  // Find two tops within 3% of each other
-  let bestPair: { top1: any; top2: any } | null = null;
-  
+  // Find two tops that are close in price
+  let bestPair: { top1: typeof highs[0]; top2: typeof highs[0] } | null = null;
   for (let i = 0; i < highs.length - 1; i++) {
     for (let j = i + 1; j < highs.length; j++) {
       const diff = Math.abs(highs[i].price - highs[j].price) / highs[i].price;
-      if (diff <= 0.03 && (highs[j].idx - highs[i].idx) >= 10) {
+      const distance = highs[j].idx - highs[i].idx;
+      if (diff <= 0.04 && distance >= 7 && distance <= 25) {
         bestPair = { top1: highs[i], top2: highs[j] };
+        break;
       }
     }
+    if (bestPair) break;
   }
   
-  if (!bestPair) return { detected: false, confirmed: false, confidence: 0, failureReason: 'No matching double top' };
+  if (!bestPair) return { ...notDetected, statusReason: 'No matching double top found' };
   
   const { top1, top2 } = bestPair;
   
-  // Find the trough (neckline) between the two tops
+  // Find the trough (neckline) between tops
   const middleSection = prices.slice(top1.idx, top2.idx + 1);
-  if (middleSection.length < 5) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Trough too narrow' };
-  
   const neckline = Math.min(...middleSection);
+  
   const currentPrice = prices[prices.length - 1];
   const avgVolume = getAvgVolume(candles);
   const currentVolume = volumes[volumes.length - 1];
-  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 0;
+  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
   
   const breakdown = currentPrice < neckline;
   const priceBelowBreakdown = breakdown ? ((neckline - currentPrice) / neckline * 100) : 0;
-  const volumeConfirmed = isVolumeConfirmed(currentVolume, avgVolume);
   
-  if (!breakdown) {
-    return {
-      detected: true,
-      confirmed: false,
-      confidence: 20,
-      failureReason: 'Waiting for neckline breakdown',
-      target: neckline - (top1.price - neckline),
-      volumeRatio
-    };
-  }
-  
-  const confirmed = breakdown && volumeConfirmed;
   const topAvg = (top1.price + top2.price) / 2;
   const target = neckline - (topAvg - neckline);
   const stopLoss = topAvg * 1.02;
   
+  let status: 'CONFIRMED' | 'FORMING' | 'NOT_DETECTED' = 'FORMING';
   let confidence = 40;
-  if (breakdown) confidence += 20;
-  if (volumeConfirmed) confidence += 15;
-  if (priceBelowBreakdown >= 3) confidence += 5;
+  let statusReason = `Forming: Neckline support at $${neckline.toFixed(2)}`;
+  
+  if (breakdown) {
+    status = 'CONFIRMED';
+    confidence = 65;
+    statusReason = `CONFIRMED: Broke below $${neckline.toFixed(2)} support`;
+    if (priceBelowBreakdown >= 2) confidence += 10;
+    if (volumeRatio >= 1.25) confidence += 10;
+  }
   
   return {
     detected: true,
-    confirmed,
-    confidence: Math.min(90, confidence),  // Lower max for double top (75% success rate)
+    confirmed: breakdown,
+    confidence: Math.min(85, confidence),
     target,
     stopLoss,
     downside: ((currentPrice - target) / currentPrice * 100).toFixed(1),
     volumeRatio: Math.round(volumeRatio * 100) / 100,
-    priceAboveBreakout: -Math.round(priceBelowBreakdown * 100) / 100
+    priceAboveBreakout: -Math.round(priceBelowBreakdown * 100) / 100,
+    status,
+    statusReason,
   };
 }
 
-// Main pattern detection wrapper - ONLY returns CONFIRMED patterns
+// BULLISH: Inverse Head & Shoulders (89% success rate)
+function detectInverseHeadShoulders(candles: PatternCandle[]): PatternResult {
+  const notDetected: PatternResult = { detected: false, confirmed: false, confidence: 0, status: 'NOT_DETECTED', statusReason: 'Pattern not found' };
+  
+  if (candles.length < 35) return { ...notDetected, statusReason: 'Insufficient data' };
+  
+  const recent = candles.slice(-40);
+  const prices = recent.map(c => c.close);
+  const volumes = recent.map(c => c.volume);
+  
+  // Find local minimums (potential shoulders and head)
+  const lows: { idx: number; price: number }[] = [];
+  for (let i = 3; i < prices.length - 3; i++) {
+    if (prices[i] < prices[i-1] && prices[i] < prices[i-2] &&
+        prices[i] < prices[i+1] && prices[i] < prices[i+2]) {
+      lows.push({ idx: i, price: prices[i] });
+    }
+  }
+  
+  if (lows.length < 3) return { ...notDetected, statusReason: 'Need 3 distinct lows' };
+  
+  // Find pattern: left shoulder - head (lowest) - right shoulder
+  let bestPattern: { ls: typeof lows[0]; head: typeof lows[0]; rs: typeof lows[0] } | null = null;
+  
+  for (let i = 0; i < lows.length - 2; i++) {
+    for (let j = i + 1; j < lows.length - 1; j++) {
+      for (let k = j + 1; k < lows.length; k++) {
+        const ls = lows[i];
+        const head = lows[j];
+        const rs = lows[k];
+        
+        // Head must be lower than both shoulders
+        if (head.price < ls.price && head.price < rs.price) {
+          // Shoulders should be similar height (within 5%)
+          const shoulderDiff = Math.abs(ls.price - rs.price) / ls.price;
+          // Head should be meaningfully lower (at least 3%)
+          const headDepth = (ls.price - head.price) / ls.price;
+          
+          if (shoulderDiff <= 0.05 && headDepth >= 0.03) {
+            bestPattern = { ls, head, rs };
+            break;
+          }
+        }
+      }
+      if (bestPattern) break;
+    }
+    if (bestPattern) break;
+  }
+  
+  if (!bestPattern) return { ...notDetected, statusReason: 'No valid inverse H&S structure' };
+  
+  const { ls, head, rs } = bestPattern;
+  
+  // Calculate neckline
+  const leftPeak = Math.max(...prices.slice(ls.idx, head.idx));
+  const rightPeak = Math.max(...prices.slice(head.idx, rs.idx + 1));
+  const neckline = (leftPeak + rightPeak) / 2;
+  
+  const currentPrice = prices[prices.length - 1];
+  const avgVolume = getAvgVolume(candles);
+  const currentVolume = volumes[volumes.length - 1];
+  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
+  
+  const breakout = currentPrice > neckline;
+  const priceAboveBreakout = breakout ? ((currentPrice - neckline) / neckline * 100) : 0;
+  
+  const target = neckline + (neckline - head.price);
+  const stopLoss = rs.price * 0.98;
+  
+  let status: 'CONFIRMED' | 'FORMING' | 'NOT_DETECTED' = 'FORMING';
+  let confidence = 50;
+  let statusReason = `Forming: Neckline at $${neckline.toFixed(2)}`;
+  
+  if (breakout) {
+    status = 'CONFIRMED';
+    confidence = 75;
+    statusReason = `CONFIRMED: Broke above $${neckline.toFixed(2)} neckline`;
+    if (priceAboveBreakout >= 2) confidence += 10;
+    if (volumeRatio >= 1.25) confidence += 5;
+  }
+  
+  return {
+    detected: true,
+    confirmed: breakout,
+    confidence: Math.min(90, confidence),
+    target,
+    stopLoss,
+    upside: ((target - currentPrice) / currentPrice * 100).toFixed(1),
+    volumeRatio: Math.round(volumeRatio * 100) / 100,
+    priceAboveBreakout: Math.round(priceAboveBreakout * 100) / 100,
+    status,
+    statusReason,
+  };
+}
+
+// BEARISH: Head & Shoulders (89% success rate)
+function detectHeadShoulders(candles: PatternCandle[]): PatternResult {
+  const notDetected: PatternResult = { detected: false, confirmed: false, confidence: 0, status: 'NOT_DETECTED', statusReason: 'Pattern not found' };
+  
+  if (candles.length < 35) return { ...notDetected, statusReason: 'Insufficient data' };
+  
+  const recent = candles.slice(-40);
+  const prices = recent.map(c => c.close);
+  const volumes = recent.map(c => c.volume);
+  
+  // Find local maximums
+  const highs: { idx: number; price: number }[] = [];
+  for (let i = 3; i < prices.length - 3; i++) {
+    if (prices[i] > prices[i-1] && prices[i] > prices[i-2] &&
+        prices[i] > prices[i+1] && prices[i] > prices[i+2]) {
+      highs.push({ idx: i, price: prices[i] });
+    }
+  }
+  
+  if (highs.length < 3) return { ...notDetected, statusReason: 'Need 3 distinct highs' };
+  
+  // Find pattern: left shoulder - head (highest) - right shoulder
+  let bestPattern: { ls: typeof highs[0]; head: typeof highs[0]; rs: typeof highs[0] } | null = null;
+  
+  for (let i = 0; i < highs.length - 2; i++) {
+    for (let j = i + 1; j < highs.length - 1; j++) {
+      for (let k = j + 1; k < highs.length; k++) {
+        const ls = highs[i];
+        const head = highs[j];
+        const rs = highs[k];
+        
+        // Head must be higher than both shoulders
+        if (head.price > ls.price && head.price > rs.price) {
+          const shoulderDiff = Math.abs(ls.price - rs.price) / ls.price;
+          const headHeight = (head.price - ls.price) / ls.price;
+          
+          if (shoulderDiff <= 0.05 && headHeight >= 0.03) {
+            bestPattern = { ls, head, rs };
+            break;
+          }
+        }
+      }
+      if (bestPattern) break;
+    }
+    if (bestPattern) break;
+  }
+  
+  if (!bestPattern) return { ...notDetected, statusReason: 'No valid H&S structure' };
+  
+  const { ls, head, rs } = bestPattern;
+  
+  // Calculate neckline
+  const leftTrough = Math.min(...prices.slice(ls.idx, head.idx));
+  const rightTrough = Math.min(...prices.slice(head.idx, rs.idx + 1));
+  const neckline = (leftTrough + rightTrough) / 2;
+  
+  const currentPrice = prices[prices.length - 1];
+  const avgVolume = getAvgVolume(candles);
+  const currentVolume = volumes[volumes.length - 1];
+  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 1;
+  
+  const breakdown = currentPrice < neckline;
+  const priceBelowBreakdown = breakdown ? ((neckline - currentPrice) / neckline * 100) : 0;
+  
+  const target = neckline - (head.price - neckline);
+  const stopLoss = rs.price * 1.02;
+  
+  let status: 'CONFIRMED' | 'FORMING' | 'NOT_DETECTED' = 'FORMING';
+  let confidence = 50;
+  let statusReason = `Forming: Neckline support at $${neckline.toFixed(2)}`;
+  
+  if (breakdown) {
+    status = 'CONFIRMED';
+    confidence = 75;
+    statusReason = `CONFIRMED: Broke below $${neckline.toFixed(2)} neckline`;
+    if (priceBelowBreakdown >= 2) confidence += 10;
+    if (volumeRatio >= 1.25) confidence += 5;
+  }
+  
+  return {
+    detected: true,
+    confirmed: breakdown,
+    confidence: Math.min(90, confidence),
+    target,
+    stopLoss,
+    downside: ((currentPrice - target) / currentPrice * 100).toFixed(1),
+    volumeRatio: Math.round(volumeRatio * 100) / 100,
+    priceAboveBreakout: -Math.round(priceBelowBreakdown * 100) / 100,
+    status,
+    statusReason,
+  };
+}
+
+// Main pattern detection wrapper
 function detectAllPatterns(candles: PatternCandle[]) {
   const allPatterns: { 
     name: string; 
@@ -748,10 +750,11 @@ function detectAllPatterns(candles: PatternCandle[]) {
     allPatterns.push({ name: 'Double Top', type: 'BEARISH', successRate: 75, result: dblTop });
   }
   
-  // STRICT FILTERING: Only show CONFIRMED patterns with HIGH confidence
-  const confirmedPatterns = allPatterns.filter(p => p.result.confirmed && p.result.confidence >= 70);
+  // Separate confirmed and forming patterns
+  const confirmedPatterns = allPatterns.filter(p => p.result.confirmed);
+  const formingPatterns = allPatterns.filter(p => !p.result.confirmed);
   
-  // Calculate dominant direction
+  // Calculate dominant direction from confirmed patterns
   const confirmedBullish = confirmedPatterns.filter(p => p.type === 'BULLISH');
   const confirmedBearish = confirmedPatterns.filter(p => p.type === 'BEARISH');
   
@@ -763,39 +766,51 @@ function detectAllPatterns(candles: PatternCandle[]) {
     confirmedPatterns.sort((a, b) => b.result.confidence - a.result.confidence);
     dominantPattern = confirmedPatterns[0];
     dominantDirection = dominantPattern.type;
+  } else if (formingPatterns.length > 0) {
+    // If no confirmed, check forming patterns
+    formingPatterns.sort((a, b) => b.result.confidence - a.result.confidence);
+    const topForming = formingPatterns[0];
+    if (topForming.result.confidence >= 50) {
+      dominantDirection = topForming.type;
+    }
   }
   
-  // If conflicting CONFIRMED patterns exist, return NEUTRAL (don't trade)
-  if (confirmedBullish.length > 0 && confirmedBearish.length > 0) {
+  // Check for conflicts
+  const hasConflict = confirmedBullish.length > 0 && confirmedBearish.length > 0;
+  if (hasConflict) {
     dominantDirection = 'NEUTRAL';
     dominantPattern = null;
   }
   
-  // Calculate net score based on CONFIRMED patterns only
+  // Calculate scores
   let bullishScore = 0;
   let bearishScore = 0;
   
   for (const p of confirmedPatterns) {
     const weight = (p.result.confidence / 100) * (p.successRate / 100);
-    if (p.type === 'BULLISH') {
-      bullishScore += weight * 3;
-    } else {
-      bearishScore += weight * 3;
-    }
+    if (p.type === 'BULLISH') bullishScore += weight * 3;
+    else bearishScore += weight * 3;
+  }
+  
+  for (const p of formingPatterns) {
+    const weight = (p.result.confidence / 100) * (p.successRate / 100) * 0.5;
+    if (p.type === 'BULLISH') bullishScore += weight;
+    else bearishScore += weight;
   }
   
   const netScore = bullishScore - bearishScore;
   
   return { 
-    allDetected: allPatterns,  // All patterns found (including unconfirmed)
-    confirmed: confirmedPatterns,  // Only confirmed patterns
+    allDetected: allPatterns,
+    confirmed: confirmedPatterns,
+    forming: formingPatterns,
     dominantDirection,
     dominantPattern,
     bullishScore: Math.round(bullishScore * 100) / 100,
     bearishScore: Math.round(bearishScore * 100) / 100,
     netScore: Math.round(netScore * 100) / 100,
-    hasConflict: confirmedBullish.length > 0 && confirmedBearish.length > 0,
-    actionable: confirmedPatterns.length > 0 && !( confirmedBullish.length > 0 && confirmedBearish.length > 0)
+    hasConflict,
+    actionable: confirmedPatterns.length > 0 && !hasConflict
   };
 }
 
@@ -1542,7 +1557,7 @@ export async function GET(
 
     suggestions,
 
-    // NEW: Professional chart patterns detected - ONLY CONFIRMED PATTERNS
+    // NEW: Professional chart patterns detected
     chartPatterns: {
       // Only show confirmed, actionable patterns
       confirmed: chartPatterns.confirmed.map(p => ({
@@ -1550,13 +1565,24 @@ export async function GET(
         type: p.type,
         successRate: `${p.successRate}%`,
         confidence: p.result.confidence,
-        status: 'CONFIRMED',
+        status: p.result.status,
+        statusReason: p.result.statusReason,
         target: p.result.target ? `$${p.result.target.toFixed(2)}` : null,
         stopLoss: p.result.stopLoss ? `$${p.result.stopLoss.toFixed(2)}` : null,
         upside: p.result.upside || null,
         downside: p.result.downside || null,
         volumeRatio: p.result.volumeRatio,
         priceAboveBreakout: p.result.priceAboveBreakout,
+      })),
+      // Patterns that are forming but not yet confirmed
+      forming: (chartPatterns.forming || []).map(p => ({
+        name: p.name,
+        type: p.type,
+        successRate: `${p.successRate}%`,
+        confidence: p.result.confidence,
+        status: p.result.status,
+        statusReason: p.result.statusReason,
+        target: p.result.target ? `$${p.result.target.toFixed(2)}` : null,
       })),
       // Show all detected patterns (for transparency)
       allDetected: chartPatterns.allDetected.map(p => ({
@@ -1565,7 +1591,8 @@ export async function GET(
         successRate: `${p.successRate}%`,
         confirmed: p.result.confirmed,
         confidence: p.result.confidence,
-        failureReason: p.result.failureReason || null,
+        status: p.result.status,
+        statusReason: p.result.statusReason,
       })),
       dominantDirection: chartPatterns.dominantDirection,
       dominantPattern: chartPatterns.dominantPattern ? {
@@ -1582,8 +1609,8 @@ export async function GET(
         ? `✓ ${chartPatterns.confirmed.length} CONFIRMED ${chartPatterns.dominantDirection} pattern(s) - ACTIONABLE`
         : chartPatterns.hasConflict
           ? '⚠️ Conflicting patterns detected - DO NOT TRADE'
-          : chartPatterns.allDetected.length > 0
-            ? `${chartPatterns.allDetected.length} pattern(s) forming - waiting for confirmation`
+          : (chartPatterns.forming || []).length > 0
+            ? `${(chartPatterns.forming || []).length} pattern(s) forming - waiting for breakout confirmation`
             : 'No patterns detected',
       patternBonus,
     },

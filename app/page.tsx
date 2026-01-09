@@ -302,9 +302,19 @@ function StockTab({ data, loading, onTrack }: { data: any; loading: boolean; onT
         </div>
       </div>
 
-      {/* NEW: Chart Patterns Section - ONLY CONFIRMED PATTERNS */}
+      {/* NEW: Chart Patterns Section */}
       <div className="p-5 rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-950/30 to-pink-950/20">
         <h2 className="text-lg font-semibold text-white mb-4">📐 Chart Pattern Analysis</h2>
+        
+        {/* Educational Info */}
+        <details className="mb-4 p-2 rounded-lg bg-slate-800/30 border border-slate-700/50">
+          <summary className="text-xs text-blue-400 cursor-pointer hover:text-blue-300">ℹ️ How pattern confirmation works</summary>
+          <div className="mt-2 text-xs text-slate-400 space-y-1">
+            <p><strong className="text-emerald-400">CONFIRMED</strong> = Price has broken above resistance (bullish) or below support (bearish). Ready to act.</p>
+            <p><strong className="text-amber-400">FORMING</strong> = Pattern structure detected but waiting for breakout. Watch for confirmation.</p>
+            <p><strong className="text-white">Volume</strong> = Higher volume on breakout increases reliability.</p>
+          </div>
+        </details>
         
         {/* Pattern Summary */}
         <div className={`p-3 rounded-xl mb-4 ${
@@ -330,7 +340,7 @@ function StockTab({ data, loading, onTrack }: { data: any; loading: boolean; onT
         {/* Confirmed Patterns (Actionable) */}
         {data.chartPatterns?.confirmed?.length > 0 && (
           <div className="space-y-3 mb-4">
-            <p className="text-xs text-emerald-400 font-semibold">✓ CONFIRMED PATTERNS (Volume Validated)</p>
+            <p className="text-xs text-emerald-400 font-semibold">✓ CONFIRMED PATTERNS - ACTIONABLE</p>
             {data.chartPatterns.confirmed.map((pattern: any, i: number) => (
               <div key={i} className={`p-3 rounded-xl border ${
                 pattern.type === 'BULLISH' ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-red-500/50 bg-red-500/10'
@@ -348,6 +358,9 @@ function StockTab({ data, loading, onTrack }: { data: any; loading: boolean; onT
                     </span>
                   </div>
                 </div>
+                {pattern.statusReason && (
+                  <p className="text-xs text-emerald-300 mb-2">✓ {pattern.statusReason}</p>
+                )}
                 <div className="grid grid-cols-4 gap-2 text-xs">
                   {pattern.target && (
                     <div className="p-2 rounded bg-slate-800/50">
@@ -372,7 +385,7 @@ function StockTab({ data, loading, onTrack }: { data: any; loading: boolean; onT
                   {pattern.volumeRatio && (
                     <div className="p-2 rounded bg-slate-800/50">
                       <p className="text-slate-400">Volume</p>
-                      <p className={`font-bold ${pattern.volumeRatio >= 1.5 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      <p className={`font-bold ${pattern.volumeRatio >= 1.25 ? 'text-emerald-400' : 'text-amber-400'}`}>
                         {pattern.volumeRatio}x avg
                       </p>
                     </div>
@@ -383,26 +396,29 @@ function StockTab({ data, loading, onTrack }: { data: any; loading: boolean; onT
           </div>
         )}
 
-        {/* Unconfirmed Patterns (Forming) */}
-        {data.chartPatterns?.allDetected?.filter((p: any) => !p.confirmed).length > 0 && (
-          <details className="mt-3">
-            <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-300">
-              📊 {data.chartPatterns.allDetected.filter((p: any) => !p.confirmed).length} pattern(s) forming (not confirmed)
-            </summary>
-            <div className="mt-2 space-y-2">
-              {data.chartPatterns.allDetected.filter((p: any) => !p.confirmed).map((pattern: any, i: number) => (
-                <div key={i} className="p-2 rounded bg-slate-800/30 text-xs">
-                  <div className="flex justify-between">
-                    <span className="text-slate-300">{pattern.name}</span>
-                    <span className="text-slate-500">{pattern.confidence}% confidence</span>
+        {/* Forming Patterns (Watch List) */}
+        {data.chartPatterns?.forming?.length > 0 && (
+          <div className="mt-3 p-3 rounded-xl border border-amber-500/30 bg-amber-500/5">
+            <p className="text-xs text-amber-400 font-semibold mb-2">⏳ FORMING PATTERNS - Watch for Breakout</p>
+            <div className="space-y-2">
+              {data.chartPatterns.forming.map((pattern: any, i: number) => (
+                <div key={i} className="p-2 rounded bg-slate-800/30">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-white">
+                      {pattern.type === 'BULLISH' ? '📈' : '📉'} {pattern.name}
+                    </span>
+                    <span className="text-xs text-slate-400">{pattern.confidence}% confidence</span>
                   </div>
-                  {pattern.failureReason && (
-                    <p className="text-slate-500 mt-1">⏳ {pattern.failureReason}</p>
+                  {pattern.statusReason && (
+                    <p className="text-xs text-amber-300 mt-1">⏳ {pattern.statusReason}</p>
+                  )}
+                  {pattern.target && (
+                    <p className="text-xs text-slate-500 mt-1">Target on breakout: {pattern.target}</p>
                   )}
                 </div>
               ))}
             </div>
-          </details>
+          </div>
         )}
 
         {/* No patterns at all */}
@@ -950,41 +966,150 @@ function OptionsTab({ data, loading, onTrack }: { data: any; loading: boolean; o
         <div className="p-5 rounded-2xl border border-orange-500/30 bg-gradient-to-br from-orange-950/20 to-red-950/10">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-orange-400">🔥 Unusual Options Activity</h2>
-            <span className="text-xs text-slate-500">10-180 DTE • Smart Money Tracking</span>
+            <span className="text-xs text-slate-500">Smart Money Detection</span>
           </div>
-          <div className="space-y-3">
+          
+          {/* What is Unusual Activity - Educational Box */}
+          <details className="mb-4 p-3 rounded-lg bg-slate-800/30 border border-slate-700/50">
+            <summary className="text-xs text-blue-400 cursor-pointer hover:text-blue-300">ℹ️ What does this mean?</summary>
+            <div className="mt-2 text-xs text-slate-400 space-y-2">
+              <p><strong className="text-white">Unusual Options Activity (UOA)</strong> = Options contracts trading at significantly higher volume than normal. Often indicates institutional investors ("smart money") positioning for a move.</p>
+              <p><strong className="text-amber-400">DIRECTIONAL</strong> = Trade likely a bet on price movement</p>
+              <p><strong className="text-purple-400">LIKELY_HEDGE</strong> = Trade likely protection/insurance against existing stock position</p>
+              <p><strong className="text-red-400">Insider Probability</strong> = Signals that could indicate insider knowledge (short-dated, OTM, high urgency)</p>
+            </div>
+          </details>
+          
+          <div className="space-y-4">
             {data.unusualActivity.slice(0, 5).map((u: any, i: number) => (
-              <div key={i} className={`p-3 rounded-xl border ${u.sentiment === 'BULLISH' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-white">{u.type === 'call' ? '📈' : '📉'} ${u.strike} {u.type?.toUpperCase()}</span>
+              <div key={i} className={`p-4 rounded-xl border ${u.sentiment === 'BULLISH' ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-red-500/40 bg-red-500/5'}`}>
+                
+                {/* Header with Strike, Type, and Expiration */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-lg text-white">
+                      {u.sentiment === 'BULLISH' ? '📈' : '📉'} ${u.contract?.strike || u.strike} {(u.contract?.type || u.type)?.toUpperCase()}
+                    </span>
+                    <span className="text-xs px-2 py-1 rounded bg-slate-700 text-slate-200">
+                      📅 {u.contract?.expiration || u.expiration || `${u.dte}d`} exp
+                    </span>
                     <span className={`text-xs px-2 py-0.5 rounded ${
                       u.convictionLevel === 'HIGH' ? 'bg-orange-500/30 text-orange-300' :
                       u.convictionLevel === 'MEDIUM' ? 'bg-amber-500/20 text-amber-400' :
                       'bg-slate-500/20 text-slate-400'
                     }`}>{u.convictionLevel || 'MEDIUM'} CONVICTION</span>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded ${u.sentiment === 'BULLISH' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{u.sentiment}</span>
+                  <span className={`text-sm px-3 py-1 rounded-lg font-bold ${u.sentiment === 'BULLISH' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{u.sentiment}</span>
                 </div>
-                <div className="grid grid-cols-5 gap-2 text-xs mb-2">
-                  <div><span className="text-slate-400">Vol:</span> <span className="text-amber-400 font-bold">{u.volume?.toLocaleString()}</span></div>
-                  <div><span className="text-slate-400">OI:</span> <span className="text-white">{u.openInterest?.toLocaleString()}</span></div>
-                  <div><span className="text-slate-400">V/OI:</span> <span className="text-orange-400 font-bold">{u.volumeOIRatio?.toFixed(1)}x</span></div>
-                  <div><span className="text-slate-400">DTE:</span> <span className="text-white">{u.dte}d</span></div>
-                  <div><span className="text-slate-400">$:</span> <span className="text-emerald-400">{u.premiumFormatted || `$${(u.premium/1000).toFixed(0)}K`}</span></div>
+                
+                {/* Trade Type Classification - PROMINENT */}
+                <div className={`p-3 rounded-lg mb-3 ${
+                  u.tradeType === 'DIRECTIONAL' ? 'bg-blue-500/10 border border-blue-500/30' :
+                  u.tradeType === 'LIKELY_HEDGE' ? 'bg-purple-500/10 border border-purple-500/30' :
+                  'bg-slate-700/30 border border-slate-600/30'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <span className={`font-bold text-sm ${
+                      u.tradeType === 'DIRECTIONAL' ? 'text-blue-400' :
+                      u.tradeType === 'LIKELY_HEDGE' ? 'text-purple-400' :
+                      'text-slate-300'
+                    }`}>
+                      {u.tradeType === 'DIRECTIONAL' ? '🎯 DIRECTIONAL BET' :
+                       u.tradeType === 'LIKELY_HEDGE' ? '🛡️ LIKELY HEDGE' :
+                       '❓ UNCERTAIN'}
+                    </span>
+                    {/* Insider Probability - VERY PROMINENT */}
+                    {u.insiderProbability && u.insiderProbability !== 'UNLIKELY' && (
+                      <span className={`text-xs px-2 py-1 rounded font-bold ${
+                        u.insiderProbability === 'HIGH' ? 'bg-red-500/30 text-red-300 animate-pulse' :
+                        u.insiderProbability === 'MEDIUM' ? 'bg-orange-500/20 text-orange-300' :
+                        'bg-amber-500/10 text-amber-400'
+                      }`}>
+                        🔍 {u.insiderProbability} INSIDER PROB
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">{u.tradeTypeReason || u.interpretation}</p>
                 </div>
-                <div className="flex flex-wrap gap-1 mb-2">
-                  {u.signals?.slice(0, 4).map((s: string, j: number) => (
+                
+                {/* Insider Signals - if present */}
+                {u.insiderSignals?.length > 0 && (
+                  <div className="mb-3 p-2 rounded bg-red-500/5 border border-red-500/20">
+                    <p className="text-xs text-red-400 font-medium mb-1">🔍 Why Insider Activity Suspected:</p>
+                    <ul className="text-xs text-slate-400 space-y-0.5">
+                      {u.insiderSignals.map((sig: string, j: number) => (
+                        <li key={j}>• {sig}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
+                {/* Key Stats Grid */}
+                <div className="grid grid-cols-5 gap-2 text-xs mb-3">
+                  <div className="p-2 rounded bg-slate-800/50 text-center">
+                    <p className="text-slate-400">Volume</p>
+                    <p className="text-amber-400 font-bold">{u.contract?.volume?.toLocaleString() || u.volume?.toLocaleString()}</p>
+                  </div>
+                  <div className="p-2 rounded bg-slate-800/50 text-center">
+                    <p className="text-slate-400">Open Int</p>
+                    <p className="text-white font-bold">{u.contract?.openInterest?.toLocaleString() || u.openInterest?.toLocaleString()}</p>
+                  </div>
+                  <div className="p-2 rounded bg-slate-800/50 text-center">
+                    <p className="text-slate-400">Vol/OI</p>
+                    <p className="text-orange-400 font-bold">{(u.contract?.volumeOIRatio || u.volumeOIRatio)?.toFixed(1)}x</p>
+                  </div>
+                  <div className="p-2 rounded bg-slate-800/50 text-center">
+                    <p className="text-slate-400">DTE</p>
+                    <p className="text-white font-bold">{u.contract?.dte || u.dte}d</p>
+                  </div>
+                  <div className="p-2 rounded bg-slate-800/50 text-center">
+                    <p className="text-slate-400">Premium</p>
+                    <p className="text-emerald-400 font-bold">${u.premiumValue ? (u.premiumValue/1000).toFixed(0) + 'K' : 'N/A'}</p>
+                  </div>
+                </div>
+                
+                {/* Signals */}
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {u.signals?.slice(0, 5).map((s: string, j: number) => (
                     <span key={j} className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300">{s}</span>
                   ))}
                 </div>
-                {u.interpretation && (
-                  <p className="text-xs text-slate-400 italic border-t border-slate-700/50 pt-2 mt-2">💡 {u.interpretation}</p>
+                
+                {/* Track Button for Unusual Options */}
+                {onTrack && (
+                  <button
+                    onClick={async () => {
+                      const optionType = (u.contract?.type || u.type)?.toUpperCase();
+                      const res = await fetch('/api/tracker', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          ticker: data.ticker,
+                          type: optionType,
+                          strategy: `Unusual ${optionType}: $${u.contract?.strike || u.strike} ${u.contract?.expiration || ''} (${u.tradeType || 'UOA'})`,
+                          entryPrice: data.currentPrice,
+                          confidence: u.score || 70,
+                          reasoning: u.signals || [],
+                          optionContract: {
+                            strike: u.contract?.strike || u.strike,
+                            expiration: u.contract?.expiration || u.expiration || 'N/A',
+                            dte: u.contract?.dte || u.dte,
+                            delta: u.contract?.delta || 0.5,
+                            entryAsk: u.contract?.ask || u.contract?.mark || 1.00,
+                          },
+                        }),
+                      });
+                      const result = await res.json();
+                      onTrack(res.ok, result.message || result.error);
+                    }}
+                    className="w-full mt-2 px-4 py-2 rounded-lg bg-orange-500/20 text-orange-400 text-sm font-medium hover:bg-orange-500/30 transition-colors border border-orange-500/30"
+                  >
+                    📊 Track This Unusual Activity
+                  </button>
                 )}
               </div>
             ))}
           </div>
-          <p className="text-xs text-slate-500 mt-3">⚠️ Note: Large trades may be hedges, not directional bets. Always verify with price action.</p>
         </div>
       )}
 
@@ -1008,11 +1133,24 @@ function OptionsTab({ data, loading, onTrack }: { data: any; loading: boolean; o
                   </div>
                 )}
                 {sug.score && (
-                  <div className="flex gap-1 mb-2">
-                    <span className={`px-1.5 py-0.5 rounded text-xs ${sug.score.delta >= 1 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>Δ{sug.score.delta}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-xs ${sug.score.iv >= 1 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>IV{sug.score.iv}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-xs ${sug.score.liquidity >= 1 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>Liq{sug.score.liquidity}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-xs ${sug.score.unusual >= 1 ? 'bg-orange-500/20 text-orange-400' : 'bg-slate-700 text-slate-400'}`}>UOA{sug.score.unusual}</span>
+                  <div className="mb-2">
+                    <div className="flex gap-1 flex-wrap">
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${sug.score.delta >= 1 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`} title="Delta Score: How likely option finishes in-the-money">Δ{sug.score.delta}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${sug.score.iv >= 1 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`} title="IV Score: Implied Volatility pricing">IV{sug.score.iv}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${sug.score.liquidity >= 1 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`} title="Liquidity Score: Trading volume & bid/ask spread">Liq{sug.score.liquidity}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-xs ${sug.score.unusual >= 1 ? 'bg-orange-500/20 text-orange-400' : 'bg-slate-700 text-slate-400'}`} title="Unusual Activity Score: Smart money signals">UOA{sug.score.unusual}</span>
+                    </div>
+                    {/* Score Explanation */}
+                    <details className="mt-2">
+                      <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-400">ℹ️ What do these scores mean?</summary>
+                      <div className="mt-2 p-2 rounded bg-slate-800/50 text-xs space-y-1">
+                        <p><span className="text-emerald-400">Δ (Delta):</span> <span className="text-slate-400">Probability of profit. Higher = more likely to be ITM at expiration. Score 0-2.</span></p>
+                        <p><span className="text-emerald-400">IV:</span> <span className="text-slate-400">Implied Volatility. Low IV = cheap options. Score 0-2.</span></p>
+                        <p><span className="text-emerald-400">Liq:</span> <span className="text-slate-400">Liquidity. Tight spreads & high volume = easy entry/exit. Score 0-2.</span></p>
+                        <p><span className="text-orange-400">UOA:</span> <span className="text-slate-400">Unusual Options Activity. Smart money signals. Score 0-2.</span></p>
+                        <p className="pt-1 border-t border-slate-700"><span className="text-white">Total: {sug.score.total}/12</span> <span className="text-slate-400">- Higher is better. 8+ is strong.</span></p>
+                      </div>
+                    </details>
                   </div>
                 )}
                 <div className="space-y-1 mb-2">

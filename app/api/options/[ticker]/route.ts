@@ -1014,6 +1014,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       iv: u.contract.iv,
       bid: u.contract.bid,
       ask: u.contract.ask,
+      mark: u.contract.mark,
       premium: Math.round(u.premiumValue),
       premiumFormatted: u.premiumValue >= 1000000 
         ? `$${(u.premiumValue / 1e6).toFixed(2)}M` 
@@ -1023,6 +1024,25 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       sentiment: u.sentiment,
       convictionLevel: u.convictionLevel,
       interpretation: u.interpretation,
+      // NEW: Hedge vs Directional classification
+      tradeType: u.tradeType,
+      tradeTypeReason: u.tradeTypeReason,
+      insiderProbability: u.insiderProbability,
+      insiderSignals: u.insiderSignals,
+      // Full contract for tracking
+      contract: {
+        strike: u.contract.strike,
+        type: u.contract.type,
+        expiration: u.contract.expiration,
+        dte: u.contract.dte,
+        delta: u.contract.delta,
+        volume: u.contract.volume,
+        openInterest: u.contract.openInterest,
+        volumeOIRatio: u.contract.volumeOIRatio,
+        bid: u.contract.bid,
+        ask: u.contract.ask,
+        mark: u.contract.mark,
+      },
     })),
     suggestions,
     optionsChain: {
