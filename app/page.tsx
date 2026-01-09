@@ -302,140 +302,105 @@ function StockTab({ data, loading, onTrack }: { data: any; loading: boolean; onT
         </div>
       </div>
 
-      {/* NEW: Chart Patterns Section */}
-      <div className="p-5 rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-950/30 to-pink-950/20">
-        <h2 className="text-lg font-semibold text-white mb-4">📐 Chart Pattern Analysis</h2>
+      {/* Chart Pattern Analysis - Shows ONE dominant pattern only */}
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-white">📐 Chart Pattern</h2>
+          <details className="text-xs">
+            <summary className="text-blue-400 cursor-pointer hover:text-blue-300">ℹ️ Info</summary>
+            <div className="absolute right-0 mt-2 p-3 rounded-lg bg-slate-900 border border-slate-700 text-slate-400 w-64 z-10">
+              <p className="mb-1"><strong className="text-emerald-400">CONFIRMED</strong> = Breakout occurred</p>
+              <p><strong className="text-amber-400">FORMING</strong> = Waiting for breakout</p>
+            </div>
+          </details>
+        </div>
         
-        {/* Educational Info */}
-        <details className="mb-4 p-2 rounded-lg bg-slate-800/30 border border-slate-700/50">
-          <summary className="text-xs text-blue-400 cursor-pointer hover:text-blue-300">ℹ️ How pattern confirmation works</summary>
-          <div className="mt-2 text-xs text-slate-400 space-y-1">
-            <p><strong className="text-emerald-400">CONFIRMED</strong> = Price has broken above resistance (bullish) or below support (bearish). Ready to act.</p>
-            <p><strong className="text-amber-400">FORMING</strong> = Pattern structure detected but waiting for breakout. Watch for confirmation.</p>
-            <p><strong className="text-white">Volume</strong> = Higher volume on breakout increases reliability.</p>
-          </div>
-        </details>
-        
-        {/* Pattern Summary */}
-        <div className={`p-3 rounded-xl mb-4 ${
+        {/* Status Box */}
+        <div className={`p-4 rounded-xl ${
           data.chartPatterns?.actionable 
             ? 'bg-emerald-500/10 border border-emerald-500/30' 
             : data.chartPatterns?.hasConflict
               ? 'bg-red-500/10 border border-red-500/30'
-              : 'bg-slate-800/30 border border-slate-700/30'
+              : data.chartPatterns?.forming?.length > 0
+                ? 'bg-amber-500/5 border border-amber-500/30'
+                : 'bg-slate-800/30 border border-slate-700/30'
         }`}>
-          <p className={`text-sm font-medium ${
+          <p className={`font-medium ${
             data.chartPatterns?.actionable ? 'text-emerald-400' : 
-            data.chartPatterns?.hasConflict ? 'text-red-400' : 'text-slate-300'
+            data.chartPatterns?.hasConflict ? 'text-red-400' : 
+            data.chartPatterns?.forming?.length > 0 ? 'text-amber-400' : 'text-slate-400'
           }`}>
-            {data.chartPatterns?.summary || 'No patterns detected'}
+            {data.chartPatterns?.summary || 'No clear pattern detected'}
           </p>
-          {data.chartPatterns?.dominantPattern && (
-            <p className="text-xs text-slate-400 mt-1">
-              Dominant: {data.chartPatterns.dominantPattern.name} ({data.chartPatterns.dominantPattern.confidence}% confidence)
-            </p>
+          
+          {/* Show single confirmed pattern details */}
+          {data.chartPatterns?.confirmed?.[0] && (
+            <div className="mt-3 pt-3 border-t border-slate-700/50">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">{data.chartPatterns.confirmed[0].type === 'BULLISH' ? '📈' : '📉'}</span>
+                <span className="font-bold text-white">{data.chartPatterns.confirmed[0].name}</span>
+                <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400">
+                  {data.chartPatterns.confirmed[0].confidence}%
+                </span>
+              </div>
+              {data.chartPatterns.confirmed[0].statusReason && (
+                <p className="text-xs text-emerald-300 mb-2">✓ {data.chartPatterns.confirmed[0].statusReason}</p>
+              )}
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                {data.chartPatterns.confirmed[0].target && (
+                  <div className="p-2 rounded bg-slate-800/50">
+                    <p className="text-slate-400">Target</p>
+                    <p className="font-bold text-emerald-400">{data.chartPatterns.confirmed[0].target}</p>
+                  </div>
+                )}
+                {data.chartPatterns.confirmed[0].stopLoss && (
+                  <div className="p-2 rounded bg-slate-800/50">
+                    <p className="text-slate-400">Stop</p>
+                    <p className="font-bold text-red-400">{data.chartPatterns.confirmed[0].stopLoss}</p>
+                  </div>
+                )}
+                {(data.chartPatterns.confirmed[0].upside || data.chartPatterns.confirmed[0].downside) && (
+                  <div className="p-2 rounded bg-slate-800/50">
+                    <p className="text-slate-400">{data.chartPatterns.confirmed[0].upside ? 'Upside' : 'Downside'}</p>
+                    <p className={`font-bold ${data.chartPatterns.confirmed[0].upside ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {data.chartPatterns.confirmed[0].upside || data.chartPatterns.confirmed[0].downside}%
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {/* Show single forming pattern details */}
+          {!data.chartPatterns?.confirmed?.length && data.chartPatterns?.forming?.[0] && (
+            <div className="mt-3 pt-3 border-t border-slate-700/50">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-lg">{data.chartPatterns.forming[0].type === 'BULLISH' ? '📈' : '📉'}</span>
+                <span className="font-bold text-white">{data.chartPatterns.forming[0].name}</span>
+                <span className="text-xs px-2 py-0.5 rounded bg-amber-500/20 text-amber-400">
+                  {data.chartPatterns.forming[0].confidence}%
+                </span>
+              </div>
+              {data.chartPatterns.forming[0].statusReason && (
+                <p className="text-xs text-amber-300 mb-1">⏳ {data.chartPatterns.forming[0].statusReason}</p>
+              )}
+              {data.chartPatterns.forming[0].target && (
+                <p className="text-xs text-slate-400">Target on breakout: {data.chartPatterns.forming[0].target}</p>
+              )}
+            </div>
           )}
         </div>
-
-        {/* Confirmed Patterns (Actionable) */}
-        {data.chartPatterns?.confirmed?.length > 0 && (
-          <div className="space-y-3 mb-4">
-            <p className="text-xs text-emerald-400 font-semibold">✓ CONFIRMED PATTERNS - ACTIONABLE</p>
-            {data.chartPatterns.confirmed.map((pattern: any, i: number) => (
-              <div key={i} className={`p-3 rounded-xl border ${
-                pattern.type === 'BULLISH' ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-red-500/50 bg-red-500/10'
-              }`}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-bold text-white">
-                    {pattern.type === 'BULLISH' ? '📈' : '📉'} {pattern.name}
-                  </span>
-                  <div className="flex gap-2">
-                    <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400">
-                      {pattern.confidence}% confidence
-                    </span>
-                    <span className="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-400">
-                      {pattern.successRate} success
-                    </span>
-                  </div>
-                </div>
-                {pattern.statusReason && (
-                  <p className="text-xs text-emerald-300 mb-2">✓ {pattern.statusReason}</p>
-                )}
-                <div className="grid grid-cols-4 gap-2 text-xs">
-                  {pattern.target && (
-                    <div className="p-2 rounded bg-slate-800/50">
-                      <p className="text-slate-400">Target</p>
-                      <p className="font-bold text-emerald-400">{pattern.target}</p>
-                    </div>
-                  )}
-                  {pattern.stopLoss && (
-                    <div className="p-2 rounded bg-slate-800/50">
-                      <p className="text-slate-400">Stop Loss</p>
-                      <p className="font-bold text-red-400">{pattern.stopLoss}</p>
-                    </div>
-                  )}
-                  {(pattern.upside || pattern.downside) && (
-                    <div className="p-2 rounded bg-slate-800/50">
-                      <p className="text-slate-400">{pattern.upside ? 'Upside' : 'Downside'}</p>
-                      <p className={`font-bold ${pattern.upside ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {pattern.upside || pattern.downside}%
-                      </p>
-                    </div>
-                  )}
-                  {pattern.volumeRatio && (
-                    <div className="p-2 rounded bg-slate-800/50">
-                      <p className="text-slate-400">Volume</p>
-                      <p className={`font-bold ${pattern.volumeRatio >= 1.25 ? 'text-emerald-400' : 'text-amber-400'}`}>
-                        {pattern.volumeRatio}x avg
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Forming Patterns (Watch List) */}
-        {data.chartPatterns?.forming?.length > 0 && (
-          <div className="mt-3 p-3 rounded-xl border border-amber-500/30 bg-amber-500/5">
-            <p className="text-xs text-amber-400 font-semibold mb-2">⏳ FORMING PATTERNS - Watch for Breakout</p>
-            <div className="space-y-2">
-              {data.chartPatterns.forming.map((pattern: any, i: number) => (
-                <div key={i} className="p-2 rounded bg-slate-800/30">
-                  <div className="flex justify-between items-center">
-                    <span className="text-sm text-white">
-                      {pattern.type === 'BULLISH' ? '📈' : '📉'} {pattern.name}
-                    </span>
-                    <span className="text-xs text-slate-400">{pattern.confidence}% confidence</span>
-                  </div>
-                  {pattern.statusReason && (
-                    <p className="text-xs text-amber-300 mt-1">⏳ {pattern.statusReason}</p>
-                  )}
-                  {pattern.target && (
-                    <p className="text-xs text-slate-500 mt-1">Target on breakout: {pattern.target}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* No patterns at all */}
-        {(!data.chartPatterns?.allDetected || data.chartPatterns.allDetected.length === 0) && (
-          <p className="text-xs text-slate-500">No chart patterns detected in recent price action.</p>
-        )}
-
-        {/* Pattern Bonus Applied */}
-        {data.chartPatterns?.patternBonus !== 0 && (
-          <p className={`mt-3 text-xs font-medium ${data.chartPatterns.patternBonus > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-            {data.chartPatterns.patternBonus > 0 ? '✓ +' : '⚠️ '}{data.chartPatterns.patternBonus}% confidence adjustment applied
+        
+        {/* Pattern impact on suggestion */}
+        {data.chartPatterns?.patternBonus !== 0 && data.chartPatterns?.patternBonus !== undefined && (
+          <p className={`mt-3 text-xs ${data.chartPatterns.patternBonus > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {data.chartPatterns.patternBonus > 0 ? '✓' : '⚠️'} {data.chartPatterns.patternBonus > 0 ? '+' : ''}{data.chartPatterns.patternBonus}% confidence adjustment
           </p>
         )}
       </div>
 
       {/* Suggestions */}
-      <div className="p-5 rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-950/30 to-cyan-950/20">
+      <div className="card p-5">
         <h2 className="text-lg font-semibold text-white mb-4">💡 Recommendations</h2>
         <div className="space-y-4">
           {suggestions?.map((sug: any, i: number) => (

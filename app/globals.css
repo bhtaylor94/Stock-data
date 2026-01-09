@@ -10,29 +10,43 @@
 
 body {
   color: rgb(var(--foreground-rgb));
-  background: linear-gradient(
-      to bottom,
-      transparent,
-      rgb(var(--background-end-rgb))
-    )
-    rgb(var(--background-start-rgb));
+  background: 
+    /* Grid pattern overlay */
+    linear-gradient(rgba(30, 41, 59, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 41, 59, 0.03) 1px, transparent 1px),
+    /* Subtle gradient */
+    linear-gradient(180deg, rgb(2, 6, 23) 0%, rgb(15, 23, 42) 50%, rgb(2, 6, 23) 100%);
+  background-size: 40px 40px, 40px 40px, 100% 100%;
   min-height: 100vh;
+}
+
+/* Enhanced grid with glow at top */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 400px;
+  background: radial-gradient(ellipse at 50% 0%, rgba(59, 130, 246, 0.08) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
 }
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(30, 41, 59, 0.5);
-  border-radius: 4px;
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(71, 85, 105, 0.8);
-  border-radius: 4px;
+  background: rgba(71, 85, 105, 0.6);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -41,12 +55,8 @@ body {
 
 /* Animations */
 @keyframes pulse-slow {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .animate-pulse-slow {
@@ -54,25 +64,26 @@ body {
 }
 
 @keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .animate-fadeIn {
   animation: fadeIn 0.3s ease-out forwards;
 }
 
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(-10px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.animate-slideIn {
+  animation: slideIn 0.2s ease-out forwards;
+}
+
 /* Loading spinner */
 @keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
 .animate-spin {
@@ -87,28 +98,76 @@ body {
   background-clip: text;
 }
 
-/* Card hover effects */
-.card-hover {
+/* Card styles */
+.card {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  border-radius: 16px;
   transition: all 0.2s ease;
 }
 
-.card-hover:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.5);
+.card:hover {
+  border-color: rgba(71, 85, 105, 0.6);
+  box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.4);
+}
+
+/* Glass effect */
+.glass {
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(51, 65, 85, 0.3);
 }
 
 /* Signal badges */
 .signal-bullish {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.2) 0%, rgba(6, 78, 59, 0.3) 100%);
-  border-color: rgba(16, 185, 129, 0.4);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(6, 78, 59, 0.2) 100%);
+  border: 1px solid rgba(16, 185, 129, 0.3);
 }
 
 .signal-bearish {
-  background: linear-gradient(135deg, rgba(239, 68, 68, 0.2) 0%, rgba(127, 29, 29, 0.3) 100%);
-  border-color: rgba(239, 68, 68, 0.4);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(127, 29, 29, 0.2) 100%);
+  border: 1px solid rgba(239, 68, 68, 0.3);
 }
 
 .signal-neutral {
-  background: linear-gradient(135deg, rgba(234, 179, 8, 0.2) 0%, rgba(113, 63, 18, 0.3) 100%);
-  border-color: rgba(234, 179, 8, 0.4);
+  background: linear-gradient(135deg, rgba(234, 179, 8, 0.15) 0%, rgba(113, 63, 18, 0.2) 100%);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+/* Input styles */
+input[type="text"] {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(51, 65, 85, 0.5);
+  transition: all 0.2s ease;
+}
+
+input[type="text"]:focus {
+  border-color: rgba(59, 130, 246, 0.5);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Button styles */
+button {
+  transition: all 0.15s ease;
+}
+
+button:active {
+  transform: scale(0.98);
+}
+
+/* Tab styles */
+.tab-active {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.2) 0%, rgba(59, 130, 246, 0.1) 100%);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+/* Live indicator */
+@keyframes livePulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.1); }
+}
+
+.live-dot {
+  animation: livePulse 1.5s ease-in-out infinite;
 }

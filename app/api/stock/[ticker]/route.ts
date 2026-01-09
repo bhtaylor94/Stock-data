@@ -716,7 +716,9 @@ function detectHeadShoulders(candles: PatternCandle[]): PatternResult {
 }
 
 // Main pattern detection wrapper
-function detectAllPatterns(candles: PatternCandle[]) {
+// CRITICAL: Only show ONE dominant pattern to avoid confusion
+// Research shows conflicting patterns lead to analysis paralysis
+function detectAllPatterns(candles: PatternCandle[], currentPrice: number) {
   const allPatterns: { 
     name: string; 
     type: 'BULLISH' | 'BEARISH'; 
@@ -750,67 +752,70 @@ function detectAllPatterns(candles: PatternCandle[]) {
     allPatterns.push({ name: 'Double Top', type: 'BEARISH', successRate: 75, result: dblTop });
   }
   
-  // Separate confirmed and forming patterns
-  const confirmedPatterns = allPatterns.filter(p => p.result.confirmed);
-  const formingPatterns = allPatterns.filter(p => !p.result.confirmed);
+  // CRITICAL FIX: Only show ONE pattern - the most reliable one
+  // Multiple conflicting patterns = no actionable pattern
   
-  // Calculate dominant direction from confirmed patterns
-  const confirmedBullish = confirmedPatterns.filter(p => p.type === 'BULLISH');
-  const confirmedBearish = confirmedPatterns.filter(p => p.type === 'BEARISH');
+  // Sort by: 1) confirmed first, 2) highest confidence, 3) highest success rate
+  allPatterns.sort((a, b) => {
+    // Confirmed patterns always first
+    if (a.result.confirmed && !b.result.confirmed) return -1;
+    if (!a.result.confirmed && b.result.confirmed) return 1;
+    // Then by confidence
+    if (b.result.confidence !== a.result.confidence) {
+      return b.result.confidence - a.result.confidence;
+    }
+    // Then by success rate
+    return b.successRate - a.successRate;
+  });
+  
+  // Get the single best pattern
+  const bestPattern = allPatterns.length > 0 ? allPatterns[0] : null;
+  
+  // Check if there are conflicting high-confidence patterns
+  const highConfidencePatterns = allPatterns.filter(p => p.result.confidence >= 45);
+  const bullishHighConf = highConfidencePatterns.filter(p => p.type === 'BULLISH');
+  const bearishHighConf = highConfidencePatterns.filter(p => p.type === 'BEARISH');
+  
+  // Conflict exists if BOTH bullish and bearish patterns have high confidence
+  const hasConflict = bullishHighConf.length > 0 && bearishHighConf.length > 0;
   
   let dominantDirection: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
   let dominantPattern: typeof allPatterns[0] | null = null;
   
-  // If we have confirmed patterns, use the highest confidence one
-  if (confirmedPatterns.length > 0) {
-    confirmedPatterns.sort((a, b) => b.result.confidence - a.result.confidence);
-    dominantPattern = confirmedPatterns[0];
-    dominantDirection = dominantPattern.type;
-  } else if (formingPatterns.length > 0) {
-    // If no confirmed, check forming patterns
-    formingPatterns.sort((a, b) => b.result.confidence - a.result.confidence);
-    const topForming = formingPatterns[0];
-    if (topForming.result.confidence >= 50) {
-      dominantDirection = topForming.type;
-    }
-  }
-  
-  // Check for conflicts
-  const hasConflict = confirmedBullish.length > 0 && confirmedBearish.length > 0;
   if (hasConflict) {
+    // Conflicting signals - don't show any pattern as reliable
     dominantDirection = 'NEUTRAL';
     dominantPattern = null;
+  } else if (bestPattern) {
+    dominantPattern = bestPattern;
+    dominantDirection = bestPattern.type;
   }
   
-  // Calculate scores
-  let bullishScore = 0;
-  let bearishScore = 0;
-  
-  for (const p of confirmedPatterns) {
-    const weight = (p.result.confidence / 100) * (p.successRate / 100);
-    if (p.type === 'BULLISH') bullishScore += weight * 3;
-    else bearishScore += weight * 3;
-  }
-  
-  for (const p of formingPatterns) {
-    const weight = (p.result.confidence / 100) * (p.successRate / 100) * 0.5;
-    if (p.type === 'BULLISH') bullishScore += weight;
-    else bearishScore += weight;
-  }
-  
-  const netScore = bullishScore - bearishScore;
+  // Only return the SINGLE best pattern (or none if conflict)
+  const confirmedPatterns = dominantPattern?.result.confirmed ? [dominantPattern] : [];
+  const formingPatterns = dominantPattern && !dominantPattern.result.confirmed ? [dominantPattern] : [];
   
   return { 
-    allDetected: allPatterns,
+    allDetected: hasConflict ? [] : (dominantPattern ? [dominantPattern] : []),
     confirmed: confirmedPatterns,
     forming: formingPatterns,
     dominantDirection,
     dominantPattern,
-    bullishScore: Math.round(bullishScore * 100) / 100,
-    bearishScore: Math.round(bearishScore * 100) / 100,
-    netScore: Math.round(netScore * 100) / 100,
+    bullishScore: dominantDirection === 'BULLISH' && dominantPattern ? 
+      (dominantPattern.result.confidence / 100) * (dominantPattern.successRate / 100) : 0,
+    bearishScore: dominantDirection === 'BEARISH' && dominantPattern ? 
+      (dominantPattern.result.confidence / 100) * (dominantPattern.successRate / 100) : 0,
+    netScore: 0,
     hasConflict,
-    actionable: confirmedPatterns.length > 0 && !hasConflict
+    actionable: confirmedPatterns.length > 0 && !hasConflict,
+    // NEW: Provide clear message about pattern status
+    message: hasConflict 
+      ? 'Conflicting patterns detected - no clear signal'
+      : dominantPattern?.result.confirmed 
+        ? `${dominantPattern.name} CONFIRMED - ${dominantDirection} signal`
+        : dominantPattern 
+          ? `${dominantPattern.name} forming - watching for breakout`
+          : 'No clear chart pattern detected'
   };
 }
 
@@ -1340,7 +1345,7 @@ export async function GET(
     close: c.close,
     volume: c.volume || 0
   }));
-  const chartPatterns = detectAllPatterns(patternCandles);
+  const chartPatterns = detectAllPatterns(patternCandles, price);
   const atr = calculateATR(priceHistory as any);
   const { support, resistance } = findSupportResistance(priceHistory as any);
   const high52Week = closes.length > 0 ? Math.max(...closes) : price * 1.2;
@@ -1557,9 +1562,9 @@ export async function GET(
 
     suggestions,
 
-    // NEW: Professional chart patterns detected
+    // NEW: Professional chart patterns detected - SINGLE DOMINANT PATTERN ONLY
     chartPatterns: {
-      // Only show confirmed, actionable patterns
+      // Only show the single confirmed pattern (if any)
       confirmed: chartPatterns.confirmed.map(p => ({
         name: p.name,
         type: p.type,
@@ -1574,7 +1579,7 @@ export async function GET(
         volumeRatio: p.result.volumeRatio,
         priceAboveBreakout: p.result.priceAboveBreakout,
       })),
-      // Patterns that are forming but not yet confirmed
+      // Single forming pattern (if no confirmed)
       forming: (chartPatterns.forming || []).map(p => ({
         name: p.name,
         type: p.type,
@@ -1584,34 +1589,16 @@ export async function GET(
         statusReason: p.result.statusReason,
         target: p.result.target ? `$${p.result.target.toFixed(2)}` : null,
       })),
-      // Show all detected patterns (for transparency)
-      allDetected: chartPatterns.allDetected.map(p => ({
-        name: p.name,
-        type: p.type,
-        successRate: `${p.successRate}%`,
-        confirmed: p.result.confirmed,
-        confidence: p.result.confidence,
-        status: p.result.status,
-        statusReason: p.result.statusReason,
-      })),
       dominantDirection: chartPatterns.dominantDirection,
       dominantPattern: chartPatterns.dominantPattern ? {
         name: chartPatterns.dominantPattern.name,
         type: chartPatterns.dominantPattern.type,
         confidence: chartPatterns.dominantPattern.result.confidence,
       } : null,
-      bullishScore: chartPatterns.bullishScore,
-      bearishScore: chartPatterns.bearishScore,
-      netScore: chartPatterns.netScore,
       hasConflict: chartPatterns.hasConflict,
       actionable: chartPatterns.actionable,
-      summary: chartPatterns.actionable 
-        ? `✓ ${chartPatterns.confirmed.length} CONFIRMED ${chartPatterns.dominantDirection} pattern(s) - ACTIONABLE`
-        : chartPatterns.hasConflict
-          ? '⚠️ Conflicting patterns detected - DO NOT TRADE'
-          : (chartPatterns.forming || []).length > 0
-            ? `${(chartPatterns.forming || []).length} pattern(s) forming - waiting for breakout confirmation`
-            : 'No patterns detected',
+      // Use the new message field for clear communication
+      summary: (chartPatterns as any).message || 'No patterns detected',
       patternBonus,
     },
 
