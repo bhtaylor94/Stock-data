@@ -50,6 +50,7 @@ function TrackButton({
           dte: suggestion.contract.dte,
           delta: suggestion.contract.delta,
           entryAsk: suggestion.contract.ask,
+          optionType: suggestion.type === 'PUT' ? 'PUT' : 'CALL',
         };
       }
       

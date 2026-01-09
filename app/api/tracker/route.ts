@@ -1,380 +1,343 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getSchwabAccessToken, schwabFetchJson } from '@/lib/schwab';
+import { TTLCache } from '@/lib/cache';
+import {
+  loadSuggestions,
+  upsertSuggestion,
+  updateSuggestion,
+  deleteSuggestion,
+  TrackedSuggestion,
+  TrackedSuggestionStatus,
+} from '@/lib/trackerStore';
+
+export const runtime = 'nodejs';
 
 // ============================================================
-// SUGGESTION TRACKER API
-// Features:
-// - Save tracked suggestions with entry price
-// - Retrieve all tracked suggestions with current performance
-// - Update suggestion status (hit target, stopped out, closed)
-// - Calculate performance metrics
+// SUGGESTION TRACKER API (durable JSON store by default)
+// Notes:
+// - Uses file-backed storage for consistency across dev restarts.
+// - On serverless platforms, filesystem may be ephemeral. For true durability,
+//   set TRACKER_STORE_PATH to a persistent volume or migrate to KV/DB.
 // ============================================================
 
-const SCHWAB_APP_KEY = process.env.SCHWAB_APP_KEY;
-const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
-const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
+const quoteCache = new TTLCache<{ last: number; price: number }>();
+const chainCache = new TTLCache<any>();
 
-// ============================================================
-// IN-MEMORY STORAGE (Use database in production)
-// For demo purposes, we use a global variable
-// In production, use Vercel KV, Supabase, or similar
-// ============================================================
+function asNumber(v: any, fallback = 0): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
 
-// Position size assumptions:
-// - Stocks: 100 shares per suggestion
-// - Options: 5 contracts per suggestion
-const STOCK_POSITION_SIZE = 100;  // shares
-const OPTION_POSITION_SIZE = 5;   // contracts (each controls 100 shares)
+function computeDte(expirationIso: string): number | null {
+  const dt = new Date(expirationIso);
+  if (Number.isNaN(dt.getTime())) return null;
+  const now = new Date();
+  // DTE counted in whole days until expiration date (end of day)
+  const end = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth(), dt.getUTCDate(), 23, 59, 59));
+  const ms = end.getTime() - now.getTime();
+  return Math.ceil(ms / (24 * 60 * 60 * 1000));
+}
 
-interface TrackedSuggestion {
-  id: string;
-  ticker: string;
-  type: 'STOCK_BUY' | 'STOCK_SELL' | 'CALL' | 'PUT' | 'ALERT';
-  strategy: string;
-  entryPrice: number;
-  currentPrice?: number;
-  targetPrice?: number;
-  stopLoss?: number;
-  confidence: number;
-  reasoning: string[];
-  
-  // Options specific
-  optionContract?: {
-    strike: number;
-    expiration: string;
-    dte: number;
-    delta: number;
-    entryAsk: number;
+async function fetchUnderlyingPrice(token: string, ticker: string): Promise<number | null> {
+  const key = `quote:${ticker}`;
+  const hit = quoteCache.get(key);
+  if (hit) return hit.price;
+
+  const url = `https://api.schwabapi.com/marketdata/v1/quotes?symbols=${encodeURIComponent(ticker)}&indicative=false`;
+  const r = await schwabFetchJson<any>(token, url);
+  if (!r.ok) return null;
+
+  const q = r.data?.quotes?.[ticker] || r.data?.[ticker] || null;
+  const price = asNumber(q?.quote?.lastPrice ?? q?.quote?.mark ?? q?.quote?.closePrice, NaN);
+  if (!Number.isFinite(price)) return null;
+
+  quoteCache.set(key, { last: Date.now(), price }, 15_000); // 15s (accuracy-first)
+  return price;
+}
+
+async function fetchOptionsChain(token: string, ticker: string): Promise<any | null> {
+  const key = `chain:${ticker}`;
+  const hit = chainCache.get(key);
+  if (hit) return hit;
+
+  const url = `https://api.schwabapi.com/marketdata/v1/chains?symbol=${encodeURIComponent(ticker)}&contractType=ALL&strikeCount=80&includeUnderlyingQuote=true&range=ALL`;
+  const r = await schwabFetchJson<any>(token, url);
+  if (!r.ok) return null;
+
+  // Very short TTL to preserve accuracy while avoiding repeated fanout.
+  chainCache.set(key, r.data, 20_000);
+  return r.data;
+}
+
+function findOptionFromChain(
+  chain: any,
+  expirationIso: string,
+  strike: number,
+  optionType: 'CALL' | 'PUT'
+): { bid?: number; ask?: number; mark?: number; delta?: number; symbol?: string } | null {
+  if (!chain) return null;
+
+  // Schwab chain shape: callExpDateMap / putExpDateMap like:
+  // { '2026-01-17:7': { '200.0': [ { bid, ask, mark, delta, symbol, ... } ] } }
+  const expMap = optionType === 'CALL' ? chain.callExpDateMap : chain.putExpDateMap;
+  if (!expMap) return null;
+
+  const expKey = Object.keys(expMap).find(k => k.startsWith(expirationIso));
+  if (!expKey) return null;
+
+  const strikeMap = expMap[expKey];
+  if (!strikeMap) return null;
+
+  const strikeKey =
+    Object.keys(strikeMap).find(k => Math.abs(Number(k) - strike) < 1e-9) ??
+    Object.keys(strikeMap).find(k => Math.abs(Number(k) - strike) < 0.001);
+
+  if (!strikeKey) return null;
+
+  const contracts = strikeMap[strikeKey];
+  const c = Array.isArray(contracts) ? contracts[0] : null;
+  if (!c) return null;
+
+  return {
+    bid: asNumber(c.bid, NaN),
+    ask: asNumber(c.ask, NaN),
+    mark: asNumber(c.mark, NaN),
+    delta: asNumber(c.delta, NaN),
+    symbol: c.symbol,
   };
-  
-  // Position sizing
-  positionSize: number;  // 100 shares or 5 contracts
-  positionType: 'SHARES' | 'CONTRACTS';
-  
-  // Tracking metadata
-  trackedAt: string;
-  status: 'ACTIVE' | 'HIT_TARGET' | 'STOPPED_OUT' | 'EXPIRED' | 'CLOSED';
-  closedAt?: string;
-  closedPrice?: number;
-  
-  // Performance
-  pnl?: number;          // Dollar P&L
-  pnlPercent?: number;   // Percentage P&L
-  totalInvested?: number; // Total $ invested in position
 }
 
-// Global storage (resets on serverless cold start - use DB in production)
-declare global {
-  var trackedSuggestions: TrackedSuggestion[] | undefined;
+function midPrice(bid?: number, ask?: number, mark?: number): number | null {
+  const m = asNumber(mark, NaN);
+  if (Number.isFinite(m) && m > 0) return m;
+  const b = asNumber(bid, NaN);
+  const a = asNumber(ask, NaN);
+  if (Number.isFinite(b) && Number.isFinite(a) && a >= b) return (a + b) / 2;
+  if (Number.isFinite(a)) return a;
+  if (Number.isFinite(b)) return b;
+  return null;
 }
 
-if (!global.trackedSuggestions) {
-  global.trackedSuggestions = [];
-}
+function computeSuggestionPnl(s: TrackedSuggestion, currentUnderlying: number | null, currentOption: number | null) {
+  const isOption = Boolean(s.optionContract);
+  const entry = asNumber(s.entryPrice, NaN);
+  if (!Number.isFinite(entry) || entry <= 0) return { pnl: 0, pnlPct: 0, currentPrice: null };
 
-// ============================================================
-// SCHWAB AUTH (reused from other routes)
-// ============================================================
-interface TokenCache {
-  accessToken: string;
-  expiresAt: number;
-}
-
-let tokenCache: TokenCache | null = null;
-
-async function getSchwabToken(): Promise<string | null> {
-  if (!SCHWAB_APP_KEY || !SCHWAB_APP_SECRET || !SCHWAB_REFRESH_TOKEN) return null;
-  
-  const now = Date.now();
-  if (tokenCache && tokenCache.expiresAt > now + 120000) {
-    return tokenCache.accessToken;
+  if (!isOption) {
+    if (!Number.isFinite(currentUnderlying ?? NaN)) return { pnl: 0, pnlPct: 0, currentPrice: null };
+    const cur = currentUnderlying as number;
+    const shares = 100;
+    const pnl = (cur - entry) * shares;
+    const pnlPct = ((cur - entry) / entry) * 100;
+    return { pnl, pnlPct, currentPrice: cur };
   }
-  
+
+  // Options: prefer real option mid/mark for accuracy.
+  const curOpt = currentOption;
+  if (!Number.isFinite(curOpt ?? NaN)) return { pnl: 0, pnlPct: 0, currentPrice: null };
+
+  const contracts = 5; // default sizing assumption (document in UI later if desired)
+  const multiplier = 100;
+  const pnl = ((curOpt as number) - entry) * contracts * multiplier;
+  const pnlPct = (((curOpt as number) - entry) / entry) * 100;
+  return { pnl, pnlPct, currentPrice: curOpt as number };
+}
+
+export async function GET() {
   try {
-    const credentials = Buffer.from(`${SCHWAB_APP_KEY}:${SCHWAB_APP_SECRET}`).toString('base64');
-    const response = await fetch('https://api.schwabapi.com/v1/oauth/token', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${credentials}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
+    const tokenRes = await getSchwabAccessToken('tracker');
+    if (!tokenRes.token) {
+      return NextResponse.json({ error: tokenRes.error || 'Auth error' }, { status: tokenRes.status || 500 });
+    }
+
+    const token = tokenRes.token;
+    const suggestions = await loadSuggestions();
+
+    // Fetch prices in parallel (accuracy-first but fast)
+    const uniqueTickers = Array.from(new Set(suggestions.map(s => s.ticker)));
+    const tickerPricesEntries = await Promise.all(
+      uniqueTickers.map(async t => [t, await fetchUnderlyingPrice(token, t)] as const)
+    );
+    const tickerPrices = Object.fromEntries(tickerPricesEntries);
+
+    // Option chains only for tickers that have options tracked
+    const optionTickers = Array.from(new Set(suggestions.filter(s => s.optionContract).map(s => s.ticker)));
+    const chainEntries = await Promise.all(optionTickers.map(async t => [t, await fetchOptionsChain(token, t)] as const));
+    const chains = Object.fromEntries(chainEntries);
+
+    const nowIso = new Date().toISOString();
+
+    const enriched = suggestions.map(s => {
+      const underlying = tickerPrices[s.ticker] ?? null;
+
+      let status: TrackedSuggestionStatus = s.status;
+
+      // Compute live DTE and expire when <= 0
+      let liveDte: number | null = null;
+      if (s.optionContract?.expiration) {
+        liveDte = computeDte(s.optionContract.expiration);
+        if (liveDte !== null && liveDte <= 0 && status === 'ACTIVE') status = 'EXPIRED';
+      }
+
+      let optionMid: number | null = null;
+      if (s.optionContract) {
+        const optType = s.optionContract.optionType || (s.type === 'PUT' ? 'PUT' : 'CALL');
+        const chain = chains[s.ticker] ?? null;
+        const hit = findOptionFromChain(chain, s.optionContract.expiration, s.optionContract.strike, optType);
+        optionMid = midPrice(hit?.bid, hit?.ask, hit?.mark);
+      }
+
+      const perf = computeSuggestionPnl(s, underlying, optionMid);
+
+      // Target/stop hit logic uses *current instrument price*
+      const currentForTriggers = perf.currentPrice ?? underlying ?? null;
+      if (status === 'ACTIVE' && Number.isFinite(currentForTriggers ?? NaN)) {
+        const cur = currentForTriggers as number;
+        if (cur >= s.targetPrice) status = 'HIT_TARGET';
+        if (cur <= s.stopLoss) status = 'STOPPED_OUT';
+      }
+
+      return {
+        ...s,
+        status,
+        updatedAt: nowIso,
+        currentPrice: perf.currentPrice ?? underlying ?? null,
+        pnl: perf.pnl,
+        pnlPct: perf.pnlPct,
+        optionContract: s.optionContract
+          ? {
+              ...s.optionContract,
+              dte: liveDte ?? s.optionContract.dte,
+            }
+          : undefined,
+      };
+    });
+
+    // Summary stats
+    const active = enriched.filter(s => s.status === 'ACTIVE');
+    const realized = enriched.filter(s => ['HIT_TARGET', 'STOPPED_OUT', 'CLOSED', 'EXPIRED'].includes(s.status));
+
+    const totalPnl = enriched.reduce((sum, s: any) => sum + asNumber(s.pnl, 0), 0);
+    const avgPnlPct =
+      enriched.length > 0 ? enriched.reduce((sum, s: any) => sum + asNumber(s.pnlPct, 0), 0) / enriched.length : 0;
+
+    return NextResponse.json({
+      suggestions: enriched,
+      stats: {
+        totalTracked: enriched.length,
+        activeCount: active.length,
+        closedCount: realized.length,
+        totalPnl,
+        avgPnlPct,
       },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: SCHWAB_REFRESH_TOKEN,
-      }).toString(),
     });
-    
-    if (!response.ok) return null;
-    
-    const data = await response.json();
-    const expiresIn = data.expires_in || 1800;
-    tokenCache = {
-      accessToken: data.access_token,
-      expiresAt: now + (expiresIn * 1000),
-    };
-    
-    return data.access_token;
-  } catch {
-    return null;
+  } catch (err: any) {
+    return NextResponse.json({ error: `Tracker GET error: ${String(err)}` }, { status: 500 });
   }
 }
 
-async function fetchCurrentPrice(token: string, symbol: string): Promise<number | null> {
+export async function POST(req: NextRequest) {
   try {
-    const res = await fetch(`https://api.schwabapi.com/marketdata/v1/quotes?symbols=${symbol}`, {
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data[symbol]?.quote?.lastPrice || null;
-  } catch {
-    return null;
+    const body = await req.json().catch(() => null);
+    if (!body) return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+
+    const now = new Date().toISOString();
+
+    const suggestion: TrackedSuggestion = {
+      id: String(body.id || `${body.ticker || 'UNK'}-${Date.now()}`),
+      ticker: String(body.ticker || '').toUpperCase(),
+      type: String(body.type || 'BUY'),
+      strategy: String(body.strategy || ''),
+      entryPrice: asNumber(body.entryPrice, 0),
+      targetPrice: asNumber(body.targetPrice, 0),
+      stopLoss: asNumber(body.stopLoss, 0),
+      confidence: asNumber(body.confidence, 0),
+      reasoning: Array.isArray(body.reasoning) ? body.reasoning.map(String) : [],
+      status: (body.status as TrackedSuggestionStatus) || 'ACTIVE',
+      createdAt: now,
+      updatedAt: now,
+      optionContract: body.optionContract
+        ? {
+            strike: asNumber(body.optionContract.strike, 0),
+            expiration: String(body.optionContract.expiration || ''),
+            dte: asNumber(body.optionContract.dte, 0),
+            delta: asNumber(body.optionContract.delta, 0),
+            entryAsk: asNumber(body.optionContract.entryAsk, 0),
+            optionType: body.optionContract.optionType === 'PUT' ? 'PUT' : 'CALL',
+          }
+        : undefined,
+    };
+
+    if (!suggestion.ticker) return NextResponse.json({ error: 'ticker is required' }, { status: 400 });
+    if (!Number.isFinite(suggestion.entryPrice) || suggestion.entryPrice <= 0)
+      return NextResponse.json({ error: 'entryPrice must be > 0' }, { status: 400 });
+
+    await upsertSuggestion(suggestion);
+
+    return NextResponse.json({ success: true, suggestion, message: 'Suggestion tracked successfully' });
+  } catch (err: any) {
+    return NextResponse.json({ error: `Tracker POST error: ${String(err)}` }, { status: 500 });
   }
 }
 
-// ============================================================
-// API HANDLERS
-// ============================================================
+export async function PUT(req: NextRequest) {
+  try {
+    const tokenRes = await getSchwabAccessToken('tracker');
+    const token = tokenRes.token || null;
 
-// GET - Retrieve all tracked suggestions with current prices
-export async function GET(request: NextRequest) {
-  const startTime = Date.now();
-  const suggestions = global.trackedSuggestions || [];
-  
-  // Get current prices for active suggestions
-  const schwabToken = await getSchwabToken();
-  const uniqueTickers = [...new Set(suggestions.filter(s => s.status === 'ACTIVE').map(s => s.ticker))];
-  
-  const priceMap: { [ticker: string]: number } = {};
-  
-  if (schwabToken && uniqueTickers.length > 0) {
-    // Batch fetch prices
-    for (const ticker of uniqueTickers) {
-      const price = await fetchCurrentPrice(schwabToken, ticker);
-      if (price) priceMap[ticker] = price;
-    }
-  }
-  
-  // Calculate performance for each suggestion WITH POSITION SIZING
-  const suggestionsWithPerformance = suggestions.map(s => {
-    const currentPrice = s.status === 'ACTIVE' ? (priceMap[s.ticker] || s.entryPrice) : (s.closedPrice || s.entryPrice);
-    
-    let pnl = 0;          // Dollar P&L
-    let pnlPercent = 0;   // Percentage
-    let totalInvested = 0; // Cost basis
-    
-    // Determine position size and type
-    const isOption = s.type === 'CALL' || s.type === 'PUT';
-    const positionSize = s.positionSize || (isOption ? OPTION_POSITION_SIZE : STOCK_POSITION_SIZE);
-    const positionType = s.positionType || (isOption ? 'CONTRACTS' : 'SHARES');
-    
-    if (s.type === 'CALL' || s.type === 'PUT') {
-      // OPTIONS P&L
-      // Position size: 5 contracts (each controls 100 shares)
-      // Entry price is the option premium (per share basis)
-      const optionEntry = s.optionContract?.entryAsk || s.entryPrice;
-      totalInvested = optionEntry * positionSize * 100; // 5 contracts × 100 shares × premium
-      
-      // For now, we approximate option value change based on delta movement
-      // In production, you'd fetch the actual option price
-      const priceChange = currentPrice - s.entryPrice;
-      const delta = s.optionContract?.delta || (s.type === 'CALL' ? 0.5 : -0.5);
-      const estimatedOptionValueChange = priceChange * Math.abs(delta);
-      
-      // Dollar P&L = value change × contracts × 100
-      pnl = estimatedOptionValueChange * positionSize * 100;
-      pnlPercent = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
-    } else if (s.type === 'STOCK_BUY') {
-      // STOCK BUY P&L
-      // Position size: 100 shares
-      totalInvested = s.entryPrice * positionSize;
-      const currentValue = currentPrice * positionSize;
-      pnl = currentValue - totalInvested;
-      pnlPercent = (pnl / totalInvested) * 100;
-    } else if (s.type === 'STOCK_SELL') {
-      // STOCK SELL (SHORT) P&L
-      // Position size: 100 shares
-      totalInvested = s.entryPrice * positionSize;
-      pnl = (s.entryPrice - currentPrice) * positionSize;
-      pnlPercent = (pnl / totalInvested) * 100;
-    }
-    
-    // Check if hit target or stop loss
-    let status = s.status;
-    if (s.status === 'ACTIVE') {
-      if (s.targetPrice && s.type === 'STOCK_BUY' && currentPrice >= s.targetPrice) {
-        status = 'HIT_TARGET';
-      } else if (s.targetPrice && s.type === 'STOCK_SELL' && currentPrice <= s.targetPrice) {
-        status = 'HIT_TARGET';
-      } else if (s.stopLoss && s.type === 'STOCK_BUY' && currentPrice <= s.stopLoss) {
-        status = 'STOPPED_OUT';
-      } else if (s.stopLoss && s.type === 'STOCK_SELL' && currentPrice >= s.stopLoss) {
-        status = 'STOPPED_OUT';
-      }
-      
-      // Check options expiration
-      if (s.optionContract && s.optionContract.dte <= 0) {
-        status = 'EXPIRED';
+    const body = await req.json().catch(() => null);
+    if (!body) return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+
+    const id = String(body.id || '');
+    if (!id) return NextResponse.json({ error: 'id is required' }, { status: 400 });
+
+    // If closing and no closedPrice provided, fetch a live price (underlying or option)
+    let closedPrice: number | undefined = body.closedPrice !== undefined ? asNumber(body.closedPrice, NaN) : undefined;
+    if (body.status === 'CLOSED' && (!Number.isFinite(closedPrice ?? NaN) || (closedPrice as any) <= 0)) {
+      // Need suggestion to determine instrument
+      const all = await loadSuggestions();
+      const s = all.find(x => x.id === id) || null;
+
+      if (s && token) {
+        if (!s.optionContract) {
+          const u = await fetchUnderlyingPrice(token, s.ticker);
+          if (Number.isFinite(u ?? NaN)) closedPrice = u as number;
+        } else {
+          const chain = await fetchOptionsChain(token, s.ticker);
+          const optType = s.optionContract.optionType || (s.type === 'PUT' ? 'PUT' : 'CALL');
+          const hit = findOptionFromChain(chain, s.optionContract.expiration, s.optionContract.strike, optType);
+          const mid = midPrice(hit?.bid, hit?.ask, hit?.mark);
+          if (Number.isFinite(mid ?? NaN)) closedPrice = mid as number;
+        }
       }
     }
-    
-    return {
-      ...s,
-      currentPrice,
-      positionSize,
-      positionType,
-      totalInvested: Math.round(totalInvested * 100) / 100,
-      pnl: Math.round(pnl * 100) / 100,
-      pnlPercent: Math.round(pnlPercent * 100) / 100,
-      status,
+
+    const patch: Partial<TrackedSuggestion> = {
+      status: (body.status as TrackedSuggestionStatus) || 'ACTIVE',
+      closedAt: body.status === 'CLOSED' ? new Date().toISOString() : undefined,
+      closedPrice: Number.isFinite(closedPrice ?? NaN) ? (closedPrice as number) : undefined,
     };
-  });
-  
-  // Calculate aggregate stats
-  const activeCount = suggestionsWithPerformance.filter(s => s.status === 'ACTIVE').length;
-  const closedCount = suggestionsWithPerformance.filter(s => s.status !== 'ACTIVE').length;
-  const winners = suggestionsWithPerformance.filter(s => s.status !== 'ACTIVE' && s.pnlPercent > 0).length;
-  const winRate = closedCount > 0 ? Math.round((winners / closedCount) * 100) : 0;
-  const avgReturn = suggestionsWithPerformance.length > 0 
-    ? Math.round(suggestionsWithPerformance.reduce((sum, s) => sum + (s.pnlPercent || 0), 0) / suggestionsWithPerformance.length * 100) / 100
-    : 0;
-  
-  return NextResponse.json({
-    suggestions: suggestionsWithPerformance.sort((a, b) => 
-      new Date(b.trackedAt).getTime() - new Date(a.trackedAt).getTime()
-    ),
-    stats: {
-      total: suggestions.length,
-      active: activeCount,
-      closed: closedCount,
-      winners,
-      losers: closedCount - winners,
-      winRate,
-      avgReturn,
-    },
-    lastUpdated: new Date().toISOString(),
-    responseTimeMs: Date.now() - startTime,
-  });
+
+    const updated = await updateSuggestion(id, patch);
+    if (!updated) return NextResponse.json({ error: 'Suggestion not found' }, { status: 404 });
+
+    return NextResponse.json({ success: true, suggestion: updated, message: 'Suggestion updated successfully' });
+  } catch (err: any) {
+    return NextResponse.json({ error: `Tracker PUT error: ${String(err)}` }, { status: 500 });
+  }
 }
 
-// POST - Add a new tracked suggestion
-export async function POST(request: NextRequest) {
+export async function DELETE(req: NextRequest) {
   try {
-    const body = await request.json();
-    
-    const {
-      ticker,
-      type,
-      strategy,
-      entryPrice,
-      targetPrice,
-      stopLoss,
-      confidence,
-      reasoning,
-      optionContract,
-    } = body;
-    
-    if (!ticker || !type || !entryPrice) {
-      return NextResponse.json({ error: 'Missing required fields: ticker, type, entryPrice' }, { status: 400 });
-    }
-    
-    // Determine position size based on type
-    const isOption = type === 'CALL' || type === 'PUT';
-    const positionSize = isOption ? OPTION_POSITION_SIZE : STOCK_POSITION_SIZE;
-    const positionType = isOption ? 'CONTRACTS' : 'SHARES';
-    
-    // Calculate total invested
-    let totalInvested = 0;
-    if (isOption) {
-      const optionEntry = optionContract?.entryAsk || entryPrice * 0.02; // Fallback to 2% of stock price
-      totalInvested = optionEntry * positionSize * 100;
-    } else {
-      totalInvested = entryPrice * positionSize;
-    }
-    
-    const newSuggestion: TrackedSuggestion = {
-      id: `${ticker}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      ticker: ticker.toUpperCase(),
-      type,
-      strategy: strategy || `${type} on ${ticker}`,
-      entryPrice,
-      targetPrice,
-      stopLoss,
-      confidence: confidence || 0,
-      reasoning: reasoning || [],
-      optionContract,
-      positionSize,
-      positionType,
-      totalInvested,
-      trackedAt: new Date().toISOString(),
-      status: 'ACTIVE',
-    };
-    
-    global.trackedSuggestions = global.trackedSuggestions || [];
-    global.trackedSuggestions.push(newSuggestion);
-    
-    return NextResponse.json({
-      success: true,
-      suggestion: newSuggestion,
-      message: `Tracking ${type} on ${ticker} at $${entryPrice} (${positionSize} ${positionType.toLowerCase()}, $${totalInvested.toFixed(2)} invested)`,
-    });
-  } catch (err) {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
-  }
-}
+    const { searchParams } = new URL(req.url);
+    const id = String(searchParams.get('id') || '');
+    if (!id) return NextResponse.json({ error: 'id query param required' }, { status: 400 });
 
-// PUT - Update suggestion status
-export async function PUT(request: NextRequest) {
-  try {
-    const body = await request.json();
-    const { id, status, closedPrice } = body;
-    
-    if (!id || !status) {
-      return NextResponse.json({ error: 'Missing required fields: id, status' }, { status: 400 });
-    }
-    
-    const suggestions = global.trackedSuggestions || [];
-    const index = suggestions.findIndex(s => s.id === id);
-    
-    if (index === -1) {
-      return NextResponse.json({ error: 'Suggestion not found' }, { status: 404 });
-    }
-    
-    suggestions[index] = {
-      ...suggestions[index],
-      status,
-      closedAt: status !== 'ACTIVE' ? new Date().toISOString() : undefined,
-      closedPrice: closedPrice || suggestions[index].currentPrice,
-    };
-    
-    return NextResponse.json({
-      success: true,
-      suggestion: suggestions[index],
-    });
-  } catch (err) {
-    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
-  }
-}
+    const ok = await deleteSuggestion(id);
+    if (!ok) return NextResponse.json({ error: 'Suggestion not found' }, { status: 404 });
 
-// DELETE - Remove a tracked suggestion
-export async function DELETE(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const id = searchParams.get('id');
-  
-  if (!id) {
-    return NextResponse.json({ error: 'Missing id parameter' }, { status: 400 });
+    return NextResponse.json({ success: true, message: 'Suggestion deleted successfully' });
+  } catch (err: any) {
+    return NextResponse.json({ error: `Tracker DELETE error: ${String(err)}` }, { status: 500 });
   }
-  
-  const suggestions = global.trackedSuggestions || [];
-  const index = suggestions.findIndex(s => s.id === id);
-  
-  if (index === -1) {
-    return NextResponse.json({ error: 'Suggestion not found' }, { status: 404 });
-  }
-  
-  suggestions.splice(index, 1);
-  
-  return NextResponse.json({
-    success: true,
-    message: 'Suggestion removed',
-  });
 }

@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+
 // ============================================================
 // COMPREHENSIVE OPTIONS API
 // Features:
