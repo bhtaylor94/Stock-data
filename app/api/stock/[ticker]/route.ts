@@ -1513,7 +1513,8 @@ export async function GET(
     hasTechnicals: priceHistory.length >= 20,
     hasNews: newsAnalysis.headlines.length > 0,
     hasAnalysts: analystAnalysis.buyPercent >= 0,
-    hasInsiders: insiderAnalysis.totalTransactions >= 0,
+    // Insider activity is considered "present" only when we have at least one parsed transaction
+    hasInsiders: insiderAnalysis.recentTransactions.length > 0,
     hasEarnings: !!earningsData,
     hasPatterns: chartPatterns.allDetected.length > 0,
   });
