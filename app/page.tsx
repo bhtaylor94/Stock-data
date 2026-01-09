@@ -263,33 +263,63 @@ function StockTab({ data, loading, onTrack }: { data: any; loading: boolean; onT
         </div>
       </div>
 
-      {/* NEW: Chart Patterns Section */}
-      {data.chartPatterns?.detected?.length > 0 && (
-        <div className="p-5 rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-950/30 to-pink-950/20">
-          <h2 className="text-lg font-semibold text-white mb-4">📐 Professional Chart Patterns</h2>
-          <p className="text-xs text-slate-400 mb-3">{data.chartPatterns.summary}</p>
-          <div className="space-y-3">
-            {data.chartPatterns.detected.map((pattern: any, i: number) => (
+      {/* NEW: Chart Patterns Section - ONLY CONFIRMED PATTERNS */}
+      <div className="p-5 rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-950/30 to-pink-950/20">
+        <h2 className="text-lg font-semibold text-white mb-4">📐 Chart Pattern Analysis</h2>
+        
+        {/* Pattern Summary */}
+        <div className={`p-3 rounded-xl mb-4 ${
+          data.chartPatterns?.actionable 
+            ? 'bg-emerald-500/10 border border-emerald-500/30' 
+            : data.chartPatterns?.hasConflict
+              ? 'bg-red-500/10 border border-red-500/30'
+              : 'bg-slate-800/30 border border-slate-700/30'
+        }`}>
+          <p className={`text-sm font-medium ${
+            data.chartPatterns?.actionable ? 'text-emerald-400' : 
+            data.chartPatterns?.hasConflict ? 'text-red-400' : 'text-slate-300'
+          }`}>
+            {data.chartPatterns?.summary || 'No patterns detected'}
+          </p>
+          {data.chartPatterns?.dominantPattern && (
+            <p className="text-xs text-slate-400 mt-1">
+              Dominant: {data.chartPatterns.dominantPattern.name} ({data.chartPatterns.dominantPattern.confidence}% confidence)
+            </p>
+          )}
+        </div>
+
+        {/* Confirmed Patterns (Actionable) */}
+        {data.chartPatterns?.confirmed?.length > 0 && (
+          <div className="space-y-3 mb-4">
+            <p className="text-xs text-emerald-400 font-semibold">✓ CONFIRMED PATTERNS (Volume Validated)</p>
+            {data.chartPatterns.confirmed.map((pattern: any, i: number) => (
               <div key={i} className={`p-3 rounded-xl border ${
-                pattern.type === 'BULLISH' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'
+                pattern.type === 'BULLISH' ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-red-500/50 bg-red-500/10'
               }`}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-bold text-white">
                     {pattern.type === 'BULLISH' ? '📈' : '📉'} {pattern.name}
                   </span>
-                  <span className={`text-xs px-2 py-0.5 rounded ${
-                    pattern.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
-                  }`}>{pattern.status}</span>
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-xs">
-                  <div className="p-2 rounded bg-slate-800/50">
-                    <p className="text-slate-400">Success Rate</p>
-                    <p className="font-bold text-white">{pattern.successRate}</p>
+                  <div className="flex gap-2">
+                    <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400">
+                      {pattern.confidence}% confidence
+                    </span>
+                    <span className="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-400">
+                      {pattern.successRate} success
+                    </span>
                   </div>
+                </div>
+                <div className="grid grid-cols-4 gap-2 text-xs">
                   {pattern.target && (
                     <div className="p-2 rounded bg-slate-800/50">
                       <p className="text-slate-400">Target</p>
                       <p className="font-bold text-emerald-400">{pattern.target}</p>
+                    </div>
+                  )}
+                  {pattern.stopLoss && (
+                    <div className="p-2 rounded bg-slate-800/50">
+                      <p className="text-slate-400">Stop Loss</p>
+                      <p className="font-bold text-red-400">{pattern.stopLoss}</p>
                     </div>
                   )}
                   {(pattern.upside || pattern.downside) && (
@@ -300,17 +330,54 @@ function StockTab({ data, loading, onTrack }: { data: any; loading: boolean; onT
                       </p>
                     </div>
                   )}
+                  {pattern.volumeRatio && (
+                    <div className="p-2 rounded bg-slate-800/50">
+                      <p className="text-slate-400">Volume</p>
+                      <p className={`font-bold ${pattern.volumeRatio >= 1.5 ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {pattern.volumeRatio}x avg
+                      </p>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
           </div>
-          {data.chartPatterns.patternBonus !== 0 && (
-            <p className={`mt-3 text-xs ${data.chartPatterns.patternBonus > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {data.chartPatterns.patternBonus > 0 ? '+' : ''}{data.chartPatterns.patternBonus}% confidence adjustment from patterns
-            </p>
-          )}
-        </div>
-      )}
+        )}
+
+        {/* Unconfirmed Patterns (Forming) */}
+        {data.chartPatterns?.allDetected?.filter((p: any) => !p.confirmed).length > 0 && (
+          <details className="mt-3">
+            <summary className="text-xs text-slate-400 cursor-pointer hover:text-slate-300">
+              📊 {data.chartPatterns.allDetected.filter((p: any) => !p.confirmed).length} pattern(s) forming (not confirmed)
+            </summary>
+            <div className="mt-2 space-y-2">
+              {data.chartPatterns.allDetected.filter((p: any) => !p.confirmed).map((pattern: any, i: number) => (
+                <div key={i} className="p-2 rounded bg-slate-800/30 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-slate-300">{pattern.name}</span>
+                    <span className="text-slate-500">{pattern.confidence}% confidence</span>
+                  </div>
+                  {pattern.failureReason && (
+                    <p className="text-slate-500 mt-1">⏳ {pattern.failureReason}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+
+        {/* No patterns at all */}
+        {(!data.chartPatterns?.allDetected || data.chartPatterns.allDetected.length === 0) && (
+          <p className="text-xs text-slate-500">No chart patterns detected in recent price action.</p>
+        )}
+
+        {/* Pattern Bonus Applied */}
+        {data.chartPatterns?.patternBonus !== 0 && (
+          <p className={`mt-3 text-xs font-medium ${data.chartPatterns.patternBonus > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {data.chartPatterns.patternBonus > 0 ? '✓ +' : '⚠️ '}{data.chartPatterns.patternBonus}% confidence adjustment applied
+          </p>
+        )}
+      </div>
 
       {/* Suggestions */}
       <div className="p-5 rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-950/30 to-cyan-950/20">
@@ -674,11 +741,72 @@ function StockTab({ data, loading, onTrack }: { data: any; loading: boolean; onT
                   {data.verification.signalAlignment.details?.insidersBullish ? 'BUYING' : 'NEUTRAL/SELLING'}
                 </span>
               </div>
+              
+              {/* NEW: Chart Patterns */}
+              <div className={`flex items-center justify-between p-2 rounded-lg ${
+                data.verification.signalAlignment.details?.patternsConflict ? 'bg-red-500/10' :
+                data.verification.signalAlignment.details?.patternsBullish ? 'bg-emerald-500/10' :
+                data.verification.signalAlignment.details?.patternsBearish ? 'bg-red-500/10' :
+                'bg-slate-500/10'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-lg ${
+                    data.verification.signalAlignment.details?.patternsConflict ? 'text-red-400' :
+                    data.verification.signalAlignment.details?.patternsBullish ? 'text-emerald-400' :
+                    data.verification.signalAlignment.details?.patternsBearish ? 'text-red-400' :
+                    'text-slate-400'
+                  }`}>
+                    {data.verification.signalAlignment.details?.patternsConflict ? '⚠' :
+                     data.verification.signalAlignment.details?.patternsBullish ? '✓' :
+                     data.verification.signalAlignment.details?.patternsBearish ? '✗' : '—'}
+                  </span>
+                  <div>
+                    <p className="text-sm text-white font-medium">Chart Patterns</p>
+                    <p className="text-xs text-slate-400">Cup & Handle, H&S, Double Top/Bottom</p>
+                  </div>
+                </div>
+                <span className={`text-xs px-2 py-1 rounded ${
+                  data.verification.signalAlignment.details?.patternsConflict ? 'bg-red-500/20 text-red-400' :
+                  data.verification.signalAlignment.details?.patternsBullish ? 'bg-emerald-500/20 text-emerald-400' :
+                  data.verification.signalAlignment.details?.patternsBearish ? 'bg-red-500/20 text-red-400' :
+                  'bg-slate-500/20 text-slate-400'
+                }`}>
+                  {data.verification.signalAlignment.details?.patternsConflict ? 'CONFLICT ⚠️' :
+                   data.verification.signalAlignment.details?.patternsBullish ? 'BULLISH (Confirmed)' :
+                   data.verification.signalAlignment.details?.patternsBearish ? 'BEARISH (Confirmed)' :
+                   'NO PATTERN'}
+                </span>
+              </div>
             </div>
+            
+            {/* Pattern Trust Box */}
+            {data.verification.patternTrust && (
+              <div className={`mt-3 p-3 rounded-lg border ${
+                data.verification.patternTrust.trustLevel.startsWith('HIGH') ? 'border-emerald-500/30 bg-emerald-500/5' :
+                data.verification.patternTrust.trustLevel.startsWith('MEDIUM') ? 'border-amber-500/30 bg-amber-500/5' :
+                data.verification.patternTrust.trustLevel.startsWith('LOW') ? 'border-red-500/30 bg-red-500/5' :
+                'border-slate-700/30 bg-slate-800/30'
+              }`}>
+                <p className="text-xs text-slate-400 mb-1">📐 Pattern Analysis Trust:</p>
+                <p className={`text-sm font-medium ${
+                  data.verification.patternTrust.trustLevel.startsWith('HIGH') ? 'text-emerald-400' :
+                  data.verification.patternTrust.trustLevel.startsWith('MEDIUM') ? 'text-amber-400' :
+                  data.verification.patternTrust.trustLevel.startsWith('LOW') ? 'text-red-400' :
+                  'text-slate-300'
+                }`}>
+                  {data.verification.patternTrust.trustLevel}
+                </p>
+                {data.verification.patternTrust.hasConfirmedPatterns && (
+                  <p className="text-xs text-slate-400 mt-1">
+                    Highest pattern confidence: {data.verification.patternTrust.highestConfidence}%
+                  </p>
+                )}
+              </div>
+            )}
             
             <div className="mt-3 p-2 rounded-lg bg-slate-800/50 text-center">
               <span className="text-sm text-white font-bold">
-                {data.verification.signalAlignment.agreementCount}/5 indicators agree
+                {data.verification.signalAlignment.agreementCount}/{data.verification.signalAlignment.totalSignals || 6} indicators agree
               </span>
               <span className="text-sm text-slate-400"> → </span>
               <span className={`text-sm font-bold ${

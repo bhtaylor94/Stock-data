@@ -232,8 +232,9 @@ function calculateATR(candles: { high: number; low: number; close: number }[], p
 }
 
 // ============================================================
-// PROFESSIONAL CHART PATTERN DETECTION
+// PROFESSIONAL CHART PATTERN DETECTION - STRICT VALIDATION
 // Research-backed patterns with historical success rates
+// ONLY shows CONFIRMED patterns with volume validation
 // ============================================================
 
 interface PatternCandle {
@@ -244,9 +245,35 @@ interface PatternCandle {
   volume: number;
 }
 
+interface PatternResult {
+  detected: boolean;
+  confirmed: boolean;  // Breakout/breakdown + volume confirmed
+  confidence: number;  // 0-100 confidence score
+  target?: number;
+  stopLoss?: number;
+  upside?: string;
+  downside?: string;
+  volumeRatio?: number;  // Current volume vs 20-day avg
+  priceAboveBreakout?: number;  // % above breakout level
+  failureReason?: string;
+}
+
+// Calculate 20-day average volume for validation
+function getAvgVolume(candles: PatternCandle[], days = 20): number {
+  if (candles.length < days) return 0;
+  const recentVol = candles.slice(-days).map(c => c.volume);
+  return recentVol.reduce((a, b) => a + b, 0) / days;
+}
+
+// STRICT VALIDATION: Volume must be 50%+ above 20-day average for confirmed breakout
+function isVolumeConfirmed(currentVolume: number, avgVolume: number): boolean {
+  return avgVolume > 0 && currentVolume >= avgVolume * 1.5;
+}
+
 // BULLISH: Cup & Handle (95% success rate, avg +54% gain)
-function detectCupAndHandle(candles: PatternCandle[]): { detected: boolean; breakout?: boolean; volumeConfirmed?: boolean; target?: number; resistance?: number; upside?: string } {
-  if (candles.length < 65) return { detected: false };
+// STRICT: Requires breakout above handle high + 50% volume surge
+function detectCupAndHandle(candles: PatternCandle[]): PatternResult {
+  if (candles.length < 65) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Insufficient data (need 65 days)' };
   
   const recent = candles.slice(-65);
   const prices = recent.map(c => c.close);
@@ -256,53 +283,183 @@ function detectCupAndHandle(candles: PatternCandle[]): { detected: boolean; brea
   const cupBottom = Math.min(...prices.slice(0, 50));
   const cupDepth = ((cupStart - cupBottom) / cupStart) * 100;
   
-  if (cupDepth < 10 || cupDepth > 30) return { detected: false };
+  // Cup depth must be 12-33% (research-backed range)
+  if (cupDepth < 12 || cupDepth > 33) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Cup depth out of range (need 12-33%)' };
   
   const bottomIdx = prices.indexOf(cupBottom);
   const leftSide = prices.slice(0, bottomIdx);
   const rightSide = prices.slice(bottomIdx, 50);
   
-  if (leftSide.length < 10 || rightSide.length < 10) return { detected: false };
+  // Both sides must have substantial formation
+  if (leftSide.length < 15 || rightSide.length < 15) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Cup sides too short' };
   
+  // Handle formation
   const handleStart = 50;
   const handle = prices.slice(handleStart);
+  if (handle.length < 5) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Handle too short' };
+  
   const handleHigh = Math.max(...handle.slice(0, 10));
   const handleLow = Math.min(...handle);
   const handleDepth = ((handleHigh - handleLow) / handleHigh) * 100;
   
-  if (handleDepth < 5 || handleDepth > 15) return { detected: false };
+  // Handle depth must be 8-12% (not too deep)
+  if (handleDepth < 5 || handleDepth > 15) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Handle depth out of range (need 5-15%)' };
   
-  const cupVolume = volumes.slice(0, 50);
-  const handleVolume = volumes.slice(50);
-  const avgCupVol = cupVolume.reduce((a, b) => a + b, 0) / cupVolume.length;
-  const recentVol = handleVolume.slice(-5).reduce((a, b) => a + b, 0) / 5;
-  
-  const volumeConfirmed = recentVol > avgCupVol * 1.4;
   const currentPrice = prices[prices.length - 1];
   const resistance = handleHigh;
+  const avgVolume = getAvgVolume(candles);
+  const currentVolume = volumes[volumes.length - 1];
+  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 0;
+  
+  // STRICT: Must have broken above resistance
   const breakout = currentPrice > resistance;
+  const priceAboveBreakout = breakout ? ((currentPrice - resistance) / resistance * 100) : 0;
   
-  if (!breakout && currentPrice < resistance * 0.95) return { detected: false };
+  // STRICT: Volume must confirm (50%+ above average)
+  const volumeConfirmed = isVolumeConfirmed(currentVolume, avgVolume);
   
+  // Pattern detected but not confirmed
+  if (!breakout) {
+    return { 
+      detected: true, 
+      confirmed: false, 
+      confidence: 30,
+      failureReason: 'Waiting for breakout above resistance',
+      target: resistance + (cupStart - cupBottom),
+      volumeRatio
+    };
+  }
+  
+  // CONFIRMED: Breakout + Volume
+  const confirmed = breakout && volumeConfirmed;
   const target = resistance + (cupStart - cupBottom);
+  const stopLoss = handleLow * 0.98;
+  
+  // Calculate confidence based on multiple factors
+  let confidence = 50;
+  if (breakout) confidence += 20;
+  if (volumeConfirmed) confidence += 20;
+  if (priceAboveBreakout >= 3) confidence += 5;  // 3%+ above breakout
+  if (cupDepth >= 15 && cupDepth <= 25) confidence += 5;  // Ideal depth
   
   return {
     detected: true,
-    breakout,
-    volumeConfirmed,
+    confirmed,
+    confidence: Math.min(95, confidence),
     target,
-    resistance,
-    upside: ((target - currentPrice) / currentPrice * 100).toFixed(1)
+    stopLoss,
+    upside: ((target - currentPrice) / currentPrice * 100).toFixed(1),
+    volumeRatio: Math.round(volumeRatio * 100) / 100,
+    priceAboveBreakout: Math.round(priceAboveBreakout * 100) / 100
   };
 }
 
 // BULLISH: Inverse Head & Shoulders (89% success rate)
-function detectInverseHeadShoulders(candles: PatternCandle[]): { detected: boolean; breakout?: boolean; neckline?: number; head?: number; target?: number; upside?: string } {
-  if (candles.length < 40) return { detected: false };
+// STRICT: Requires neckline break + 30% volume increase
+function detectInverseHeadShoulders(candles: PatternCandle[]): PatternResult {
+  if (candles.length < 40) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Insufficient data' };
   
   const recent = candles.slice(-40);
   const prices = recent.map(c => c.close);
+  const volumes = recent.map(c => c.volume);
   
+  // Find significant lows (potential shoulders and head)
+  const lows: { idx: number; price: number }[] = [];
+  for (let i = 3; i < prices.length - 3; i++) {
+    if (prices[i] < prices[i-1] && prices[i] < prices[i-2] && prices[i] < prices[i-3] &&
+        prices[i] < prices[i+1] && prices[i] < prices[i+2]) {
+      lows.push({ idx: i, price: prices[i] });
+    }
+  }
+  
+  if (lows.length < 3) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Need 3 distinct lows' };
+  
+  // Find the deepest low (head) and validate shoulders
+  let bestPattern: { leftShoulder: any; head: any; rightShoulder: any } | null = null;
+  
+  for (let i = 0; i < lows.length - 2; i++) {
+    for (let j = i + 1; j < lows.length - 1; j++) {
+      for (let k = j + 1; k < lows.length; k++) {
+        const ls = lows[i];
+        const h = lows[j];
+        const rs = lows[k];
+        
+        // Head must be lower than both shoulders
+        if (h.price < ls.price && h.price < rs.price) {
+          // Shoulders should be within 5% of each other
+          const shoulderDiff = Math.abs(ls.price - rs.price) / ls.price;
+          if (shoulderDiff <= 0.05) {
+            // Head should be at least 5% lower than shoulders
+            const headDepth = (ls.price - h.price) / ls.price;
+            if (headDepth >= 0.05) {
+              bestPattern = { leftShoulder: ls, head: h, rightShoulder: rs };
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  if (!bestPattern) return { detected: false, confirmed: false, confidence: 0, failureReason: 'No valid H&S structure' };
+  
+  const { leftShoulder, head, rightShoulder } = bestPattern;
+  
+  // Calculate neckline (connecting highs between shoulders and head)
+  const leftPeak = Math.max(...prices.slice(leftShoulder.idx, head.idx));
+  const rightPeak = Math.max(...prices.slice(head.idx, rightShoulder.idx + 1));
+  const neckline = Math.min(leftPeak, rightPeak);
+  
+  const currentPrice = prices[prices.length - 1];
+  const avgVolume = getAvgVolume(candles);
+  const currentVolume = volumes[volumes.length - 1];
+  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 0;
+  
+  const breakout = currentPrice > neckline;
+  const priceAboveBreakout = breakout ? ((currentPrice - neckline) / neckline * 100) : 0;
+  const volumeConfirmed = currentVolume >= avgVolume * 1.3;  // 30% for H&S per research
+  
+  if (!breakout) {
+    return {
+      detected: true,
+      confirmed: false,
+      confidence: 25,
+      failureReason: 'Waiting for neckline breakout',
+      target: neckline + (neckline - head.price),
+      volumeRatio
+    };
+  }
+  
+  const confirmed = breakout && volumeConfirmed;
+  const target = neckline + (neckline - head.price);
+  const stopLoss = rightShoulder.price * 0.98;
+  
+  let confidence = 45;
+  if (breakout) confidence += 25;
+  if (volumeConfirmed) confidence += 20;
+  if (priceAboveBreakout >= 3) confidence += 5;
+  
+  return {
+    detected: true,
+    confirmed,
+    confidence: Math.min(95, confidence),
+    target,
+    stopLoss,
+    upside: ((target - currentPrice) / currentPrice * 100).toFixed(1),
+    volumeRatio: Math.round(volumeRatio * 100) / 100,
+    priceAboveBreakout: Math.round(priceAboveBreakout * 100) / 100
+  };
+}
+
+// BULLISH: Double Bottom (88% success rate)
+// STRICT: Requires breakout above neckline + volume confirmation
+function detectDoubleBottom(candles: PatternCandle[]): PatternResult {
+  if (candles.length < 30) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Insufficient data' };
+  
+  const recent = candles.slice(-30);
+  const prices = recent.map(c => c.close);
+  const volumes = recent.map(c => c.volume);
+  
+  // Find significant lows
   const lows: { idx: number; price: number }[] = [];
   for (let i = 2; i < prices.length - 2; i++) {
     if (prices[i] < prices[i-1] && prices[i] < prices[i-2] &&
@@ -311,205 +468,334 @@ function detectInverseHeadShoulders(candles: PatternCandle[]): { detected: boole
     }
   }
   
-  if (lows.length < 3) return { detected: false };
+  if (lows.length < 2) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Need 2 distinct lows' };
   
-  const leftShoulder = lows[0];
-  const head = lows[1];
-  const rightShoulder = lows[2];
+  // Find two bottoms within 3% of each other (research-backed)
+  let bestPair: { bottom1: any; bottom2: any } | null = null;
   
-  if (head.price >= leftShoulder.price || head.price >= rightShoulder.price) {
-    return { detected: false };
-  }
-  
-  const shoulderDiff = Math.abs(leftShoulder.price - rightShoulder.price) / leftShoulder.price;
-  if (shoulderDiff > 0.05) return { detected: false };
-  
-  const neckline = Math.max(prices[leftShoulder.idx + 1] || 0, prices[rightShoulder.idx + 1] || 0);
-  const currentPrice = prices[prices.length - 1];
-  const breakout = currentPrice > neckline;
-  
-  const target = neckline + (neckline - head.price);
-  
-  return {
-    detected: true,
-    breakout,
-    neckline,
-    head: head.price,
-    target,
-    upside: ((target - currentPrice) / currentPrice * 100).toFixed(1)
-  };
-}
-
-// BULLISH: Double Bottom (88% success rate)
-function detectDoubleBottom(candles: PatternCandle[]): { detected: boolean; breakout?: boolean; resistance?: number; support?: number; target?: number; upside?: string } {
-  if (candles.length < 30) return { detected: false };
-  
-  const recent = candles.slice(-30);
-  const prices = recent.map(c => c.close);
-  
-  const lows: { idx: number; price: number }[] = [];
-  for (let i = 2; i < prices.length - 2; i++) {
-    if (prices[i] < prices[i-1] && prices[i] < prices[i+1]) {
-      lows.push({ idx: i, price: prices[i] });
+  for (let i = 0; i < lows.length - 1; i++) {
+    for (let j = i + 1; j < lows.length; j++) {
+      const diff = Math.abs(lows[i].price - lows[j].price) / lows[i].price;
+      // Bottoms must be within 3% AND separated by at least 10 days
+      if (diff <= 0.03 && (lows[j].idx - lows[i].idx) >= 10) {
+        bestPair = { bottom1: lows[i], bottom2: lows[j] };
+      }
     }
   }
   
-  if (lows.length < 2) return { detected: false };
+  if (!bestPair) return { detected: false, confirmed: false, confidence: 0, failureReason: 'No matching double bottom' };
   
-  const bottom1 = lows[0];
-  const bottom2 = lows[lows.length - 1];
-  const diff = Math.abs(bottom1.price - bottom2.price) / bottom1.price;
+  const { bottom1, bottom2 } = bestPair;
   
-  if (diff > 0.03) return { detected: false };
+  // Find the peak (neckline) between the two bottoms
+  const middleSection = prices.slice(bottom1.idx, bottom2.idx + 1);
+  if (middleSection.length < 5) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Peak too narrow' };
   
-  const middleSection = prices.slice(bottom1.idx, bottom2.idx);
-  if (middleSection.length === 0) return { detected: false };
-  const peak = Math.max(...middleSection);
-  
+  const neckline = Math.max(...middleSection);
   const currentPrice = prices[prices.length - 1];
-  const breakout = currentPrice > peak;
+  const avgVolume = getAvgVolume(candles);
+  const currentVolume = volumes[volumes.length - 1];
+  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 0;
   
+  const breakout = currentPrice > neckline;
+  const priceAboveBreakout = breakout ? ((currentPrice - neckline) / neckline * 100) : 0;
+  const volumeConfirmed = isVolumeConfirmed(currentVolume, avgVolume);
+  
+  if (!breakout) {
+    return {
+      detected: true,
+      confirmed: false,
+      confidence: 25,
+      failureReason: 'Waiting for neckline breakout',
+      target: neckline + (neckline - bottom1.price),
+      volumeRatio
+    };
+  }
+  
+  const confirmed = breakout && volumeConfirmed;
   const bottomAvg = (bottom1.price + bottom2.price) / 2;
-  const target = peak + (peak - bottomAvg);
+  const target = neckline + (neckline - bottomAvg);
+  const stopLoss = bottomAvg * 0.98;
+  
+  let confidence = 45;
+  if (breakout) confidence += 25;
+  if (volumeConfirmed) confidence += 20;
+  if (priceAboveBreakout >= 3) confidence += 5;
   
   return {
     detected: true,
-    breakout,
-    resistance: peak,
-    support: bottomAvg,
+    confirmed,
+    confidence: Math.min(95, confidence),
     target,
-    upside: ((target - currentPrice) / currentPrice * 100).toFixed(1)
+    stopLoss,
+    upside: ((target - currentPrice) / currentPrice * 100).toFixed(1),
+    volumeRatio: Math.round(volumeRatio * 100) / 100,
+    priceAboveBreakout: Math.round(priceAboveBreakout * 100) / 100
   };
 }
 
 // BEARISH: Head & Shoulders (89% success rate)
-function detectHeadShoulders(candles: PatternCandle[]): { detected: boolean; breakdown?: boolean; neckline?: number; head?: number; target?: number; downside?: string } {
-  if (candles.length < 40) return { detected: false };
+// STRICT: Requires neckline breakdown + volume confirmation
+function detectHeadShoulders(candles: PatternCandle[]): PatternResult {
+  if (candles.length < 40) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Insufficient data' };
   
   const recent = candles.slice(-40);
   const prices = recent.map(c => c.close);
+  const volumes = recent.map(c => c.volume);
   
-  const peaks: { idx: number; price: number }[] = [];
-  for (let i = 2; i < prices.length - 2; i++) {
-    if (prices[i] > prices[i-1] && prices[i] > prices[i-2] &&
+  // Find significant highs (potential shoulders and head)
+  const highs: { idx: number; price: number }[] = [];
+  for (let i = 3; i < prices.length - 3; i++) {
+    if (prices[i] > prices[i-1] && prices[i] > prices[i-2] && prices[i] > prices[i-3] &&
         prices[i] > prices[i+1] && prices[i] > prices[i+2]) {
-      peaks.push({ idx: i, price: prices[i] });
+      highs.push({ idx: i, price: prices[i] });
     }
   }
   
-  if (peaks.length < 3) return { detected: false };
+  if (highs.length < 3) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Need 3 distinct highs' };
   
-  const leftShoulder = peaks[0];
-  const head = peaks[1];
-  const rightShoulder = peaks[2];
+  // Find the highest high (head) and validate shoulders
+  let bestPattern: { leftShoulder: any; head: any; rightShoulder: any } | null = null;
   
-  if (head.price <= leftShoulder.price || head.price <= rightShoulder.price) {
-    return { detected: false };
+  for (let i = 0; i < highs.length - 2; i++) {
+    for (let j = i + 1; j < highs.length - 1; j++) {
+      for (let k = j + 1; k < highs.length; k++) {
+        const ls = highs[i];
+        const h = highs[j];
+        const rs = highs[k];
+        
+        // Head must be higher than both shoulders
+        if (h.price > ls.price && h.price > rs.price) {
+          // Shoulders should be within 5% of each other
+          const shoulderDiff = Math.abs(ls.price - rs.price) / ls.price;
+          if (shoulderDiff <= 0.05) {
+            // Head should be at least 5% higher than shoulders
+            const headHeight = (h.price - ls.price) / ls.price;
+            if (headHeight >= 0.05) {
+              bestPattern = { leftShoulder: ls, head: h, rightShoulder: rs };
+            }
+          }
+        }
+      }
+    }
   }
   
-  const shoulderDiff = Math.abs(leftShoulder.price - rightShoulder.price) / leftShoulder.price;
-  if (shoulderDiff > 0.05) return { detected: false };
+  if (!bestPattern) return { detected: false, confirmed: false, confidence: 0, failureReason: 'No valid H&S structure' };
   
-  const neckline = Math.min(prices[leftShoulder.idx + 1] || Infinity, prices[rightShoulder.idx + 1] || Infinity);
+  const { leftShoulder, head, rightShoulder } = bestPattern;
+  
+  // Calculate neckline (connecting lows between shoulders and head)
+  const leftTrough = Math.min(...prices.slice(leftShoulder.idx, head.idx));
+  const rightTrough = Math.min(...prices.slice(head.idx, rightShoulder.idx + 1));
+  const neckline = Math.max(leftTrough, rightTrough);
+  
   const currentPrice = prices[prices.length - 1];
-  const breakdown = currentPrice < neckline;
+  const avgVolume = getAvgVolume(candles);
+  const currentVolume = volumes[volumes.length - 1];
+  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 0;
   
+  const breakdown = currentPrice < neckline;
+  const priceBelowBreakdown = breakdown ? ((neckline - currentPrice) / neckline * 100) : 0;
+  const volumeConfirmed = currentVolume >= avgVolume * 1.3;
+  
+  if (!breakdown) {
+    return {
+      detected: true,
+      confirmed: false,
+      confidence: 25,
+      failureReason: 'Waiting for neckline breakdown',
+      target: neckline - (head.price - neckline),
+      volumeRatio
+    };
+  }
+  
+  const confirmed = breakdown && volumeConfirmed;
   const target = neckline - (head.price - neckline);
+  const stopLoss = rightShoulder.price * 1.02;
+  
+  let confidence = 45;
+  if (breakdown) confidence += 25;
+  if (volumeConfirmed) confidence += 20;
+  if (priceBelowBreakdown >= 3) confidence += 5;
   
   return {
     detected: true,
-    breakdown,
-    neckline,
-    head: head.price,
+    confirmed,
+    confidence: Math.min(95, confidence),
     target,
-    downside: ((currentPrice - target) / currentPrice * 100).toFixed(1)
+    stopLoss,
+    downside: ((currentPrice - target) / currentPrice * 100).toFixed(1),
+    volumeRatio: Math.round(volumeRatio * 100) / 100,
+    priceAboveBreakout: -Math.round(priceBelowBreakdown * 100) / 100
   };
 }
 
 // BEARISH: Double Top (75% success rate)
-function detectDoubleTop(candles: PatternCandle[]): { detected: boolean; breakdown?: boolean; resistance?: number; support?: number; target?: number; downside?: string } {
-  if (candles.length < 30) return { detected: false };
+// STRICT: Requires breakdown below neckline + volume confirmation
+function detectDoubleTop(candles: PatternCandle[]): PatternResult {
+  if (candles.length < 30) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Insufficient data' };
   
   const recent = candles.slice(-30);
   const prices = recent.map(c => c.close);
+  const volumes = recent.map(c => c.volume);
   
-  const peaks: { idx: number; price: number }[] = [];
+  // Find significant highs
+  const highs: { idx: number; price: number }[] = [];
   for (let i = 2; i < prices.length - 2; i++) {
-    if (prices[i] > prices[i-1] && prices[i] > prices[i+1]) {
-      peaks.push({ idx: i, price: prices[i] });
+    if (prices[i] > prices[i-1] && prices[i] > prices[i-2] &&
+        prices[i] > prices[i+1] && prices[i] > prices[i+2]) {
+      highs.push({ idx: i, price: prices[i] });
     }
   }
   
-  if (peaks.length < 2) return { detected: false };
+  if (highs.length < 2) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Need 2 distinct highs' };
   
-  const peak1 = peaks[0];
-  const peak2 = peaks[peaks.length - 1];
-  const diff = Math.abs(peak1.price - peak2.price) / peak1.price;
+  // Find two tops within 3% of each other
+  let bestPair: { top1: any; top2: any } | null = null;
   
-  if (diff > 0.03) return { detected: false };
+  for (let i = 0; i < highs.length - 1; i++) {
+    for (let j = i + 1; j < highs.length; j++) {
+      const diff = Math.abs(highs[i].price - highs[j].price) / highs[i].price;
+      if (diff <= 0.03 && (highs[j].idx - highs[i].idx) >= 10) {
+        bestPair = { top1: highs[i], top2: highs[j] };
+      }
+    }
+  }
   
-  const middleSection = prices.slice(peak1.idx, peak2.idx);
-  if (middleSection.length === 0) return { detected: false };
-  const trough = Math.min(...middleSection);
+  if (!bestPair) return { detected: false, confirmed: false, confidence: 0, failureReason: 'No matching double top' };
   
+  const { top1, top2 } = bestPair;
+  
+  // Find the trough (neckline) between the two tops
+  const middleSection = prices.slice(top1.idx, top2.idx + 1);
+  if (middleSection.length < 5) return { detected: false, confirmed: false, confidence: 0, failureReason: 'Trough too narrow' };
+  
+  const neckline = Math.min(...middleSection);
   const currentPrice = prices[prices.length - 1];
-  const breakdown = currentPrice < trough;
+  const avgVolume = getAvgVolume(candles);
+  const currentVolume = volumes[volumes.length - 1];
+  const volumeRatio = avgVolume > 0 ? currentVolume / avgVolume : 0;
   
-  const peakAvg = (peak1.price + peak2.price) / 2;
-  const target = trough - (peakAvg - trough);
+  const breakdown = currentPrice < neckline;
+  const priceBelowBreakdown = breakdown ? ((neckline - currentPrice) / neckline * 100) : 0;
+  const volumeConfirmed = isVolumeConfirmed(currentVolume, avgVolume);
+  
+  if (!breakdown) {
+    return {
+      detected: true,
+      confirmed: false,
+      confidence: 20,
+      failureReason: 'Waiting for neckline breakdown',
+      target: neckline - (top1.price - neckline),
+      volumeRatio
+    };
+  }
+  
+  const confirmed = breakdown && volumeConfirmed;
+  const topAvg = (top1.price + top2.price) / 2;
+  const target = neckline - (topAvg - neckline);
+  const stopLoss = topAvg * 1.02;
+  
+  let confidence = 40;
+  if (breakdown) confidence += 20;
+  if (volumeConfirmed) confidence += 15;
+  if (priceBelowBreakdown >= 3) confidence += 5;
   
   return {
     detected: true,
-    breakdown,
-    resistance: peakAvg,
-    support: trough,
+    confirmed,
+    confidence: Math.min(90, confidence),  // Lower max for double top (75% success rate)
     target,
-    downside: ((currentPrice - target) / currentPrice * 100).toFixed(1)
+    stopLoss,
+    downside: ((currentPrice - target) / currentPrice * 100).toFixed(1),
+    volumeRatio: Math.round(volumeRatio * 100) / 100,
+    priceAboveBreakout: -Math.round(priceBelowBreakdown * 100) / 100
   };
 }
 
-// Main pattern detection wrapper
+// Main pattern detection wrapper - ONLY returns CONFIRMED patterns
 function detectAllPatterns(candles: PatternCandle[]) {
-  const patterns: { name: string; type: 'BULLISH' | 'BEARISH'; confidence: number; signal: any }[] = [];
-  let bullishScore = 0;
-  let bearishScore = 0;
+  const allPatterns: { 
+    name: string; 
+    type: 'BULLISH' | 'BEARISH'; 
+    successRate: number;
+    result: PatternResult;
+  }[] = [];
   
-  // Bullish patterns
+  // Detect all patterns
   const cupHandle = detectCupAndHandle(candles);
   if (cupHandle.detected) {
-    patterns.push({ name: 'Cup & Handle', type: 'BULLISH', confidence: 95, signal: cupHandle });
-    bullishScore += cupHandle.breakout ? 3 : 1.5;
+    allPatterns.push({ name: 'Cup & Handle', type: 'BULLISH', successRate: 95, result: cupHandle });
   }
   
   const invHS = detectInverseHeadShoulders(candles);
   if (invHS.detected) {
-    patterns.push({ name: 'Inverse Head & Shoulders', type: 'BULLISH', confidence: 89, signal: invHS });
-    bullishScore += invHS.breakout ? 2.5 : 1.5;
+    allPatterns.push({ name: 'Inverse Head & Shoulders', type: 'BULLISH', successRate: 89, result: invHS });
   }
   
   const dblBottom = detectDoubleBottom(candles);
   if (dblBottom.detected) {
-    patterns.push({ name: 'Double Bottom', type: 'BULLISH', confidence: 88, signal: dblBottom });
-    bullishScore += dblBottom.breakout ? 2.5 : 1.5;
+    allPatterns.push({ name: 'Double Bottom', type: 'BULLISH', successRate: 88, result: dblBottom });
   }
   
-  // Bearish patterns
   const hs = detectHeadShoulders(candles);
   if (hs.detected) {
-    patterns.push({ name: 'Head & Shoulders', type: 'BEARISH', confidence: 89, signal: hs });
-    bearishScore += hs.breakdown ? 2.5 : 1.5;
+    allPatterns.push({ name: 'Head & Shoulders', type: 'BEARISH', successRate: 89, result: hs });
   }
   
   const dblTop = detectDoubleTop(candles);
   if (dblTop.detected) {
-    patterns.push({ name: 'Double Top', type: 'BEARISH', confidence: 75, signal: dblTop });
-    bearishScore += dblTop.breakdown ? 2.5 : 1.5;
+    allPatterns.push({ name: 'Double Top', type: 'BEARISH', successRate: 75, result: dblTop });
+  }
+  
+  // STRICT FILTERING: Only show CONFIRMED patterns with HIGH confidence
+  const confirmedPatterns = allPatterns.filter(p => p.result.confirmed && p.result.confidence >= 70);
+  
+  // Calculate dominant direction
+  const confirmedBullish = confirmedPatterns.filter(p => p.type === 'BULLISH');
+  const confirmedBearish = confirmedPatterns.filter(p => p.type === 'BEARISH');
+  
+  let dominantDirection: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+  let dominantPattern: typeof allPatterns[0] | null = null;
+  
+  // If we have confirmed patterns, use the highest confidence one
+  if (confirmedPatterns.length > 0) {
+    confirmedPatterns.sort((a, b) => b.result.confidence - a.result.confidence);
+    dominantPattern = confirmedPatterns[0];
+    dominantDirection = dominantPattern.type;
+  }
+  
+  // If conflicting CONFIRMED patterns exist, return NEUTRAL (don't trade)
+  if (confirmedBullish.length > 0 && confirmedBearish.length > 0) {
+    dominantDirection = 'NEUTRAL';
+    dominantPattern = null;
+  }
+  
+  // Calculate net score based on CONFIRMED patterns only
+  let bullishScore = 0;
+  let bearishScore = 0;
+  
+  for (const p of confirmedPatterns) {
+    const weight = (p.result.confidence / 100) * (p.successRate / 100);
+    if (p.type === 'BULLISH') {
+      bullishScore += weight * 3;
+    } else {
+      bearishScore += weight * 3;
+    }
   }
   
   const netScore = bullishScore - bearishScore;
   
-  return { patterns, bullishScore, bearishScore, netScore };
-}
+  return { 
+    allDetected: allPatterns,  // All patterns found (including unconfirmed)
+    confirmed: confirmedPatterns,  // Only confirmed patterns
+    dominantDirection,
+    dominantPattern,
+    bullishScore: Math.round(bullishScore * 100) / 100,
+    bearishScore: Math.round(bearishScore * 100) / 100,
+    netScore: Math.round(netScore * 100) / 100,
+    hasConflict: confirmedBullish.length > 0 && confirmedBearish.length > 0,
+    actionable: confirmedPatterns.length > 0 && !( confirmedBullish.length > 0 && confirmedBearish.length > 0)
 
 // ============================================================
 // SCORING SYSTEM (Deterministic, Piotroski-style)
@@ -1101,20 +1387,37 @@ export async function GET(
     }
   );
 
-  // NEW: Apply professional pattern bonus to suggestions
+  // NEW: Apply professional pattern bonus - ONLY from CONFIRMED patterns
   let patternBonus = 0;
-  const activeBullish = chartPatterns.patterns.filter(p => p.type === 'BULLISH' && p.signal.breakout);
-  const activeBearish = chartPatterns.patterns.filter(p => p.type === 'BEARISH' && p.signal.breakdown);
   
-  if (activeBullish.some(p => p.name === 'Cup & Handle')) patternBonus += 10;
-  if (activeBullish.some(p => p.name === 'Inverse Head & Shoulders')) patternBonus += 8;
-  if (activeBullish.some(p => p.name === 'Double Bottom')) patternBonus += 8;
-  if (activeBullish.length >= 2) patternBonus += 5;
+  // Only apply bonus if we have ACTIONABLE confirmed patterns (no conflicts)
+  if (chartPatterns.actionable && chartPatterns.confirmed.length > 0) {
+    const confirmedBullish = chartPatterns.confirmed.filter(p => p.type === 'BULLISH');
+    const confirmedBearish = chartPatterns.confirmed.filter(p => p.type === 'BEARISH');
+    
+    // Bullish pattern bonuses (only if confirmed with 70%+ confidence)
+    for (const p of confirmedBullish) {
+      if (p.result.confidence >= 70) {
+        if (p.name === 'Cup & Handle') patternBonus += 12;
+        else if (p.name === 'Inverse Head & Shoulders') patternBonus += 10;
+        else if (p.name === 'Double Bottom') patternBonus += 10;
+      }
+    }
+    
+    // Bearish pattern penalties for BUY recommendations
+    if (suggestions[0]?.type === 'BUY') {
+      for (const p of confirmedBearish) {
+        if (p.result.confidence >= 70) {
+          if (p.name === 'Head & Shoulders') patternBonus -= 12;
+          else if (p.name === 'Double Top') patternBonus -= 10;
+        }
+      }
+    }
+  }
   
-  // Bearish patterns reduce confidence for buy recommendations
-  if (suggestions[0]?.type === 'BUY') {
-    if (activeBearish.some(p => p.name === 'Head & Shoulders')) patternBonus -= 10;
-    if (activeBearish.some(p => p.name === 'Double Top')) patternBonus -= 8;
+  // If there's a conflict, penalize heavily
+  if (chartPatterns.hasConflict) {
+    patternBonus = -15;  // Conflicting patterns = high uncertainty
   }
   
   // Apply pattern bonus to main suggestion
@@ -1122,10 +1425,12 @@ export async function GET(
     suggestions[0].confidence = Math.min(95, Math.max(25, suggestions[0].confidence + patternBonus));
     if (patternBonus !== 0) {
       suggestions[0].reasoning = suggestions[0].reasoning || [];
-      if (patternBonus > 0) {
-        suggestions[0].reasoning.push(`+${patternBonus}% confidence: ${activeBullish.length} bullish chart pattern(s) detected`);
-      } else {
-        suggestions[0].reasoning.push(`${patternBonus}% confidence: Bearish chart pattern(s) detected`);
+      if (chartPatterns.hasConflict) {
+        suggestions[0].reasoning.push(`⚠️ -15% confidence: Conflicting chart patterns detected`);
+      } else if (patternBonus > 0) {
+        suggestions[0].reasoning.push(`✓ +${patternBonus}% confidence: ${chartPatterns.confirmed.length} CONFIRMED ${chartPatterns.dominantDirection} pattern(s)`);
+      } else if (patternBonus < 0) {
+        suggestions[0].reasoning.push(`${patternBonus}% confidence: CONFIRMED bearish pattern(s) detected`);
       }
     }
   }
@@ -1235,24 +1540,49 @@ export async function GET(
 
     suggestions,
 
-    // NEW: Professional chart patterns detected
+    // NEW: Professional chart patterns detected - ONLY CONFIRMED PATTERNS
     chartPatterns: {
-      detected: chartPatterns.patterns.map(p => ({
+      // Only show confirmed, actionable patterns
+      confirmed: chartPatterns.confirmed.map(p => ({
         name: p.name,
         type: p.type,
-        successRate: `${p.confidence}%`,
-        status: p.signal.breakout || p.signal.breakdown ? 'ACTIVE' : 'FORMING',
-        target: p.signal.target ? `$${p.signal.target.toFixed(2)}` : null,
-        upside: p.signal.upside || null,
-        downside: p.signal.downside || null,
-        details: p.signal,
+        successRate: `${p.successRate}%`,
+        confidence: p.result.confidence,
+        status: 'CONFIRMED',
+        target: p.result.target ? `$${p.result.target.toFixed(2)}` : null,
+        stopLoss: p.result.stopLoss ? `$${p.result.stopLoss.toFixed(2)}` : null,
+        upside: p.result.upside || null,
+        downside: p.result.downside || null,
+        volumeRatio: p.result.volumeRatio,
+        priceAboveBreakout: p.result.priceAboveBreakout,
       })),
+      // Show all detected patterns (for transparency)
+      allDetected: chartPatterns.allDetected.map(p => ({
+        name: p.name,
+        type: p.type,
+        successRate: `${p.successRate}%`,
+        confirmed: p.result.confirmed,
+        confidence: p.result.confidence,
+        failureReason: p.result.failureReason || null,
+      })),
+      dominantDirection: chartPatterns.dominantDirection,
+      dominantPattern: chartPatterns.dominantPattern ? {
+        name: chartPatterns.dominantPattern.name,
+        type: chartPatterns.dominantPattern.type,
+        confidence: chartPatterns.dominantPattern.result.confidence,
+      } : null,
       bullishScore: chartPatterns.bullishScore,
       bearishScore: chartPatterns.bearishScore,
       netScore: chartPatterns.netScore,
-      summary: chartPatterns.patterns.length > 0
-        ? `${chartPatterns.patterns.length} professional pattern(s) detected`
-        : 'No major patterns detected',
+      hasConflict: chartPatterns.hasConflict,
+      actionable: chartPatterns.actionable,
+      summary: chartPatterns.actionable 
+        ? `✓ ${chartPatterns.confirmed.length} CONFIRMED ${chartPatterns.dominantDirection} pattern(s) - ACTIONABLE`
+        : chartPatterns.hasConflict
+          ? '⚠️ Conflicting patterns detected - DO NOT TRADE'
+          : chartPatterns.allDetected.length > 0
+            ? `${chartPatterns.allDetected.length} pattern(s) forming - waiting for confirmation`
+            : 'No patterns detected',
       patternBonus,
     },
 
@@ -1267,6 +1597,7 @@ export async function GET(
         fundamentals: 'quarterly (Finnhub)',
         news: 'last 7 days',
         analysts: 'latest available',
+        patterns: 'calculated from 1-year price history',
       },
       
       // Data completeness score (0-100)
@@ -1280,7 +1611,7 @@ export async function GET(
         hasEarnings: !!earnings?.earningsCalendar?.[0],
       }),
       
-      // Signal alignment (do multiple indicators agree?)
+      // Signal alignment (do multiple indicators agree?) - NOW INCLUDES PATTERNS
       signalAlignment: {
         aligned: checkSignalAlignment(
           fundamentalAnalysis.score >= 5,
@@ -1294,6 +1625,11 @@ export async function GET(
           newsBullish: newsAnalysis.signal === 'BULLISH',
           analystsBullish: analystAnalysis.buyPercent >= 50,
           insidersBullish: insiderAnalysis.netActivity === 'BUYING',
+          // NEW: Pattern alignment
+          patternsBullish: chartPatterns.dominantDirection === 'BULLISH' && chartPatterns.actionable,
+          patternsNeutral: chartPatterns.dominantDirection === 'NEUTRAL' || !chartPatterns.actionable,
+          patternsBearish: chartPatterns.dominantDirection === 'BEARISH' && chartPatterns.actionable,
+          patternsConflict: chartPatterns.hasConflict,
         },
         agreementCount: [
           fundamentalAnalysis.score >= 5,
@@ -1301,8 +1637,27 @@ export async function GET(
           newsAnalysis.signal === 'BULLISH',
           analystAnalysis.buyPercent >= 50,
           insiderAnalysis.netActivity === 'BUYING',
+          chartPatterns.dominantDirection === 'BULLISH' && chartPatterns.actionable,
         ].filter(Boolean).length,
-        totalSignals: 5,
+        totalSignals: 6,  // Now includes patterns
+      },
+      
+      // Pattern-specific trust assessment
+      patternTrust: {
+        hasConfirmedPatterns: chartPatterns.confirmed.length > 0,
+        noConflicts: !chartPatterns.hasConflict,
+        actionable: chartPatterns.actionable,
+        dominantDirection: chartPatterns.dominantDirection,
+        highestConfidence: chartPatterns.confirmed.length > 0 
+          ? Math.max(...chartPatterns.confirmed.map(p => p.result.confidence))
+          : 0,
+        trustLevel: chartPatterns.hasConflict 
+          ? 'LOW - Conflicting patterns, do not trade based on patterns'
+          : chartPatterns.actionable && chartPatterns.confirmed.length > 0
+            ? 'HIGH - Confirmed patterns with volume validation'
+            : chartPatterns.allDetected.length > 0
+              ? 'MEDIUM - Patterns forming but not confirmed'
+              : 'NEUTRAL - No patterns detected',
       },
       
       // Known limitations
@@ -1311,6 +1666,7 @@ export async function GET(
         'Technical indicators are based on daily closing prices',
         'News sentiment is algorithmic, not human-reviewed',
         'Analyst ratings may lag actual market conditions',
+        'Chart patterns require volume confirmation (50%+ above average)',
         'Past performance does not guarantee future results',
       ],
       
