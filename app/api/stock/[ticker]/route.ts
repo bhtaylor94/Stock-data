@@ -1536,7 +1536,8 @@ export async function GET(
     isStale: (Date.now() - quoteAsOfMs) > 60_000,
   };
 
-  const regimeInfo = computeRegime(priceHistory, technicalIndicators.sma50, technicalIndicators.sma200);
+  // Use the computed moving averages already in scope (avoid referencing non-existent identifiers)
+  const regimeInfo = computeRegime(priceHistory, sma50, sma200);
   const calib = calibratedConfidence(combinedModelScore, 18, agreementCount, completenessScore, regimeInfo.regime);
 
   const gateFailures: string[] = [];
