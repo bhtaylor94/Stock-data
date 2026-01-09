@@ -352,12 +352,6 @@ function parseOptionsChain(chainData: any, currentPrice: number): {
 
 // ============================================================
 // DETECT UNUSUAL OPTIONS ACTIVITY
-// Based on professional smart money tracking:
-// - Focus on 10-180 DTE (institutional conviction, not hedges)
-// - Volume/OI ratio > 1.5x is primary signal
-// - Premium size indicates institutional activity
-// - OTM options with high volume are more significant
-// - Multiple signals = higher conviction
 // ============================================================
 interface UnusualActivity {
   contract: OptionContract;
@@ -373,21 +367,14 @@ function detectUnusualActivity(calls: OptionContract[], puts: OptionContract[], 
   const unusual: UnusualActivity[] = [];
   
   const analyzeContract = (c: OptionContract) => {
-    // CRITICAL: Only look at 10-180 DTE for institutional conviction plays
-    // Near-dated (< 10 DTE) are often hedges or lottery tickets
-    // Very long-dated (> 180 DTE) have less actionable signals
     if (c.dte < 10 || c.dte > 180) return;
-    
-    // Must have meaningful activity
     if (c.volume < 50 || c.openInterest < 10) return;
     
     const signals: string[] = [];
     let unusualScore = 0;
     
-    // === PRIMARY SIGNAL: Volume/OI Ratio ===
-    // This is THE key indicator of unusual activity
     if (c.volumeOIRatio >= 5) {
-      signals.push(`🔥🔥 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Extreme - Likely new positions)`);
+      signals.push(`🔥🔥 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Extreme)`);
       unusualScore += 40;
     } else if (c.volumeOIRatio >= 3) {
       signals.push(`🔥 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Very High)`);
@@ -396,92 +383,49 @@ function detectUnusualActivity(calls: OptionContract[], puts: OptionContract[], 
       signals.push(`📈 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Elevated)`);
       unusualScore += 15;
     } else {
-      return; // Skip if Vol/OI is below 1.5x - not unusual
+      return;
     }
     
-    // === PREMIUM VALUE (Institutional Size) ===
     const premiumValue = c.mark * c.volume * 100;
     if (premiumValue >= 1000000) {
-      signals.push(`🐋 Premium: $${(premiumValue / 1e6).toFixed(2)}M (Whale Activity)`);
+      signals.push(`🐋 Premium: $${(premiumValue / 1e6).toFixed(2)}M (Whale)`);
       unusualScore += 35;
     } else if (premiumValue >= 500000) {
-      signals.push(`💰 Premium: $${(premiumValue / 1e3).toFixed(0)}K (Institutional Size)`);
+      signals.push(`💰 Premium: $${(premiumValue / 1e3).toFixed(0)}K (Institutional)`);
       unusualScore += 25;
     } else if (premiumValue >= 100000) {
       signals.push(`💵 Premium: $${(premiumValue / 1e3).toFixed(0)}K`);
       unusualScore += 15;
-    } else if (premiumValue >= 50000) {
-      signals.push(`💲 Premium: $${(premiumValue / 1e3).toFixed(0)}K`);
-      unusualScore += 5;
     }
     
-    // === NEW POSITIONS INDICATOR ===
     if (c.volume >= c.openInterest && c.openInterest > 100) {
-      signals.push(`🆕 New Positions Opening (Vol > OI)`);
+      signals.push(`🆕 New Positions Opening`);
       unusualScore += 20;
     }
     
-    // === VOLUME SIGNALS ===
     if (c.volume >= 10000) {
       signals.push(`📊 Volume: ${c.volume.toLocaleString()} (Massive)`);
       unusualScore += 20;
     } else if (c.volume >= 5000) {
       signals.push(`📊 Volume: ${c.volume.toLocaleString()} (High)`);
       unusualScore += 10;
-    } else if (c.volume >= 1000) {
-      signals.push(`📊 Volume: ${c.volume.toLocaleString()}`);
-      unusualScore += 5;
     }
     
-    // === OTM PREMIUM ===
-    // OTM options with high activity = more significant (not hedges)
-    const otmPercent = c.type === 'call' 
-      ? ((c.strike - currentPrice) / currentPrice) * 100
-      : ((currentPrice - c.strike) / currentPrice) * 100;
-    
-    if (!c.itm && otmPercent > 5 && otmPercent < 20) {
-      signals.push(`🎯 Slightly OTM (${otmPercent.toFixed(1)}%) - High conviction`);
-      unusualScore += 15;
-    } else if (!c.itm && otmPercent >= 20) {
-      signals.push(`🎰 Deep OTM (${otmPercent.toFixed(1)}%) - Speculative`);
-      unusualScore += 5;
-    }
-    
-    // === DTE WEIGHTING ===
-    // 30-90 DTE is sweet spot for institutional plays
     if (c.dte >= 30 && c.dte <= 90) {
-      signals.push(`📅 ${c.dte} DTE - Optimal institutional timeframe`);
+      signals.push(`📅 ${c.dte} DTE - Optimal timeframe`);
       unusualScore += 10;
-    } else if (c.dte >= 90 && c.dte <= 180) {
-      signals.push(`📅 ${c.dte} DTE - LEAPS-style conviction play`);
-      unusualScore += 15;
-    } else {
-      signals.push(`📅 ${c.dte} DTE`);
     }
     
-    // === TIGHT SPREAD (Institutional quality execution) ===
-    if (c.spreadPercent < 3 && c.volume > 500) {
-      signals.push(`✅ Tight Spread: ${c.spreadPercent.toFixed(1)}% (Clean execution)`);
-      unusualScore += 10;
-    } else if (c.spreadPercent < 5 && c.volume > 200) {
-      signals.push(`✅ Decent Spread: ${c.spreadPercent.toFixed(1)}%`);
-      unusualScore += 5;
-    }
-    
-    // Minimum score threshold for relevance
     if (unusualScore < 40) return;
     
-    // Determine sentiment
     const sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = c.type === 'call' ? 'BULLISH' : 'BEARISH';
     
-    // Determine conviction level
     let convictionLevel: 'HIGH' | 'MEDIUM' | 'LOW';
     if (unusualScore >= 80) convictionLevel = 'HIGH';
     else if (unusualScore >= 55) convictionLevel = 'MEDIUM';
     else convictionLevel = 'LOW';
     
-    // Generate interpretation
-    const interpretation = generateInterpretation(c, premiumValue, convictionLevel, currentPrice);
+    const interpretation = `${convictionLevel} conviction ${sentiment.toLowerCase()} bet targeting $${c.strike} within ${c.dte} days.`;
     
     unusual.push({
       contract: c,
@@ -497,32 +441,13 @@ function detectUnusualActivity(calls: OptionContract[], puts: OptionContract[], 
   calls.forEach(analyzeContract);
   puts.forEach(analyzeContract);
   
-  // Sort by unusual score descending
   unusual.sort((a, b) => b.score - a.score);
   
-  return unusual.slice(0, 10); // Top 10 unusual
-}
-
-function generateInterpretation(c: OptionContract, premiumValue: number, conviction: string, currentPrice: number): string {
-  const direction = c.type === 'call' ? 'bullish' : 'bearish';
-  const sizeDesc = premiumValue >= 500000 ? 'institutional-sized' : premiumValue >= 100000 ? 'significant' : 'notable';
-  const timeframe = c.dte >= 90 ? 'longer-term' : c.dte >= 45 ? 'medium-term' : 'near-term';
-  
-  const targetMove = c.type === 'call' 
-    ? `to $${c.strike} (+${(((c.strike - currentPrice) / currentPrice) * 100).toFixed(1)}%)`
-    : `to $${c.strike} (${(((c.strike - currentPrice) / currentPrice) * 100).toFixed(1)}%)`;
-  
-  if (conviction === 'HIGH') {
-    return `High conviction ${direction} bet: ${sizeDesc} ${timeframe} positioning suggests smart money expects move ${targetMove} within ${c.dte} days. Multiple signals align - this is worth watching.`;
-  } else if (conviction === 'MEDIUM') {
-    return `${sizeDesc.charAt(0).toUpperCase() + sizeDesc.slice(1)} ${direction} activity detected. ${timeframe.charAt(0).toUpperCase() + timeframe.slice(1)} positioning targeting ${targetMove}. Could be directional bet or part of larger strategy.`;
-  } else {
-    return `Elevated ${direction} interest at $${c.strike} strike. May be speculative or hedging activity. Monitor for follow-through.`;
-  }
+  return unusual.slice(0, 10);
 }
 
 // ============================================================
-// CALCULATE IV METRICS
+// IV ANALYSIS
 // ============================================================
 interface IVAnalysis {
   avgCallIV: number;
@@ -536,7 +461,6 @@ interface IVAnalysis {
 }
 
 function analyzeIV(calls: OptionContract[], puts: OptionContract[], currentPrice: number): IVAnalysis {
-  // Filter for ATM options (within 5% of current price)
   const atmCalls = calls.filter(c => Math.abs(c.strike - currentPrice) / currentPrice < 0.05 && c.iv > 0);
   const atmPuts = puts.filter(p => Math.abs(p.strike - currentPrice) / currentPrice < 0.05 && p.iv > 0);
   
@@ -544,12 +468,8 @@ function analyzeIV(calls: OptionContract[], puts: OptionContract[], currentPrice
   const avgPutIV = atmPuts.length > 0 ? atmPuts.reduce((sum, p) => sum + p.iv, 0) / atmPuts.length : 0.30;
   const atmIV = (avgCallIV + avgPutIV) / 2;
   
-  // Put/Call IV Skew (negative = puts more expensive, bearish hedging)
   const putCallIVSkew = avgPutIV - avgCallIV;
-  
-  // Simplified IV rank (would need historical IV for accuracy)
   const ivRank = Math.min(100, Math.max(0, ((atmIV - 0.15) / 0.50) * 100));
-  const ivPercentile = ivRank; // Simplified
   
   let ivSignal: 'HIGH' | 'ELEVATED' | 'NORMAL' | 'LOW' = 'NORMAL';
   let recommendation: 'BUY_PREMIUM' | 'SELL_PREMIUM' | 'NEUTRAL' = 'NEUTRAL';
@@ -559,7 +479,6 @@ function analyzeIV(calls: OptionContract[], puts: OptionContract[], currentPrice
     recommendation = 'SELL_PREMIUM';
   } else if (ivRank >= 50) {
     ivSignal = 'ELEVATED';
-    recommendation = 'NEUTRAL';
   } else if (ivRank <= 30) {
     ivSignal = 'LOW';
     recommendation = 'BUY_PREMIUM';
@@ -570,7 +489,7 @@ function analyzeIV(calls: OptionContract[], puts: OptionContract[], currentPrice
     avgPutIV: Math.round(avgPutIV * 1000) / 10,
     putCallIVSkew: Math.round(putCallIVSkew * 1000) / 10,
     ivRank: Math.round(ivRank),
-    ivPercentile: Math.round(ivPercentile),
+    ivPercentile: Math.round(ivRank),
     ivSignal,
     recommendation,
     atmIV: Math.round(atmIV * 1000) / 10,
@@ -578,7 +497,7 @@ function analyzeIV(calls: OptionContract[], puts: OptionContract[], currentPrice
 }
 
 // ============================================================
-// CALCULATE MARKET METRICS
+// MARKET METRICS
 // ============================================================
 interface MarketMetrics {
   totalCallVolume: number;
@@ -604,7 +523,6 @@ function calculateMarketMetrics(calls: OptionContract[], puts: OptionContract[],
   if (putCallRatio < 0.7) sentiment = 'BULLISH';
   else if (putCallRatio > 1.2) sentiment = 'BEARISH';
   
-  // Calculate max pain (simplified - strike with most OI)
   const strikeOI: { [strike: number]: number } = {};
   [...calls, ...puts].forEach(c => {
     strikeOI[c.strike] = (strikeOI[c.strike] || 0) + c.openInterest;
@@ -642,7 +560,7 @@ function calculateSMA(prices: number[], period: number): number {
 }
 
 // ============================================================
-// GENERATE TRADE SUGGESTIONS
+// GENERATE SUGGESTIONS
 // ============================================================
 interface OptionScore {
   total: number;
@@ -666,26 +584,25 @@ function scoreOption(
   let technicalScore = 0;
   let unusualScore = 0;
 
+  // Delta scoring
   const absDelta = Math.abs(option.delta);
-  
-  // Delta: 0.35-0.65 is optimal
   if (absDelta >= 0.35 && absDelta <= 0.65) deltaScore = 2;
   else if (absDelta >= 0.25 && absDelta <= 0.75) deltaScore = 1;
 
-  // IV: Below average = cheap
-  const ivRatio = option.iv / (avgIV / 100 || 0.30);
-  if (ivRatio < 0.85) ivScore = 2;
-  else if (ivRatio < 1.0) ivScore = 1;
+  // IV scoring
+  const optIV = option.iv * 100;
+  if (optIV < avgIV * 0.9) ivScore = 2;
+  else if (optIV <= avgIV) ivScore = 1;
 
-  // Liquidity: Tight spread + volume
-  if (option.spreadPercent < 5 && option.volume > 100) liquidityScore = 2;
-  else if (option.spreadPercent < 10 && option.volume > 50) liquidityScore = 1;
+  // Liquidity scoring
+  if (option.spreadPercent < 3 && option.volume > 200) liquidityScore = 2;
+  else if (option.spreadPercent < 5 && option.volume > 50) liquidityScore = 1;
 
-  // Timing: 21-45 DTE optimal
+  // Timing scoring
   if (option.dte >= 21 && option.dte <= 45) timingScore = 2;
   else if (option.dte >= 14 && option.dte <= 60) timingScore = 1;
 
-  // Technical alignment
+  // Technical scoring
   if (option.type === 'call' && trend === 'BULLISH') technicalScore = 2;
   else if (option.type === 'put' && trend === 'BEARISH') technicalScore = 2;
   else if (trend === 'NEUTRAL') technicalScore = 1;
@@ -716,39 +633,20 @@ function generateSuggestions(
 ): any[] {
   const suggestions: any[] = [];
 
-  // Filter valid options
   const validCalls = calls.filter(c => c.dte >= 7 && c.dte <= 90 && c.bid > 0.05);
   const validPuts = puts.filter(p => p.dte >= 7 && p.dte <= 90 && p.bid > 0.05);
 
-  // Score all valid options
   const scoredCalls = validCalls.map(c => ({ contract: c, score: scoreOption(c, trend, ivAnalysis.atmIV) }));
   const scoredPuts = validPuts.map(p => ({ contract: p, score: scoreOption(p, trend, ivAnalysis.atmIV) }));
 
   scoredCalls.sort((a, b) => b.score.total - a.score.total);
   scoredPuts.sort((a, b) => b.score.total - a.score.total);
 
-  // Best call (if bullish or neutral)
+  // Best call
   if (scoredCalls.length > 0 && trend !== 'BEARISH') {
     const best = scoredCalls[0];
     const c = best.contract;
     const s = best.score;
-    
-    const callExplanation = {
-      summary: `This ${c.dte}-day call option at $${c.strike} strike scores ${s.total}/12, making it ${s.total >= 8 ? 'an excellent' : s.total >= 5 ? 'a good' : 'a speculative'} ${trend === 'BULLISH' ? 'directional play' : 'speculative bet'}.`,
-      scoreBreakdown: {
-        delta: { score: s.delta, max: 2, reason: `Delta ${c.delta.toFixed(2)} - ${Math.abs(c.delta) >= 0.35 && Math.abs(c.delta) <= 0.65 ? 'optimal range for directional exposure' : 'outside optimal 0.35-0.65 range'}` },
-        iv: { score: s.iv, max: 2, reason: `IV ${(c.iv * 100).toFixed(0)}% vs avg ${ivAnalysis.atmIV.toFixed(0)}% - ${c.iv * 100 < ivAnalysis.atmIV ? 'below average = cheaper option' : 'at or above average'}` },
-        liquidity: { score: s.liquidity, max: 2, reason: `Spread ${c.spreadPercent.toFixed(1)}%, Volume ${c.volume} - ${c.spreadPercent < 5 && c.volume > 100 ? 'excellent liquidity' : 'moderate liquidity'}` },
-        timing: { score: s.timing, max: 2, reason: `${c.dte} DTE - ${c.dte >= 21 && c.dte <= 45 ? 'optimal 21-45 day window' : c.dte < 21 ? 'short-dated, high theta decay' : 'longer-dated, lower theta'}` },
-        technical: { score: s.technical, max: 2, reason: `Trend: ${trend} - ${trend === 'BULLISH' ? 'aligned with call direction' : 'neutral trend, speculative'}` },
-        unusual: { score: s.unusual, max: 2, reason: c.isUnusual ? 'Unusual activity detected - institutional interest' : 'Normal activity levels' },
-      },
-      whyThisStrike: `$${c.strike} strike has ${Math.round(Math.abs(c.delta) * 100)}% probability of expiring ITM. ${c.itm ? 'Currently in-the-money with intrinsic value.' : 'Out-of-the-money, pure time value.'}`,
-      riskReward: `Max risk: $${(c.ask * 100).toFixed(0)} per contract. Breakeven at $${(c.strike + c.ask).toFixed(2)} at expiration.`,
-      marketContext: trend === 'BULLISH' 
-        ? 'Current uptrend supports bullish thesis. Call is trend-aligned.'
-        : 'Current trend is neutral. This is a speculative play - manage position size accordingly.',
-    };
     
     suggestions.push({
       type: 'CALL',
@@ -757,15 +655,13 @@ function generateSuggestions(
       score: s,
       reasoning: [
         `Delta: ${c.delta.toFixed(2)} (${Math.round(Math.abs(c.delta) * 100)}% prob ITM)`,
-        `IV: ${(c.iv * 100).toFixed(0)}% ${c.iv * 100 < ivAnalysis.atmIV ? '(below avg)' : ''}`,
+        `IV: ${(c.iv * 100).toFixed(0)}%`,
         `DTE: ${c.dte} days | Spread: ${c.spreadPercent.toFixed(1)}%`,
-        `Vol/OI: ${c.volumeOIRatio.toFixed(1)}x ${c.isUnusual ? '🔥 UNUSUAL' : ''}`,
         `Score: ${s.total}/12`,
       ],
       warnings: s.total < 6 ? ['Lower confidence - manage size'] : [],
       confidence: Math.round((s.total / 12) * 100),
       riskLevel: s.total >= 8 ? 'LOW' : s.total >= 5 ? 'MEDIUM' : 'HIGH',
-      detailedExplanation: callExplanation,
     });
   }
 
@@ -775,23 +671,6 @@ function generateSuggestions(
     const p = best.contract;
     const s = best.score;
     
-    const putExplanation = {
-      summary: `This ${p.dte}-day put option at $${p.strike} strike scores ${s.total}/12, making it ${s.total >= 8 ? 'an excellent' : s.total >= 5 ? 'a good' : 'a speculative'} ${trend === 'BEARISH' ? 'directional play' : 'hedge'}.`,
-      scoreBreakdown: {
-        delta: { score: s.delta, max: 2, reason: `Delta ${p.delta.toFixed(2)} - ${Math.abs(p.delta) >= 0.35 && Math.abs(p.delta) <= 0.65 ? 'optimal range for directional exposure' : 'outside optimal 0.35-0.65 range'}` },
-        iv: { score: s.iv, max: 2, reason: `IV ${(p.iv * 100).toFixed(0)}% vs avg ${ivAnalysis.atmIV.toFixed(0)}% - ${p.iv * 100 < ivAnalysis.atmIV ? 'below average = cheaper option' : 'at or above average'}` },
-        liquidity: { score: s.liquidity, max: 2, reason: `Spread ${p.spreadPercent.toFixed(1)}%, Volume ${p.volume} - ${p.spreadPercent < 5 && p.volume > 100 ? 'excellent liquidity' : 'moderate liquidity'}` },
-        timing: { score: s.timing, max: 2, reason: `${p.dte} DTE - ${p.dte >= 21 && p.dte <= 45 ? 'optimal 21-45 day window' : p.dte < 21 ? 'short-dated, high theta decay' : 'longer-dated, lower theta'}` },
-        technical: { score: s.technical, max: 2, reason: `Trend: ${trend} - ${trend === 'BEARISH' ? 'aligned with put direction' : 'counter-trend, use as hedge'}` },
-        unusual: { score: s.unusual, max: 2, reason: p.isUnusual ? 'Unusual activity detected - institutional interest' : 'Normal activity levels' },
-      },
-      whyThisStrike: `$${p.strike} strike has ${Math.round(Math.abs(p.delta) * 100)}% probability of expiring ITM. ${p.itm ? 'Currently in-the-money with intrinsic value.' : 'Out-of-the-money, pure time value.'}`,
-      riskReward: `Max risk: $${(p.ask * 100).toFixed(0)} per contract. Breakeven at $${(p.strike - p.ask).toFixed(2)} at expiration.`,
-      marketContext: trend === 'BEARISH' 
-        ? 'Current downtrend supports bearish thesis. Put is trend-aligned.'
-        : 'Current trend is not bearish. This put serves better as portfolio protection than directional bet.',
-    };
-    
     suggestions.push({
       type: 'PUT',
       strategy: trend === 'BEARISH' ? 'Long Put (Trend Aligned)' : 'Protective Put (Hedge)',
@@ -799,35 +678,19 @@ function generateSuggestions(
       score: s,
       reasoning: [
         `Delta: ${p.delta.toFixed(2)} (${Math.round(Math.abs(p.delta) * 100)}% prob ITM)`,
-        `IV: ${(p.iv * 100).toFixed(0)}% ${p.iv * 100 < ivAnalysis.atmIV ? '(below avg)' : ''}`,
+        `IV: ${(p.iv * 100).toFixed(0)}%`,
         `DTE: ${p.dte} days | Spread: ${p.spreadPercent.toFixed(1)}%`,
-        `Vol/OI: ${p.volumeOIRatio.toFixed(1)}x ${p.isUnusual ? '🔥 UNUSUAL' : ''}`,
         `Score: ${s.total}/12`,
       ],
       warnings: trend !== 'BEARISH' ? ['Counter-trend - use as hedge'] : [],
       confidence: Math.round((s.total / 12) * 100),
       riskLevel: s.total >= 8 ? 'LOW' : s.total >= 5 ? 'MEDIUM' : 'HIGH',
-      detailedExplanation: putExplanation,
     });
   }
 
   // Unusual activity alert
   if (unusualActivity.length > 0) {
     const topUnusual = unusualActivity[0];
-    const unusualExplanation = {
-      summary: `Unusual options activity detected on ${topUnusual.contract.type.toUpperCase()} $${topUnusual.contract.strike} - this often indicates institutional positioning.`,
-      whyUnusual: [
-        `Volume: ${topUnusual.contract.volume.toLocaleString()} contracts traded today`,
-        `Open Interest: ${topUnusual.contract.openInterest.toLocaleString()} existing contracts`,
-        `Volume/OI Ratio: ${topUnusual.contract.volumeOIRatio.toFixed(1)}x - ${topUnusual.contract.volumeOIRatio >= 3 ? 'very high, likely new positions' : 'elevated activity'}`,
-        `Premium Flow: $${Math.round(topUnusual.premiumValue).toLocaleString()} in premium`,
-      ],
-      interpretation: topUnusual.sentiment === 'BULLISH'
-        ? 'Heavy call buying suggests institutional traders expect upward movement.'
-        : 'Heavy put buying suggests institutional traders expect downward movement or are hedging.',
-      caveat: 'Unusual activity is a signal, not a guarantee. Institutions may be hedging existing positions rather than making directional bets.',
-    };
-    
     suggestions.push({
       type: 'ALERT',
       strategy: `🔥 Unusual Activity: ${topUnusual.contract.type.toUpperCase()} $${topUnusual.contract.strike}`,
@@ -837,21 +700,15 @@ function generateSuggestions(
       confidence: topUnusual.score,
       riskLevel: 'WARNING',
       sentiment: topUnusual.sentiment,
-      detailedExplanation: unusualExplanation,
     });
   }
 
-  // IV alert
+  // IV alerts
   if (ivAnalysis.ivSignal === 'HIGH') {
     suggestions.push({
       type: 'ALERT',
       strategy: `⚠️ High IV Environment (${ivAnalysis.atmIV.toFixed(0)}%)`,
-      reasoning: [
-        `IV Rank: ${ivAnalysis.ivRank}%`,
-        'Options are expensive',
-        'Consider selling premium or spreads',
-        'Avoid buying naked options',
-      ],
+      reasoning: ['Options are expensive', 'Consider selling premium or spreads'],
       warnings: [],
       confidence: 0,
       riskLevel: 'WARNING',
@@ -860,12 +717,7 @@ function generateSuggestions(
     suggestions.push({
       type: 'ALERT',
       strategy: `💡 Low IV Environment (${ivAnalysis.atmIV.toFixed(0)}%)`,
-      reasoning: [
-        `IV Rank: ${ivAnalysis.ivRank}%`,
-        'Options are cheap',
-        'Good time to buy premium',
-        'Consider long calls/puts',
-      ],
+      reasoning: ['Options are cheap', 'Good time to buy premium'],
       warnings: [],
       confidence: 0,
       riskLevel: 'WARNING',
@@ -877,29 +729,7 @@ function generateSuggestions(
     suggestions.push({
       type: 'ALERT',
       strategy: rsi > 70 ? `⚠️ RSI Overbought (${rsi.toFixed(0)})` : `⚠️ RSI Oversold (${rsi.toFixed(0)})`,
-      reasoning: [
-        rsi > 70 ? 'Stock may be extended - calls risky' : 'Stock may bounce - puts risky',
-        'Wait for confirmation before trading',
-      ],
-      warnings: [],
-      confidence: 0,
-      riskLevel: 'WARNING',
-    });
-  }
-
-  // Put/Call skew alert
-  if (Math.abs(ivAnalysis.putCallIVSkew) > 3) {
-    suggestions.push({
-      type: 'ALERT',
-      strategy: ivAnalysis.putCallIVSkew > 0 
-        ? `📉 Put Skew Elevated (+${ivAnalysis.putCallIVSkew.toFixed(1)}%)` 
-        : `📈 Call Skew Elevated (${ivAnalysis.putCallIVSkew.toFixed(1)}%)`,
-      reasoning: [
-        ivAnalysis.putCallIVSkew > 0 
-          ? 'Puts more expensive than calls - hedging activity'
-          : 'Calls more expensive than puts - bullish speculation',
-        'May indicate institutional positioning',
-      ],
+      reasoning: [rsi > 70 ? 'Stock may be extended' : 'Stock may bounce'],
       warnings: [],
       confidence: 0,
       riskLevel: 'WARNING',
@@ -916,36 +746,22 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   const ticker = params.ticker.toUpperCase();
   const startTime = Date.now();
 
-  // Get Schwab token
   const { token, error: tokenError, errorCode } = await getSchwabToken();
   
   if (!token) {
-    const instructions = errorCode === 401 
-      ? [
-          '⚠️ Your Schwab refresh token has EXPIRED',
-          'Schwab tokens expire every 7 days',
-          'You need to generate a new refresh token from Schwab Developer Portal',
-          'Then update SCHWAB_REFRESH_TOKEN in Vercel environment variables',
-        ]
-      : [
-          'Set SCHWAB_APP_KEY in Vercel',
-          'Set SCHWAB_APP_SECRET in Vercel', 
-          'Set SCHWAB_REFRESH_TOKEN in Vercel',
-          'Refresh tokens expire every 7 days',
-        ];
-    
     return NextResponse.json({
       error: 'Schwab authentication failed',
       details: tokenError,
       errorCode,
       ticker,
-      instructions,
+      instructions: errorCode === 401 
+        ? ['Schwab refresh token has expired (7-day limit)', 'Generate a new refresh token']
+        : ['Set SCHWAB_APP_KEY, SCHWAB_APP_SECRET, SCHWAB_REFRESH_TOKEN'],
       lastUpdated: new Date().toISOString(),
       dataSource: 'none',
     });
   }
 
-  // Fetch options chain
   const { data: chainData, error: chainError } = await fetchOptionsChain(token, ticker);
   
   if (!chainData || chainError) {
@@ -964,35 +780,24 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     return NextResponse.json({ error: 'Invalid underlying price', ticker });
   }
 
-  // Parse all options
   const { calls, puts, expirations, byExpiration } = parseOptionsChain(chainData, currentPrice);
-
-  // Fetch price history for technicals
   const priceHistory = await fetchPriceHistory(token, ticker);
   
-  // Calculate technicals
   const rsi = priceHistory.length > 14 ? calculateRSI(priceHistory) : 50;
   const sma20 = priceHistory.length > 20 ? calculateSMA(priceHistory, 20) : currentPrice;
   const sma50 = priceHistory.length > 50 ? calculateSMA(priceHistory, 50) : currentPrice * 0.95;
   const support = priceHistory.length > 0 ? Math.min(...priceHistory.slice(-20)) : currentPrice * 0.95;
   const resistance = priceHistory.length > 0 ? Math.max(...priceHistory.slice(-20)) : currentPrice * 1.05;
   
-  // Determine trend
   let trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
   if (currentPrice > sma20 && currentPrice > sma50) trend = 'BULLISH';
   else if (currentPrice < sma20 && currentPrice < sma50) trend = 'BEARISH';
 
-  // Calculate analytics
   const ivAnalysis = analyzeIV(calls, puts, currentPrice);
   const marketMetrics = calculateMarketMetrics(calls, puts, currentPrice);
   const unusualActivity = detectUnusualActivity(calls, puts, currentPrice);
+  const suggestions = generateSuggestions(calls, puts, trend, rsi, ivAnalysis, marketMetrics, unusualActivity);
 
-  // Generate suggestions
-  const suggestions = generateSuggestions(
-    calls, puts, trend, rsi, ivAnalysis, marketMetrics, unusualActivity
-  );
-
-  // Get first expiration data
   const firstExp = expirations[0] || '';
 
   return NextResponse.json({
@@ -1001,15 +806,9 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     lastUpdated: new Date().toISOString(),
     dataSource: 'schwab-live',
     responseTimeMs: Date.now() - startTime,
-
-    // All expirations
     expirations,
     selectedExpiration: firstExp,
-
-    // Options by expiration (for dropdown selection)
     byExpiration,
-
-    // Technical context
     technicals: {
       trend,
       rsi: Math.round(rsi),
@@ -1018,11 +817,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       support: Math.round(support * 100) / 100,
       resistance: Math.round(resistance * 100) / 100,
     },
-
-    // IV Analysis
     ivAnalysis,
-
-    // Market Metrics
     metrics: {
       putCallRatio: marketMetrics.putCallRatio,
       putCallOIRatio: marketMetrics.putCallOIRatio,
@@ -1035,8 +830,6 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       avgIV: ivAnalysis.atmIV,
       ivRank: ivAnalysis.ivRank,
     },
-
-    // Unusual Options Activity
     unusualActivity: unusualActivity.map(u => ({
       strike: u.contract.strike,
       type: u.contract.type,
@@ -1059,17 +852,11 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       convictionLevel: u.convictionLevel,
       interpretation: u.interpretation,
     })),
-
-    // Trade suggestions
     suggestions,
-
-    // Options chain for first expiration
     optionsChain: {
       calls: byExpiration[firstExp]?.calls || [],
       puts: byExpiration[firstExp]?.puts || [],
     },
-
-    // All calls and puts (for comprehensive view)
     allCalls: calls,
     allPuts: puts,
   });

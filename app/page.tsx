@@ -13,6 +13,185 @@ function LoadingSpinner() {
   );
 }
 
+// ============================================================
+// TRACK BUTTON COMPONENT
+// ============================================================
+function TrackButton({ 
+  ticker, 
+  suggestion, 
+  entryPrice, 
+  onTrack 
+}: { 
+  ticker: string;
+  suggestion: any;
+  entryPrice: number;
+  onTrack: (success: boolean, message: string) => void;
+}) {
+  const [tracking, setTracking] = useState(false);
+  
+  const handleTrack = async () => {
+    setTracking(true);
+    try {
+      const trackData: any = {
+        ticker,
+        type: suggestion.type === 'BUY' ? 'STOCK_BUY' : 
+              suggestion.type === 'SELL' ? 'STOCK_SELL' : 
+              suggestion.type,
+        strategy: suggestion.strategy,
+        entryPrice,
+        confidence: suggestion.confidence || 0,
+        reasoning: suggestion.reasoning || [],
+      };
+      
+      if (suggestion.contract) {
+        trackData.optionContract = {
+          strike: suggestion.contract.strike,
+          expiration: suggestion.contract.expiration,
+          dte: suggestion.contract.dte,
+          delta: suggestion.contract.delta,
+          entryAsk: suggestion.contract.ask,
+        };
+      }
+      
+      if (suggestion.type === 'BUY' || suggestion.type === 'STOCK_BUY' || suggestion.type === 'CALL') {
+        trackData.targetPrice = Math.round(entryPrice * 1.10 * 100) / 100;
+        trackData.stopLoss = Math.round(entryPrice * 0.95 * 100) / 100;
+      } else if (suggestion.type === 'SELL' || suggestion.type === 'STOCK_SELL' || suggestion.type === 'PUT') {
+        trackData.targetPrice = Math.round(entryPrice * 0.90 * 100) / 100;
+        trackData.stopLoss = Math.round(entryPrice * 1.05 * 100) / 100;
+      }
+      
+      const res = await fetch('/api/tracker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(trackData),
+      });
+      
+      const result = await res.json();
+      onTrack(result.success, result.success ? `✓ Tracking ${ticker}` : result.error);
+    } catch {
+      onTrack(false, 'Network error');
+    }
+    setTracking(false);
+  };
+  
+  if (suggestion.type === 'ALERT') return null;
+  
+  return (
+    <button
+      onClick={handleTrack}
+      disabled={tracking}
+      className="mt-2 px-3 py-1.5 rounded-lg bg-blue-500/20 text-blue-400 text-xs font-medium hover:bg-blue-500/30 transition disabled:opacity-50 flex items-center gap-1"
+    >
+      {tracking ? <><span className="w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" /> Tracking...</> : <>📌 Track</>}
+    </button>
+  );
+}
+
+// ============================================================
+// TRACKER TAB
+// ============================================================
+function TrackerTab() {
+  const [trackerData, setTrackerData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  
+  const fetchTrackerData = async () => {
+    try {
+      const res = await fetch('/api/tracker');
+      if (res.ok) setTrackerData(await res.json());
+    } catch {}
+    setLoading(false);
+  };
+  
+  useEffect(() => { fetchTrackerData(); }, []);
+  
+  const handleClose = async (id: string, status: string) => {
+    await fetch('/api/tracker', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, status }) });
+    fetchTrackerData();
+  };
+  
+  const handleDelete = async (id: string) => {
+    await fetch(`/api/tracker?id=${id}`, { method: 'DELETE' });
+    fetchTrackerData();
+  };
+  
+  if (loading) return <LoadingSpinner />;
+  
+  if (!trackerData?.suggestions?.length) {
+    return (
+      <div className="text-center py-12">
+        <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-slate-800/50 flex items-center justify-center"><span className="text-4xl">📊</span></div>
+        <h3 className="text-lg font-semibold text-white mb-2">No Tracked Suggestions</h3>
+        <p className="text-slate-400 text-sm">Click "Track" on any suggestion to monitor performance.</p>
+      </div>
+    );
+  }
+  
+  const { suggestions, stats } = trackerData;
+  
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+        <div className="p-4 rounded-xl border border-slate-700/50 bg-slate-800/30 text-center">
+          <p className="text-xs text-slate-400">Total</p><p className="text-2xl font-bold text-white">{stats.total}</p>
+        </div>
+        <div className="p-4 rounded-xl border border-blue-500/30 bg-blue-500/5 text-center">
+          <p className="text-xs text-slate-400">Active</p><p className="text-2xl font-bold text-blue-400">{stats.active}</p>
+        </div>
+        <div className="p-4 rounded-xl border border-emerald-500/30 bg-emerald-500/5 text-center">
+          <p className="text-xs text-slate-400">Winners</p><p className="text-2xl font-bold text-emerald-400">{stats.winners}</p>
+        </div>
+        <div className="p-4 rounded-xl border border-red-500/30 bg-red-500/5 text-center">
+          <p className="text-xs text-slate-400">Losers</p><p className="text-2xl font-bold text-red-400">{stats.losers}</p>
+        </div>
+        <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 text-center">
+          <p className="text-xs text-slate-400">Win Rate</p><p className={`text-2xl font-bold ${stats.winRate >= 50 ? 'text-emerald-400' : 'text-red-400'}`}>{stats.winRate}%</p>
+        </div>
+        <div className="p-4 rounded-xl border border-purple-500/30 bg-purple-500/5 text-center">
+          <p className="text-xs text-slate-400">Avg Return</p><p className={`text-2xl font-bold ${stats.avgReturn >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{stats.avgReturn >= 0 ? '+' : ''}{stats.avgReturn}%</p>
+        </div>
+      </div>
+      
+      <button onClick={fetchTrackerData} className="px-4 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-300 text-sm">🔄 Refresh</button>
+      
+      <div className="space-y-4">
+        {suggestions.map((s: any) => (
+          <div key={s.id} className={`p-4 rounded-xl border ${s.status === 'ACTIVE' ? (s.pnlPercent >= 0 ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5') : 'border-slate-700/50 bg-slate-800/30'}`}>
+            <div className="flex items-start justify-between mb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-bold text-lg font-mono text-white">{s.ticker}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded ${s.type.includes('BUY') || s.type === 'CALL' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>{s.type.replace('STOCK_', '')}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded ${s.status === 'ACTIVE' ? 'bg-blue-500/20 text-blue-400' : s.status === 'HIT_TARGET' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/20 text-slate-400'}`}>{s.status.replace('_', ' ')}</span>
+                </div>
+                <p className="text-sm text-slate-400">{s.strategy}</p>
+              </div>
+              <div className="text-right">
+                <p className={`text-2xl font-bold ${s.pnlPercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{s.pnlPercent >= 0 ? '+' : ''}{s.pnlPercent}%</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-2 mb-3 text-xs">
+              <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400">Entry</p><p className="font-bold text-white">${s.entryPrice?.toFixed(2)}</p></div>
+              <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400">Current</p><p className={`font-bold ${s.currentPrice >= s.entryPrice ? 'text-emerald-400' : 'text-red-400'}`}>${s.currentPrice?.toFixed(2)}</p></div>
+              <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400">Target</p><p className="font-bold text-emerald-400">${s.targetPrice?.toFixed(2) || 'N/A'}</p></div>
+              <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400">Stop</p><p className="font-bold text-red-400">${s.stopLoss?.toFixed(2) || 'N/A'}</p></div>
+            </div>
+            {s.status === 'ACTIVE' ? (
+              <div className="flex gap-2">
+                <button onClick={() => handleClose(s.id, 'HIT_TARGET')} className="flex-1 px-3 py-2 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs hover:bg-emerald-500/30">✓ Hit Target</button>
+                <button onClick={() => handleClose(s.id, 'STOPPED_OUT')} className="flex-1 px-3 py-2 rounded-lg bg-red-500/20 text-red-400 text-xs hover:bg-red-500/30">✗ Stopped Out</button>
+                <button onClick={() => handleClose(s.id, 'CLOSED')} className="flex-1 px-3 py-2 rounded-lg bg-slate-500/20 text-slate-400 text-xs hover:bg-slate-500/30">Close</button>
+              </div>
+            ) : (
+              <button onClick={() => handleDelete(s.id)} className="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-400 text-xs hover:text-white">🗑️ Remove</button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ScoreBar({ score, maxScore, label, size = 'md' }: { score: number; maxScore: number; label: string; size?: 'sm' | 'md' }) {
   const pct = (score / maxScore) * 100;
   const color = pct >= 70 ? 'bg-emerald-500' : pct >= 50 ? 'bg-amber-500' : 'bg-red-500';
@@ -43,7 +222,7 @@ function FactorItem({ factor }: { factor: { name: string; passed: boolean; value
 // ============================================================
 // STOCK TAB
 // ============================================================
-function StockTab({ data, loading }: { data: any; loading: boolean }) {
+function StockTab({ data, loading, onTrack }: { data: any; loading: boolean; onTrack?: (success: boolean, message: string) => void }) {
   if (loading) return <LoadingSpinner />;
   if (!data) return <p className="text-slate-500 text-center py-12">Enter a ticker symbol to analyze</p>;
   if (data.error) {
@@ -84,6 +263,55 @@ function StockTab({ data, loading }: { data: any; loading: boolean }) {
         </div>
       </div>
 
+      {/* NEW: Chart Patterns Section */}
+      {data.chartPatterns?.detected?.length > 0 && (
+        <div className="p-5 rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-950/30 to-pink-950/20">
+          <h2 className="text-lg font-semibold text-white mb-4">📐 Professional Chart Patterns</h2>
+          <p className="text-xs text-slate-400 mb-3">{data.chartPatterns.summary}</p>
+          <div className="space-y-3">
+            {data.chartPatterns.detected.map((pattern: any, i: number) => (
+              <div key={i} className={`p-3 rounded-xl border ${
+                pattern.type === 'BULLISH' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'
+              }`}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-bold text-white">
+                    {pattern.type === 'BULLISH' ? '📈' : '📉'} {pattern.name}
+                  </span>
+                  <span className={`text-xs px-2 py-0.5 rounded ${
+                    pattern.status === 'ACTIVE' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
+                  }`}>{pattern.status}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div className="p-2 rounded bg-slate-800/50">
+                    <p className="text-slate-400">Success Rate</p>
+                    <p className="font-bold text-white">{pattern.successRate}</p>
+                  </div>
+                  {pattern.target && (
+                    <div className="p-2 rounded bg-slate-800/50">
+                      <p className="text-slate-400">Target</p>
+                      <p className="font-bold text-emerald-400">{pattern.target}</p>
+                    </div>
+                  )}
+                  {(pattern.upside || pattern.downside) && (
+                    <div className="p-2 rounded bg-slate-800/50">
+                      <p className="text-slate-400">{pattern.upside ? 'Upside' : 'Downside'}</p>
+                      <p className={`font-bold ${pattern.upside ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {pattern.upside || pattern.downside}%
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          {data.chartPatterns.patternBonus !== 0 && (
+            <p className={`mt-3 text-xs ${data.chartPatterns.patternBonus > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {data.chartPatterns.patternBonus > 0 ? '+' : ''}{data.chartPatterns.patternBonus}% confidence adjustment from patterns
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Suggestions */}
       <div className="p-5 rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-950/30 to-cyan-950/20">
         <h2 className="text-lg font-semibold text-white mb-4">💡 Recommendations</h2>
@@ -111,6 +339,9 @@ function StockTab({ data, loading }: { data: any; loading: boolean }) {
               <div className="mb-3">
                 {sug.reasoning?.map((r: string, j: number) => <p key={j} className="text-xs text-slate-400">• {r}</p>)}
               </div>
+              
+              {/* Track Button */}
+              {onTrack && <TrackButton ticker={data.ticker} suggestion={sug} entryPrice={data.price} onTrack={onTrack} />}
               
               {/* Detailed Explanation (expandable) */}
               {sug.detailedExplanation && sug.type !== 'ALERT' && (
@@ -511,7 +742,7 @@ function StockTab({ data, loading }: { data: any; loading: boolean }) {
 // ============================================================
 // OPTIONS TAB
 // ============================================================
-function OptionsTab({ data, loading }: { data: any; loading: boolean }) {
+function OptionsTab({ data, loading, onTrack }: { data: any; loading: boolean; onTrack?: (success: boolean, message: string) => void }) {
   const [selectedExp, setSelectedExp] = useState<string>('');
   const [showCalls, setShowCalls] = useState(true);
   
@@ -620,6 +851,9 @@ function OptionsTab({ data, loading }: { data: any; loading: boolean }) {
                 <div className="space-y-1 mb-2">
                   {sug.reasoning?.slice(0, 3).map((r: string, j: number) => <p key={j} className="text-xs text-slate-300">• {r}</p>)}
                 </div>
+                
+                {/* Track Button */}
+                {onTrack && <TrackButton ticker={data.ticker} suggestion={sug} entryPrice={data.currentPrice} onTrack={onTrack} />}
                 
                 {/* Detailed Explanation */}
                 {sug.detailedExplanation && (
@@ -797,11 +1031,17 @@ const POPULAR_TICKERS = [
 export default function Home() {
   const [ticker, setTicker] = useState('');
   const [searchedTicker, setSearchedTicker] = useState('');
-  const [activeTab, setActiveTab] = useState<'stocks' | 'options'>('stocks');
+  const [activeTab, setActiveTab] = useState<'stocks' | 'options' | 'tracker'>('stocks');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
   const [loadingStock, setLoadingStock] = useState(false);
   const [loadingOptions, setLoadingOptions] = useState(false);
+  const [trackMessage, setTrackMessage] = useState<{ success: boolean; text: string } | null>(null);
+
+  const handleTrack = (success: boolean, message: string) => {
+    setTrackMessage({ success, text: message });
+    setTimeout(() => setTrackMessage(null), 3000);
+  };
 
   const handleSearch = async (sym?: string) => {
     const searchSym = (sym || ticker).toUpperCase().trim();
@@ -898,12 +1138,21 @@ export default function Home() {
           <div className="flex gap-2">
             <button onClick={() => setActiveTab('stocks')} className={`px-5 py-2.5 rounded-xl font-medium transition ${activeTab === 'stocks' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'text-slate-400 hover:text-white bg-slate-800/30'}`}>📊 Stock</button>
             <button onClick={() => setActiveTab('options')} className={`px-5 py-2.5 rounded-xl font-medium transition ${activeTab === 'options' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'text-slate-400 hover:text-white bg-slate-800/30'}`}>📈 Options</button>
+            <button onClick={() => setActiveTab('tracker')} className={`px-5 py-2.5 rounded-xl font-medium transition ${activeTab === 'tracker' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-slate-400 hover:text-white bg-slate-800/30'}`}>📌 Tracker</button>
           </div>
-          {searchedTicker && <button onClick={handleRefresh} disabled={loadingStock || loadingOptions} className="px-4 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-300 hover:text-white text-sm flex items-center gap-2 disabled:opacity-50"><span className={loadingStock || loadingOptions ? 'animate-spin' : ''}>🔄</span> Refresh</button>}
+          {searchedTicker && activeTab !== 'tracker' && <button onClick={handleRefresh} disabled={loadingStock || loadingOptions} className="px-4 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-300 hover:text-white text-sm flex items-center gap-2 disabled:opacity-50"><span className={loadingStock || loadingOptions ? 'animate-spin' : ''}>🔄</span> Refresh</button>}
         </div>
 
-        {activeTab === 'stocks' && <StockTab data={stockData} loading={loadingStock} />}
-        {activeTab === 'options' && <OptionsTab data={optionsData} loading={loadingOptions} />}
+        {/* Track Message Toast */}
+        {trackMessage && (
+          <div className={`mb-4 p-3 rounded-xl text-sm font-medium animate-fadeIn ${trackMessage.success ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-red-500/20 text-red-400 border border-red-500/30'}`}>
+            {trackMessage.text}
+          </div>
+        )}
+
+        {activeTab === 'stocks' && <StockTab data={stockData} loading={loadingStock} onTrack={handleTrack} />}
+        {activeTab === 'options' && <OptionsTab data={optionsData} loading={loadingOptions} onTrack={handleTrack} />}
+        {activeTab === 'tracker' && <TrackerTab />}
 
         <div className="mt-8 p-4 rounded-xl bg-slate-800/20 border border-slate-700/30">
           <p className="text-xs text-slate-500 text-center">⚠️ Educational purposes only. Not financial advice. Data: Schwab, Finnhub</p>

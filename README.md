@@ -1,11 +1,11 @@
 # AI Hedge Fund 🧠📈
 
-A real-time stock and options analysis platform featuring **fundamental analysis**, **technical analysis**, and **Greeks-based options suggestions**.
+A real-time stock and options analysis platform featuring **fundamental analysis**, **technical analysis**, **Greeks-based options suggestions**, and **suggestion performance tracking**.
 
 ## Features
 
 ### 📊 Stock Analysis Tab
-- **Real-time stock prices** via Finnhub API
+- **Real-time stock prices** via Schwab/Finnhub API
 - **Fundamental Analysis** scoring based on:
   - P/E Ratio (undervalued < 15, fairly valued < 25, overvalued > 40)
   - ROE (strong > 20%, good > 15%, weak < 10%)
@@ -35,47 +35,25 @@ A real-time stock and options analysis platform featuring **fundamental analysis
 
 - **Market sentiment** analysis
 - **Put/Call ratio** interpretation
-- **Earnings proximity** alerts
+- **Unusual Options Activity** detection
 
-## Scoring Logic
+### 📌 Suggestion Tracker Tab (NEW!)
+- **Track any suggestion** from Stock or Options tabs
+- **Real-time P&L tracking** with current prices from your APIs
+- **Performance metrics**:
+  - Win Rate percentage
+  - Average Return
+  - Winners vs Losers count
+  - Active vs Closed positions
 
-### Fundamental Signals
+- **Position management**:
+  - Mark as Hit Target
+  - Mark as Stopped Out
+  - Close Position manually
 
-| Signal | Bullish Points | Bearish Points |
-|--------|----------------|----------------|
-| P/E < 15 | +2 | — |
-| P/E > 40 | — | +2 |
-| ROE > 20% | +2 | — |
-| ROE < 10% | — | +1 |
-| Debt/Equity < 0.5 | +2 | — |
-| Debt/Equity > 2 | — | +2 |
-| Profit Margin > 20% | +2 | — |
-| Profit Margin < 5% | — | +1 |
-| Revenue Growth > 20% | +2 | — |
-| Revenue Declining | — | +2 |
-
-### Technical Signals
-
-| Signal | Bullish Points | Bearish Points |
-|--------|----------------|----------------|
-| Golden Cross (50 > 200 SMA) | +2 | — |
-| Death Cross (50 < 200 SMA) | — | +2 |
-| Price > both SMAs | +2 | — |
-| Price < both SMAs | — | +2 |
-| RSI < 30 (oversold) | +2 | — |
-| RSI > 70 (overbought) | — | +2 |
-| MACD bullish crossover | +2 | — |
-| MACD bearish crossover | — | +2 |
-
-### Options Greeks-Based Adjustments
-
-| Signal | Effect |
-|--------|--------|
-| Theta > 10% of premium/day | -10 confidence |
-| Gamma > 0.05 + DTE < 7 | Warning alert |
-| IV > 40% | -10 confidence (expensive) |
-| IV < 25% | +5 confidence (cheap) |
-| Earnings < 7 days | -15 confidence |
+- **Auto-calculated targets**:
+  - 10% profit target
+  - 5% stop loss
 
 ## Quick Start
 
@@ -95,7 +73,7 @@ npm install
 **For Live Options Data (Recommended):**
 2. **Schwab Developer API**: [developer.schwab.com](https://developer.schwab.com)
    - Requires a Schwab brokerage account
-   - Provides real-time options chains with full Greeks (Delta, Gamma, Theta, Vega)
+   - Provides real-time options chains with full Greeks
    - OAuth refresh tokens expire every 7 days
 
 ### 3. Configure Environment
@@ -122,19 +100,6 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000)
 
-## Deploy to Vercel
-
-### One-Click Deploy
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USERNAME/ai-hedge-fund&env=FINNHUB_API_KEY)
-
-### Manual Deploy
-
-1. Push to GitHub
-2. Import to [Vercel](https://vercel.com/new)
-3. Add environment variable: `FINNHUB_API_KEY`
-4. Deploy!
-
 ## Project Structure
 
 ```
@@ -142,10 +107,11 @@ ai-hedge-fund/
 ├── app/
 │   ├── api/
 │   │   ├── stock/[ticker]/route.ts   # Stock data + analysis API
-│   │   └── options/[ticker]/route.ts # Options data + suggestions API
+│   │   ├── options/[ticker]/route.ts # Options data + suggestions API
+│   │   └── tracker/route.ts          # Suggestion tracking API (NEW!)
 │   ├── globals.css                   # Tailwind styles
 │   ├── layout.tsx                    # Root layout
-│   └── page.tsx                      # Main UI (Stock + Options tabs)
+│   └── page.tsx                      # Main UI (Stock + Options + Tracker tabs)
 ├── .env.local.example
 ├── package.json
 ├── tailwind.config.js
@@ -156,21 +122,40 @@ ai-hedge-fund/
 ## API Endpoints
 
 ### GET /api/stock/[ticker]
-Returns comprehensive stock analysis:
-- Real-time price, change, volume
-- Fundamental metrics (P/E, ROE, Debt/Equity, margins, growth)
-- Technical indicators (RSI, MACD, SMAs, Golden/Death Cross)
-- Fundamental analysis score & signals
-- Technical analysis score & signals
-- Combined rating & trade suggestions
+Returns comprehensive stock analysis with fundamentals, technicals, news, and suggestions.
 
 ### GET /api/options/[ticker]
-Returns options intelligence:
-- Current price, expiration dates
-- Options chain with Greeks (calls & puts)
-- Market metrics (Put/Call ratio, IV, volume)
-- Greeks-based trade suggestions
-- Earnings & sentiment analysis
+Returns options intelligence with Greeks, unusual activity, and trade suggestions.
+
+### GET /api/tracker
+Returns all tracked suggestions with current prices and performance metrics.
+
+### POST /api/tracker
+Track a new suggestion. Body:
+```json
+{
+  "ticker": "AAPL",
+  "type": "STOCK_BUY" | "STOCK_SELL" | "CALL" | "PUT",
+  "strategy": "Long Call (Trend Aligned)",
+  "entryPrice": 150.00,
+  "targetPrice": 165.00,
+  "stopLoss": 142.50,
+  "confidence": 75,
+  "reasoning": ["RSI favorable", "Above 50 SMA"]
+}
+```
+
+### PUT /api/tracker
+Update suggestion status. Body:
+```json
+{
+  "id": "suggestion-id",
+  "status": "CLOSED" | "HIT_TARGET" | "STOPPED_OUT"
+}
+```
+
+### DELETE /api/tracker?id=suggestion-id
+Remove a tracked suggestion.
 
 ## Tech Stack
 
@@ -178,27 +163,21 @@ Returns options intelligence:
 - **Language**: TypeScript
 - **Styling**: Tailwind CSS
 - **Data Sources**:
-  - **Schwab API**: Live options chains with full Greeks (Delta, Gamma, Theta, Vega, IV)
-  - **Finnhub API**: Stock quotes, fundamentals, news, earnings, analyst ratings
-  - **Fallback**: Mock data when APIs unavailable
+  - **Schwab API**: Live options chains with full Greeks
+  - **Finnhub API**: Stock quotes, fundamentals, news
 
-## Data Flow
+## Tracker Storage Note
 
-1. **Options Tab**: Schwab API → Parse options chains → Generate Greeks-based suggestions
-2. **Stock Tab**: Finnhub API → Analyze fundamentals + technicals → Generate trade suggestions
-3. **Fallback**: If APIs fail, realistic mock data is generated for demo purposes
-
-## Rate Limits
-
-- **Finnhub Free**: 60 API calls/minute
-- **Schwab**: Requires brokerage account, generous limits
-- **Mock Data**: Falls back automatically if no API keys
+Currently, tracked suggestions are stored in-memory (server-side). In production, you should:
+1. Use Vercel KV for serverless-compatible storage
+2. Or connect to a database (Supabase, PlanetScale, etc.)
+3. Or use localStorage for client-side only storage
 
 ## Disclaimer
 
 ⚠️ **For educational purposes only. Not financial advice.**
 
-The analysis provided by this application is for informational purposes only and should not be used for actual investment decisions. Always do your own research and consult with qualified financial advisors before making investment decisions.
+The analysis and tracking provided by this application is for informational purposes only. Always do your own research and consult with qualified financial advisors before making investment decisions.
 
 ## License
 
