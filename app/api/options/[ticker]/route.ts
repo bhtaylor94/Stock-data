@@ -874,7 +874,7 @@ function liquidityOk(c: OptionContract): boolean {
         `Score: ${s.total}/12`,
       ],
       warnings: s.total < 6 ? ['Lower confidence - manage size'] : [],
-      confidence: calibratedOptionConfidence(s.total, trend, (c.type === 'call' && trend === 'BULLISH') || (c.type === 'put' && trend === 'BEARISH'), c.spreadPercent, c.openInterest, c.volume).confidence,
+      confidence: calibratedOptionConfidence(s.total, trend, (trend === 'BULLISH'), c.spreadPercent, c.openInterest, c.volume).confidence,
       riskLevel: s.total >= 8 ? 'LOW' : s.total >= 5 ? 'MEDIUM' : 'HIGH',
     });
   }
@@ -897,7 +897,7 @@ function liquidityOk(c: OptionContract): boolean {
         `Score: ${s.total}/12`,
       ],
       warnings: trend !== 'BEARISH' ? ['Counter-trend - use as hedge'] : [],
-      confidence: calibratedOptionConfidence(s.total, trend, (p.type === 'call' && trend === 'BULLISH') || (p.type === 'put' && trend === 'BEARISH'), p.spreadPercent, p.openInterest, p.volume).confidence,
+      confidence: calibratedOptionConfidence(s.total, trend, (trend === 'BEARISH'), p.spreadPercent, p.openInterest, p.volume).confidence,
       riskLevel: s.total >= 8 ? 'LOW' : s.total >= 5 ? 'MEDIUM' : 'HIGH',
     });
   }
