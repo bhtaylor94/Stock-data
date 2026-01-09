@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 
+// Expected move helper: IV * sqrt(T) using annualized IV.
+// Returns percent move over `dte` days. Used for conservative risk gating.
+function expectedMovePct(atmIV: number, dte: number): number {
+  const t = Math.max(1, dte) / 365;
+  const pct = Math.max(0, atmIV) * Math.sqrt(t) * 100;
+  return Math.round(pct * 100) / 100;
+}
+
 // ============================================================
 // COMPREHENSIVE OPTIONS API
 // Features:
@@ -1113,12 +1121,4 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     allCalls: calls,
     allPuts: puts,
   });
-
-function expectedMovePct(atmIV: number, dte: number) {
-  // Expected move ~ IV * sqrt(T) (annualized IV). Returns percent.
-  const t = Math.max(1, dte) / 365;
-  const pct = Math.max(0, atmIV) * Math.sqrt(t) * 100;
-  return Math.round(pct * 100) / 100;
-}
-
 }
