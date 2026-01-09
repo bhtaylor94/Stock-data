@@ -18,6 +18,13 @@ const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
 // For demo purposes, we use a global variable
 // In production, use Vercel KV, Supabase, or similar
 // ============================================================
+
+// Position size assumptions:
+// - Stocks: 100 shares per suggestion
+// - Options: 5 contracts per suggestion
+const STOCK_POSITION_SIZE = 100;  // shares
+const OPTION_POSITION_SIZE = 5;   // contracts (each controls 100 shares)
+
 interface TrackedSuggestion {
   id: string;
   ticker: string;
@@ -39,6 +46,10 @@ interface TrackedSuggestion {
     entryAsk: number;
   };
   
+  // Position sizing
+  positionSize: number;  // 100 shares or 5 contracts
+  positionType: 'SHARES' | 'CONTRACTS';
+  
   // Tracking metadata
   trackedAt: string;
   status: 'ACTIVE' | 'HIT_TARGET' | 'STOPPED_OUT' | 'EXPIRED' | 'CLOSED';
@@ -46,8 +57,9 @@ interface TrackedSuggestion {
   closedPrice?: number;
   
   // Performance
-  pnl?: number;
-  pnlPercent?: number;
+  pnl?: number;          // Dollar P&L
+  pnlPercent?: number;   // Percentage P&L
+  totalInvested?: number; // Total $ invested in position
 }
 
 // Global storage (resets on serverless cold start - use DB in production)
@@ -142,25 +154,48 @@ export async function GET(request: NextRequest) {
     }
   }
   
-  // Calculate performance for each suggestion
+  // Calculate performance for each suggestion WITH POSITION SIZING
   const suggestionsWithPerformance = suggestions.map(s => {
     const currentPrice = s.status === 'ACTIVE' ? (priceMap[s.ticker] || s.entryPrice) : (s.closedPrice || s.entryPrice);
     
-    let pnl = 0;
-    let pnlPercent = 0;
+    let pnl = 0;          // Dollar P&L
+    let pnlPercent = 0;   // Percentage
+    let totalInvested = 0; // Cost basis
+    
+    // Determine position size and type
+    const isOption = s.type === 'CALL' || s.type === 'PUT';
+    const positionSize = s.positionSize || (isOption ? OPTION_POSITION_SIZE : STOCK_POSITION_SIZE);
+    const positionType = s.positionType || (isOption ? 'CONTRACTS' : 'SHARES');
     
     if (s.type === 'CALL' || s.type === 'PUT') {
-      // Options P&L (simplified - just track underlying movement direction)
+      // OPTIONS P&L
+      // Position size: 5 contracts (each controls 100 shares)
+      // Entry price is the option premium (per share basis)
+      const optionEntry = s.optionContract?.entryAsk || s.entryPrice;
+      totalInvested = optionEntry * positionSize * 100; // 5 contracts × 100 shares × premium
+      
+      // For now, we approximate option value change based on delta movement
+      // In production, you'd fetch the actual option price
       const priceChange = currentPrice - s.entryPrice;
-      const direction = s.type === 'CALL' ? 1 : -1;
-      pnlPercent = (priceChange / s.entryPrice) * 100 * direction;
-      pnl = priceChange * direction;
+      const delta = s.optionContract?.delta || (s.type === 'CALL' ? 0.5 : -0.5);
+      const estimatedOptionValueChange = priceChange * Math.abs(delta);
+      
+      // Dollar P&L = value change × contracts × 100
+      pnl = estimatedOptionValueChange * positionSize * 100;
+      pnlPercent = totalInvested > 0 ? (pnl / totalInvested) * 100 : 0;
     } else if (s.type === 'STOCK_BUY') {
-      pnl = currentPrice - s.entryPrice;
-      pnlPercent = (pnl / s.entryPrice) * 100;
+      // STOCK BUY P&L
+      // Position size: 100 shares
+      totalInvested = s.entryPrice * positionSize;
+      const currentValue = currentPrice * positionSize;
+      pnl = currentValue - totalInvested;
+      pnlPercent = (pnl / totalInvested) * 100;
     } else if (s.type === 'STOCK_SELL') {
-      pnl = s.entryPrice - currentPrice;
-      pnlPercent = (pnl / s.entryPrice) * 100;
+      // STOCK SELL (SHORT) P&L
+      // Position size: 100 shares
+      totalInvested = s.entryPrice * positionSize;
+      pnl = (s.entryPrice - currentPrice) * positionSize;
+      pnlPercent = (pnl / totalInvested) * 100;
     }
     
     // Check if hit target or stop loss
@@ -185,6 +220,9 @@ export async function GET(request: NextRequest) {
     return {
       ...s,
       currentPrice,
+      positionSize,
+      positionType,
+      totalInvested: Math.round(totalInvested * 100) / 100,
       pnl: Math.round(pnl * 100) / 100,
       pnlPercent: Math.round(pnlPercent * 100) / 100,
       status,
@@ -239,6 +277,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing required fields: ticker, type, entryPrice' }, { status: 400 });
     }
     
+    // Determine position size based on type
+    const isOption = type === 'CALL' || type === 'PUT';
+    const positionSize = isOption ? OPTION_POSITION_SIZE : STOCK_POSITION_SIZE;
+    const positionType = isOption ? 'CONTRACTS' : 'SHARES';
+    
+    // Calculate total invested
+    let totalInvested = 0;
+    if (isOption) {
+      const optionEntry = optionContract?.entryAsk || entryPrice * 0.02; // Fallback to 2% of stock price
+      totalInvested = optionEntry * positionSize * 100;
+    } else {
+      totalInvested = entryPrice * positionSize;
+    }
+    
     const newSuggestion: TrackedSuggestion = {
       id: `${ticker}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       ticker: ticker.toUpperCase(),
@@ -250,6 +302,9 @@ export async function POST(request: NextRequest) {
       confidence: confidence || 0,
       reasoning: reasoning || [],
       optionContract,
+      positionSize,
+      positionType,
+      totalInvested,
       trackedAt: new Date().toISOString(),
       status: 'ACTIVE',
     };
@@ -260,7 +315,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({
       success: true,
       suggestion: newSuggestion,
-      message: `Tracking ${type} on ${ticker} at $${entryPrice}`,
+      message: `Tracking ${type} on ${ticker} at $${entryPrice} (${positionSize} ${positionType.toLowerCase()}, $${totalInvested.toFixed(2)} invested)`,
     });
   } catch (err) {
     return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });

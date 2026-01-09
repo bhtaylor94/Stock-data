@@ -361,9 +361,160 @@ interface UnusualActivity {
   premiumValue: number;
   convictionLevel: 'HIGH' | 'MEDIUM' | 'LOW';
   interpretation: string;
+  // NEW: Hedge vs Directional classification
+  tradeType: 'DIRECTIONAL' | 'LIKELY_HEDGE' | 'UNCERTAIN';
+  tradeTypeReason: string;
+  insiderProbability: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY';
+  insiderSignals: string[];
 }
 
-function detectUnusualActivity(calls: OptionContract[], puts: OptionContract[], currentPrice: number): UnusualActivity[] {
+// Research-based criteria for determining hedge vs directional
+function classifyTradeType(
+  contract: OptionContract, 
+  currentPrice: number, 
+  stockTrend: 'UP' | 'DOWN' | 'SIDEWAYS',
+  isNearEarnings: boolean
+): { 
+  tradeType: 'DIRECTIONAL' | 'LIKELY_HEDGE' | 'UNCERTAIN'; 
+  reason: string;
+  insiderProbability: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY';
+  insiderSignals: string[];
+} {
+  const insiderSignals: string[] = [];
+  let hedgeScore = 0;
+  let directionalScore = 0;
+  let insiderScore = 0;
+  
+  // KEY RESEARCH FINDINGS:
+  // 1. Short-dated options (< 30 DTE) = more likely directional/speculative
+  // 2. Long-dated options (> 90 DTE) = more likely hedge
+  // 3. Trend contradiction (puts in uptrend, calls in downtrend) = likely hedge
+  // 4. Near-ATM with high volume = directional
+  // 5. Deep OTM with high premium = possible insider knowledge
+  
+  // Factor 1: Expiration - Research shows short-term = conviction, long-term = hedge
+  if (contract.dte < 14) {
+    directionalScore += 3;
+    insiderSignals.push('Short-dated (< 2 weeks) - high urgency');
+    insiderScore += 2;
+  } else if (contract.dte < 30) {
+    directionalScore += 2;
+    insiderSignals.push('Near-term expiration - elevated conviction');
+    insiderScore += 1;
+  } else if (contract.dte > 90) {
+    hedgeScore += 3;
+  } else if (contract.dte > 60) {
+    hedgeScore += 1;
+  }
+  
+  // Factor 2: Moneyness - Deep OTM with high premium = unusual
+  const otmPercent = contract.type === 'call' 
+    ? (contract.strike - currentPrice) / currentPrice * 100
+    : (currentPrice - contract.strike) / currentPrice * 100;
+  
+  if (otmPercent > 20) {
+    // Deep OTM - very speculative or hedge
+    if (contract.dte < 30 && contract.volume > contract.openInterest) {
+      directionalScore += 3;
+      insiderSignals.push(`Deep OTM (${otmPercent.toFixed(0)}%) with new positions - possible insider knowledge`);
+      insiderScore += 3;
+    } else {
+      hedgeScore += 2;
+    }
+  } else if (otmPercent > 10) {
+    // Moderately OTM
+    directionalScore += 1;
+  } else if (otmPercent < 5) {
+    // ATM or ITM - strong directional conviction
+    directionalScore += 2;
+  }
+  
+  // Factor 3: Trend contradiction - KEY HEDGE SIGNAL
+  // Puts during uptrend or calls during downtrend = likely hedge
+  if (contract.type === 'put' && stockTrend === 'UP') {
+    hedgeScore += 3;
+  } else if (contract.type === 'call' && stockTrend === 'DOWN') {
+    hedgeScore += 3;
+  } else {
+    // Trade aligns with trend = directional
+    directionalScore += 2;
+  }
+  
+  // Factor 4: Volume vs Open Interest - New positions = directional
+  if (contract.volume > contract.openInterest * 2) {
+    directionalScore += 2;
+    insiderSignals.push('Volume >> OI - significant new positioning');
+    insiderScore += 1;
+  } else if (contract.volume > contract.openInterest) {
+    directionalScore += 1;
+  }
+  
+  // Factor 5: Earnings proximity - hedging common before earnings
+  if (isNearEarnings && contract.type === 'put') {
+    hedgeScore += 2;
+  } else if (isNearEarnings && contract.type === 'call' && contract.dte < 14) {
+    directionalScore += 1;
+    insiderSignals.push('Near-dated call before earnings - possible catalyst knowledge');
+    insiderScore += 2;
+  }
+  
+  // Factor 6: Premium size relative to typical - institutional or insider
+  const premiumValue = contract.mark * contract.volume * 100;
+  if (premiumValue > 1000000) {
+    insiderSignals.push(`$${(premiumValue/1e6).toFixed(1)}M premium - institutional size`);
+    if (contract.dte < 30 && otmPercent > 10) {
+      insiderScore += 2;
+    }
+  }
+  
+  // Factor 7: Execution urgency (if available through spread)
+  // Paying above mid-price indicates urgency
+  if (contract.bid > 0 && contract.ask > 0) {
+    const midPrice = (contract.bid + contract.ask) / 2;
+    if (contract.last > midPrice * 1.02) {
+      directionalScore += 1;
+      insiderSignals.push('Paid above mid-price - urgency to enter');
+      insiderScore += 1;
+    }
+  }
+  
+  // Determine trade type
+  let tradeType: 'DIRECTIONAL' | 'LIKELY_HEDGE' | 'UNCERTAIN';
+  let reason: string;
+  
+  if (directionalScore >= hedgeScore + 3) {
+    tradeType = 'DIRECTIONAL';
+    reason = 'Strong directional signals: short-dated, aligned with trend, new positions';
+  } else if (hedgeScore >= directionalScore + 2) {
+    tradeType = 'LIKELY_HEDGE';
+    reason = 'Hedge characteristics: contradicts trend, longer-dated, or near earnings';
+  } else {
+    tradeType = 'UNCERTAIN';
+    reason = 'Mixed signals - could be directional or hedge';
+  }
+  
+  // Determine insider probability
+  let insiderProbability: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY';
+  if (insiderScore >= 6) {
+    insiderProbability = 'HIGH';
+  } else if (insiderScore >= 4) {
+    insiderProbability = 'MEDIUM';
+  } else if (insiderScore >= 2) {
+    insiderProbability = 'LOW';
+  } else {
+    insiderProbability = 'UNLIKELY';
+  }
+  
+  return { tradeType, reason, insiderProbability, insiderSignals };
+}
+
+function detectUnusualActivity(
+  calls: OptionContract[], 
+  puts: OptionContract[], 
+  currentPrice: number,
+  stockTrend: 'UP' | 'DOWN' | 'SIDEWAYS' = 'SIDEWAYS',
+  isNearEarnings: boolean = false
+): UnusualActivity[] {
   const unusual: UnusualActivity[] = [];
   
   const analyzeContract = (c: OptionContract) => {
@@ -425,7 +576,21 @@ function detectUnusualActivity(calls: OptionContract[], puts: OptionContract[], 
     else if (unusualScore >= 55) convictionLevel = 'MEDIUM';
     else convictionLevel = 'LOW';
     
-    const interpretation = `${convictionLevel} conviction ${sentiment.toLowerCase()} bet targeting $${c.strike} within ${c.dte} days.`;
+    // NEW: Classify as hedge vs directional
+    const classification = classifyTradeType(c, currentPrice, stockTrend, isNearEarnings);
+    
+    // Adjust interpretation based on trade type
+    let interpretation = `${convictionLevel} conviction ${sentiment.toLowerCase()} bet targeting $${c.strike} within ${c.dte} days.`;
+    if (classification.tradeType === 'LIKELY_HEDGE') {
+      interpretation = `LIKELY HEDGE: ${sentiment.toLowerCase()} protection targeting $${c.strike}. ${classification.reason}`;
+    } else if (classification.tradeType === 'DIRECTIONAL') {
+      interpretation = `DIRECTIONAL BET: ${convictionLevel} conviction ${sentiment.toLowerCase()} position targeting $${c.strike}. ${classification.reason}`;
+    }
+    
+    // Add insider warning if applicable
+    if (classification.insiderProbability === 'HIGH' || classification.insiderProbability === 'MEDIUM') {
+      signals.push(`🔍 Insider probability: ${classification.insiderProbability}`);
+    }
     
     unusual.push({
       contract: c,
@@ -435,6 +600,10 @@ function detectUnusualActivity(calls: OptionContract[], puts: OptionContract[], 
       premiumValue,
       convictionLevel,
       interpretation,
+      tradeType: classification.tradeType,
+      tradeTypeReason: classification.reason,
+      insiderProbability: classification.insiderProbability,
+      insiderSignals: classification.insiderSignals,
     });
   };
   
@@ -792,10 +961,13 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   let trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
   if (currentPrice > sma20 && currentPrice > sma50) trend = 'BULLISH';
   else if (currentPrice < sma20 && currentPrice < sma50) trend = 'BEARISH';
+  
+  // Convert trend for unusual activity detection
+  const stockTrend: 'UP' | 'DOWN' | 'SIDEWAYS' = trend === 'BULLISH' ? 'UP' : trend === 'BEARISH' ? 'DOWN' : 'SIDEWAYS';
 
   const ivAnalysis = analyzeIV(calls, puts, currentPrice);
   const marketMetrics = calculateMarketMetrics(calls, puts, currentPrice);
-  const unusualActivity = detectUnusualActivity(calls, puts, currentPrice);
+  const unusualActivity = detectUnusualActivity(calls, puts, currentPrice, stockTrend, false);
   const suggestions = generateSuggestions(calls, puts, trend, rsi, ivAnalysis, marketMetrics, unusualActivity);
 
   const firstExp = expirations[0] || '';

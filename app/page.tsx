@@ -129,8 +129,25 @@ function TrackerTab() {
   
   const { suggestions, stats } = trackerData;
   
+  // Calculate total portfolio P&L
+  const totalPnL = suggestions.reduce((sum: number, s: any) => sum + (s.pnl || 0), 0);
+  const totalInvested = suggestions.filter((s: any) => s.status === 'ACTIVE').reduce((sum: number, s: any) => sum + (s.totalInvested || 0), 0);
+  
   return (
     <div className="space-y-6">
+      {/* Portfolio Summary */}
+      <div className="p-4 rounded-2xl border border-purple-500/30 bg-gradient-to-r from-purple-950/30 to-blue-950/20">
+        <h3 className="text-sm text-slate-400 mb-2">Portfolio Performance</h3>
+        <div className="flex items-baseline gap-4">
+          <span className={`text-3xl font-bold ${totalPnL >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+            {totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)}
+          </span>
+          <span className="text-slate-400 text-sm">
+            (${totalInvested.toFixed(0)} invested in active positions)
+          </span>
+        </div>
+      </div>
+      
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <div className="p-4 rounded-xl border border-slate-700/50 bg-slate-800/30 text-center">
           <p className="text-xs text-slate-400">Total</p><p className="text-2xl font-bold text-white">{stats.total}</p>
@@ -152,11 +169,11 @@ function TrackerTab() {
         </div>
       </div>
       
-      <button onClick={fetchTrackerData} className="px-4 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-300 text-sm">🔄 Refresh</button>
+      <button onClick={fetchTrackerData} className="px-4 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-300 text-sm">🔄 Refresh Prices</button>
       
       <div className="space-y-4">
         {suggestions.map((s: any) => (
-          <div key={s.id} className={`p-4 rounded-xl border ${s.status === 'ACTIVE' ? (s.pnlPercent >= 0 ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5') : 'border-slate-700/50 bg-slate-800/30'}`}>
+          <div key={s.id} className={`p-4 rounded-xl border ${s.status === 'ACTIVE' ? (s.pnl >= 0 ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5') : 'border-slate-700/50 bg-slate-800/30'}`}>
             <div className="flex items-start justify-between mb-3">
               <div>
                 <div className="flex items-center gap-2 mb-1">
@@ -165,9 +182,19 @@ function TrackerTab() {
                   <span className={`text-xs px-2 py-0.5 rounded ${s.status === 'ACTIVE' ? 'bg-blue-500/20 text-blue-400' : s.status === 'HIT_TARGET' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/20 text-slate-400'}`}>{s.status.replace('_', ' ')}</span>
                 </div>
                 <p className="text-sm text-slate-400">{s.strategy}</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  {s.positionSize} {s.positionType?.toLowerCase() || 'shares'} • ${s.totalInvested?.toFixed(0) || '0'} invested
+                </p>
               </div>
               <div className="text-right">
-                <p className={`text-2xl font-bold ${s.pnlPercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>{s.pnlPercent >= 0 ? '+' : ''}{s.pnlPercent}%</p>
+                {/* Dollar P&L - PRIMARY */}
+                <p className={`text-2xl font-bold ${s.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {s.pnl >= 0 ? '+' : ''}${s.pnl?.toFixed(2) || '0.00'}
+                </p>
+                {/* Percentage P&L - SECONDARY */}
+                <p className={`text-sm ${s.pnlPercent >= 0 ? 'text-emerald-400/70' : 'text-red-400/70'}`}>
+                  {s.pnlPercent >= 0 ? '+' : ''}{s.pnlPercent?.toFixed(2) || '0.00'}%
+                </p>
               </div>
             </div>
             <div className="grid grid-cols-4 gap-2 mb-3 text-xs">
@@ -176,6 +203,18 @@ function TrackerTab() {
               <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400">Target</p><p className="font-bold text-emerald-400">${s.targetPrice?.toFixed(2) || 'N/A'}</p></div>
               <div className="p-2 rounded bg-slate-800/50"><p className="text-slate-400">Stop</p><p className="font-bold text-red-400">${s.stopLoss?.toFixed(2) || 'N/A'}</p></div>
             </div>
+            {/* Option contract details */}
+            {s.optionContract && (
+              <div className="mb-3 p-2 rounded bg-slate-800/30 text-xs">
+                <span className="text-slate-400">Option: </span>
+                <span className="text-white">${s.optionContract.strike} {s.type}</span>
+                <span className="text-slate-400"> exp </span>
+                <span className="text-white">{s.optionContract.expiration}</span>
+                <span className="text-slate-400"> ({s.optionContract.dte} DTE)</span>
+                <span className="text-slate-400"> Δ </span>
+                <span className="text-white">{s.optionContract.delta?.toFixed(2)}</span>
+              </div>
+            )}
             {s.status === 'ACTIVE' ? (
               <div className="flex gap-2">
                 <button onClick={() => handleClose(s.id, 'HIT_TARGET')} className="flex-1 px-3 py-2 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs hover:bg-emerald-500/30">✓ Hit Target</button>

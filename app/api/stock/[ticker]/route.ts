@@ -796,6 +796,8 @@ function detectAllPatterns(candles: PatternCandle[]) {
     netScore: Math.round(netScore * 100) / 100,
     hasConflict: confirmedBullish.length > 0 && confirmedBearish.length > 0,
     actionable: confirmedPatterns.length > 0 && !( confirmedBullish.length > 0 && confirmedBearish.length > 0)
+  };
+}
 
 // ============================================================
 // SCORING SYSTEM (Deterministic, Piotroski-style)
