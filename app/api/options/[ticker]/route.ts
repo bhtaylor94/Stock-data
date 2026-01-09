@@ -829,6 +829,14 @@ function generateSuggestions(
 ): any[] {
   const suggestions: any[] = [];
 
+// Liquidity / tradability gate (accuracy-first: reject illiquid, wide-spread contracts)
+function liquidityOk(c: OptionContract): boolean {
+  const spreadOk = Number(c.spreadPercent ?? 999) <= 12;
+  const interestOk = (Number(c.openInterest ?? 0) >= 500) || (Number(c.volume ?? 0) >= 200);
+  const priceOk = Number(c.mark ?? 0) >= 0.10 && Number(c.bid ?? 0) >= 0.05;
+  return Boolean(spreadOk && interestOk && priceOk);
+}
+
   const validCalls = calls.filter(c => c.dte >= 7 && c.dte <= 90 && liquidityOk(c));
   const validPuts = puts.filter(p => p.dte >= 7 && p.dte <= 90 && liquidityOk(p));
 
@@ -1111,14 +1119,6 @@ function expectedMovePct(atmIV: number, dte: number) {
   const t = Math.max(1, dte) / 365;
   const pct = Math.max(0, atmIV) * Math.sqrt(t) * 100;
   return Math.round(pct * 100) / 100;
-}
-
-function liquidityOk(c: OptionContract) {
-  // Accuracy/consistency gate: only suggest tradable contracts.
-  const spreadOk = c.spreadPercent <= 12;
-  const interestOk = (c.openInterest >= 500) || (c.volume >= 200);
-  const priceOk = c.mark >= 0.10 && c.bid >= 0.05;
-  return spreadOk && interestOk && priceOk;
 }
 
 }
