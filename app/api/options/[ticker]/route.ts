@@ -793,6 +793,31 @@ function scoreOption(
   };
 }
 
+
+function calibratedOptionConfidence(totalScore: number, trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL', isTrendAligned: boolean, spreadPct: number, oi: number, volume: number) {
+  // Conservative calibration to avoid overconfidence. (Measured framework placeholder - calibrate with future backtests.)
+  let conf =
+    totalScore >= 10 ? 76 :
+    totalScore >= 8 ? 68 :
+    totalScore >= 6 ? 58 :
+    totalScore >= 5 ? 52 :
+    44;
+
+  if (trend === 'NEUTRAL') conf -= 10;
+  if (isTrendAligned) conf += 4;
+
+  // Tradability boosts/penalties
+  if (spreadPct <= 3) conf += 3;
+  else if (spreadPct >= 8) conf -= 6;
+
+  if (oi >= 1500 || volume >= 500) conf += 3;
+  else if (oi < 500 && volume < 200) conf -= 6;
+
+  conf = Math.max(5, Math.min(95, Math.round(conf)));
+  const bucket = conf >= 75 ? 'HIGH' : conf >= 60 ? 'MED' : 'LOW';
+  return { confidence: conf, bucket, calibrationVersion: 'v1.0-conservative' as const };
+}
+
 function generateSuggestions(
   calls: OptionContract[],
   puts: OptionContract[],
@@ -804,14 +829,16 @@ function generateSuggestions(
 ): any[] {
   const suggestions: any[] = [];
 
-  const validCalls = calls.filter(c => c.dte >= 7 && c.dte <= 90 && c.bid > 0.05);
-  const validPuts = puts.filter(p => p.dte >= 7 && p.dte <= 90 && p.bid > 0.05);
+  const validCalls = calls.filter(c => c.dte >= 7 && c.dte <= 90 && liquidityOk(c));
+  const validPuts = puts.filter(p => p.dte >= 7 && p.dte <= 90 && liquidityOk(p));
 
   const scoredCalls = validCalls.map(c => ({ contract: c, score: scoreOption(c, trend, ivAnalysis.atmIV) }));
   const scoredPuts = validPuts.map(p => ({ contract: p, score: scoreOption(p, trend, ivAnalysis.atmIV) }));
 
   scoredCalls.sort((a, b) => b.score.total - a.score.total);
   scoredPuts.sort((a, b) => b.score.total - a.score.total);
+
+  const emPct = expectedMovePct(ivAnalysis.atmIV, 30);
 
   // Best call
   if (scoredCalls.length > 0 && trend !== 'BEARISH') {
@@ -831,7 +858,7 @@ function generateSuggestions(
         `Score: ${s.total}/12`,
       ],
       warnings: s.total < 6 ? ['Lower confidence - manage size'] : [],
-      confidence: Math.round((s.total / 12) * 100),
+      confidence: calibratedOptionConfidence(s.total, trend, (c.type === 'call' && trend === 'BULLISH') || (c.type === 'put' && trend === 'BEARISH'), c.spreadPercent, c.openInterest, c.volume).confidence,
       riskLevel: s.total >= 8 ? 'LOW' : s.total >= 5 ? 'MEDIUM' : 'HIGH',
     });
   }
@@ -854,7 +881,7 @@ function generateSuggestions(
         `Score: ${s.total}/12`,
       ],
       warnings: trend !== 'BEARISH' ? ['Counter-trend - use as hedge'] : [],
-      confidence: Math.round((s.total / 12) * 100),
+      confidence: calibratedOptionConfidence(s.total, trend, (p.type === 'call' && trend === 'BULLISH') || (p.type === 'put' && trend === 'BEARISH'), p.spreadPercent, p.openInterest, p.volume).confidence,
       riskLevel: s.total >= 8 ? 'LOW' : s.total >= 5 ? 'MEDIUM' : 'HIGH',
     });
   }
@@ -907,7 +934,25 @@ function generateSuggestions(
     });
   }
 
+  
+  const tradable = suggestions.filter(s => s.type === 'CALL' || s.type === 'PUT');
+  if (tradable.length === 0) {
+    const reasons: string[] = [];
+    reasons.push('No contracts passed liquidity/spread gates (spread% ≤ 12, OI ≥ 500 or volume ≥ 200, mark ≥ 0.10).');
+    if (trend === 'NEUTRAL') reasons.push('Underlying trend is NEUTRAL; skipping directional options suggestions for accuracy.');
+    reasons.push(`Expected move (30D, IV-based): ~${emPct}%`);
+    return [{
+      type: 'NO_TRADE',
+      strategy: 'NO_TRADE',
+      confidence: 0,
+      riskLevel: 'N/A',
+      reasoning: reasons,
+      warnings: [],
+    }];
+  }
+
   return suggestions;
+
 }
 
 // ============================================================
@@ -971,6 +1016,11 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   const marketMetrics = calculateMarketMetrics(calls, puts, currentPrice);
   const unusualActivity = detectUnusualActivity(calls, puts, currentPrice, stockTrend, false);
   const suggestions = generateSuggestions(calls, puts, trend, rsi, ivAnalysis, marketMetrics, unusualActivity);
+  const tradable = suggestions.filter((s: any) => s.type === 'CALL' || s.type === 'PUT');
+  const tradeDecision = tradable.length === 0 || suggestions[0]?.type === 'NO_TRADE'
+    ? { action: 'NO_TRADE', confidence: 0, rationale: suggestions[0]?.reasoning || ['No trade'] }
+    : { action: 'OPTIONS_TRADE', confidence: Math.max(0, Math.min(95, Math.round(tradable[0]?.confidence || 0))), rationale: tradable[0]?.reasoning || [] };
+
 
   const firstExp = expirations[0] || '';
 
@@ -980,6 +1030,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     lastUpdated: new Date().toISOString(),
     dataSource: 'schwab-live',
     responseTimeMs: Date.now() - startTime,
+    meta: { asOf: new Date().toISOString(), calibrationVersion: 'v1.0-conservative', tradeDecision },
     expirations,
     selectedExpiration: firstExp,
     byExpiration,
@@ -1054,4 +1105,20 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     allCalls: calls,
     allPuts: puts,
   });
+
+function expectedMovePct(atmIV: number, dte: number) {
+  // Expected move ~ IV * sqrt(T) (annualized IV). Returns percent.
+  const t = Math.max(1, dte) / 365;
+  const pct = Math.max(0, atmIV) * Math.sqrt(t) * 100;
+  return Math.round(pct * 100) / 100;
+}
+
+function liquidityOk(c: OptionContract) {
+  // Accuracy/consistency gate: only suggest tradable contracts.
+  const spreadOk = c.spreadPercent <= 12;
+  const interestOk = (c.openInterest >= 500) || (c.volume >= 200);
+  const priceOk = c.mark >= 0.10 && c.bid >= 0.05;
+  return spreadOk && interestOk && priceOk;
+}
+
 }

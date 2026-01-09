@@ -76,7 +76,7 @@ function TrackButton({
     setTracking(false);
   };
   
-  if (suggestion.type === 'ALERT') return null;
+  if (suggestion.type === 'ALERT' || suggestion.type === 'NO_TRADE') return null;
   
   return (
     <button
@@ -302,6 +302,46 @@ function StockTab({ data, loading, onTrack }: { data: any; loading: boolean; onT
           }`}>{analysis?.combined?.rating?.replace('_', ' ') || 'N/A'}</span>
         </div>
       </div>
+
+
+      {/* Accuracy Gate (freshness + measured decision) */}
+      {data.meta?.tradeDecision && (
+        <div className={`p-5 rounded-2xl border ${data.meta.tradeDecision.action === 'NO_TRADE' ? 'border-amber-500/30 bg-amber-500/5' : 'border-emerald-500/30 bg-emerald-500/5'}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-semibold text-white">✅ Accuracy Gate</h3>
+              <p className="text-xs text-slate-400 mt-1">
+                As of <span className="text-slate-200">{new Date(data.meta.asOf).toLocaleString()}</span>
+                {data.meta.isStale ? <span className="ml-2 text-amber-400">• stale</span> : <span className="ml-2 text-emerald-400">• fresh</span>}
+              </p>
+              <p className="text-xs text-slate-400 mt-1">
+                Regime: <span className="text-slate-200">{data.meta.regime}</span>
+                <span className="ml-2">ATR% <span className="text-slate-200">{data.meta.atrPct}</span></span>
+                <span className="ml-2">Trend <span className="text-slate-200">{data.meta.trendStrength}</span></span>
+              </p>
+            </div>
+
+            <div className="text-right">
+              <div className={`text-sm font-bold ${data.meta.tradeDecision.action === 'NO_TRADE' ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {String(data.meta.tradeDecision.action).replaceAll('_',' ')}
+              </div>
+              {data.meta.tradeDecision.action !== 'NO_TRADE' && (
+                <div className="text-xs text-slate-400 mt-1">
+                  Confidence: <span className="text-slate-200">{data.meta.tradeDecision.confidence}%</span> ({data.meta.tradeDecision.confidenceBucket})
+                </div>
+              )}
+            </div>
+          </div>
+
+          {data.meta.tradeDecision.action === 'NO_TRADE' && (
+            <div className="mt-3 pt-3 border-t border-slate-700/40 space-y-1">
+              {(data.meta.tradeDecision.rationale || []).slice(0, 6).map((r: string, i: number) => (
+                <p key={i} className="text-xs text-slate-300">• {r}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Chart Pattern Analysis - Shows ONE dominant pattern only */}
       <div className="card p-5">
@@ -927,6 +967,29 @@ function OptionsTab({ data, loading, onTrack }: { data: any; loading: boolean; o
         <span className="text-xs text-slate-400">{data.responseTimeMs}ms</span>
       </div>
 
+      {/* Accuracy-first Trade Decision */}
+      {data?.meta?.tradeDecision && (
+        <div className={`p-4 rounded-2xl border ${
+          data.meta.tradeDecision.action === 'NO_TRADE' ? 'border-slate-600/40 bg-slate-900/40' : 'border-emerald-500/30 bg-emerald-500/5'
+        }`}>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-sm font-semibold text-white">🧠 Options Trade Decision</h3>
+            <span className="text-xs text-slate-400">asOf {data.meta.asOf}</span>
+          </div>
+          <p className="text-sm text-slate-200">
+            <span className="font-semibold">{data.meta.tradeDecision.action}</span>
+            {data.meta.tradeDecision.action !== 'NO_TRADE' && (
+              <span className="text-slate-400"> • confidence {data.meta.tradeDecision.confidence}%</span>
+            )}
+          </p>
+          <div className="mt-2 space-y-1">
+            {(data.meta.tradeDecision.rationale || []).slice(0, 6).map((r: string, i: number) => (
+              <p key={i} className="text-xs text-slate-400">• {r}</p>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Unusual Options Activity */}
       {data.unusualActivity?.length > 0 && (
         <div className="p-5 rounded-2xl border border-orange-500/30 bg-gradient-to-br from-orange-950/20 to-red-950/10">
@@ -1062,6 +1125,7 @@ function OptionsTab({ data, loading, onTrack }: { data: any; loading: boolean; o
                             dte: u.contract?.dte || u.dte,
                             delta: u.contract?.delta || 0.5,
                             entryAsk: u.contract?.ask || u.contract?.mark || 1.00,
+                            optionType: optionType === 'PUT' ? 'PUT' : 'CALL',
                           },
                         }),
                       });
@@ -1081,8 +1145,20 @@ function OptionsTab({ data, loading, onTrack }: { data: any; loading: boolean; o
 
       {/* Trade Suggestions */}
       {data.suggestions?.filter((s: any) => s.type !== 'ALERT').length > 0 && (
+
         <div className="p-5 rounded-2xl border border-blue-500/30 bg-gradient-to-br from-blue-950/30 to-cyan-950/20">
           <h2 className="text-lg font-semibold text-white mb-4">💡 Trade Setups</h2>
+          {data.suggestions.filter((s: any) => s.type !== 'ALERT')[0]?.type === 'NO_TRADE' && (
+            <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/5 mb-4">
+              <p className="font-semibold text-amber-400">NO TRADE — quality gates not met</p>
+              <div className="mt-2 space-y-1">
+                {data.suggestions.filter((s: any) => s.type !== 'ALERT')[0].reasoning?.slice(0, 6).map((r: string, i: number) => (
+                  <p key={i} className="text-xs text-slate-300">• {r}</p>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="grid gap-4 md:grid-cols-2">
             {data.suggestions.filter((s: any) => s.type !== 'ALERT').slice(0, 4).map((sug: any, i: number) => (
               <div key={i} className={`p-4 rounded-xl border ${sug.type === 'CALL' ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>

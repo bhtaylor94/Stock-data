@@ -221,7 +221,47 @@ export async function GET() {
     const avgPnlPct =
       enriched.length > 0 ? enriched.reduce((sum, s: any) => sum + asNumber(s.pnlPct, 0), 0) / enriched.length : 0;
 
-    return NextResponse.json({
+    
+    // Measured accuracy metrics (calibration feedback)
+    function bucketFromConfidence(c: any) {
+      const v = asNumber(c, 0);
+      if (v >= 75) return 'HIGH';
+      if (v >= 60) return 'MED';
+      if (v > 0) return 'LOW';
+      return 'N/A';
+    }
+
+    const realizedForMetrics = realized.filter(s => typeof s.confidence === 'number' && s.confidence > 0);
+
+    const byBucket: Record<string, any> = {};
+    for (const s of realizedForMetrics as any[]) {
+      const b = bucketFromConfidence(s.confidence);
+      byBucket[b] = byBucket[b] || { count: 0, wins: 0, avgPnlPct: 0 };
+      byBucket[b].count += 1;
+      const win = (s.status === 'HIT_TARGET') || asNumber(s.pnlPct, 0) > 0;
+      if (win) byBucket[b].wins += 1;
+      byBucket[b].avgPnlPct += asNumber(s.pnlPct, 0);
+    }
+    Object.keys(byBucket).forEach(k => {
+      byBucket[k].winRate = byBucket[k].count ? (byBucket[k].wins / byBucket[k].count) : 0;
+      byBucket[k].avgPnlPct = byBucket[k].count ? (byBucket[k].avgPnlPct / byBucket[k].count) : 0;
+    });
+
+    const bySetup: Record<string, any> = {};
+    for (const s of realized as any[]) {
+      const key = (s.setup || s.strategy || s.type || 'UNKNOWN') as string;
+      bySetup[key] = bySetup[key] || { count: 0, wins: 0, avgPnlPct: 0 };
+      bySetup[key].count += 1;
+      const win = (s.status === 'HIT_TARGET') || asNumber(s.pnlPct, 0) > 0;
+      if (win) bySetup[key].wins += 1;
+      bySetup[key].avgPnlPct += asNumber(s.pnlPct, 0);
+    }
+    Object.keys(bySetup).forEach(k => {
+      bySetup[k].winRate = bySetup[k].count ? (bySetup[k].wins / bySetup[k].count) : 0;
+      bySetup[k].avgPnlPct = bySetup[k].count ? (bySetup[k].avgPnlPct / bySetup[k].count) : 0;
+    });
+
+return NextResponse.json({
       suggestions: enriched,
       stats: {
         totalTracked: enriched.length,
@@ -229,6 +269,8 @@ export async function GET() {
         closedCount: realized.length,
         totalPnl,
         avgPnlPct,
+        byBucket,
+        bySetup,
       },
     });
   } catch (err: any) {

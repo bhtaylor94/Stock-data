@@ -21,6 +21,84 @@ const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
 const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
 
 // ============================================================
+// Accuracy-first helpers (freshness gates, regime detection, confidence calibration)
+// ============================================================
+
+type MarketRegime = 'TREND' | 'RANGE' | 'HIGH_VOL';
+
+function computeRegime(priceHistory: { close: number; high: number; low: number }[], sma50: number, sma200: number) : { regime: MarketRegime; atrPct: number; trendStrength: number } {
+  if (!priceHistory || priceHistory.length < 60) return { regime: 'RANGE', atrPct: 0, trendStrength: 0 };
+  const last = priceHistory[priceHistory.length - 1];
+  // ATR(14) approximate
+  const n = 14;
+  const start = Math.max(1, priceHistory.length - n);
+  let trSum = 0;
+  for (let i = start; i < priceHistory.length; i++) {
+    const cur = priceHistory[i];
+    const prev = priceHistory[i-1];
+    const tr = Math.max(cur.high - cur.low, Math.abs(cur.high - prev.close), Math.abs(cur.low - prev.close));
+    trSum += tr;
+  }
+  const atr = trSum / Math.max(1, (priceHistory.length - start));
+  const atrPct = last.close > 0 ? (atr / last.close) * 100 : 0;
+
+  const trendStrength = last.close > 0 ? (Math.abs(sma50 - sma200) / last.close) * 100 : 0;
+
+  // Regime rules (simple but stable):
+  // - HIGH_VOL if ATR% elevated
+  // - TREND if 50/200 separation meaningful
+  // - otherwise RANGE
+  const regime: MarketRegime =
+    atrPct >= 4 ? 'HIGH_VOL' :
+    trendStrength >= 2 ? 'TREND' :
+    'RANGE';
+
+  return { regime, atrPct: Math.round(atrPct * 100) / 100, trendStrength: Math.round(trendStrength * 100) / 100 };
+}
+
+function calibratedConfidence(modelScore: number, maxScore: number, agreementCount: number, completeness: number, regime: MarketRegime) {
+  // Conservative calibration: we prefer fewer high-confidence calls.
+  const pct = maxScore > 0 ? (modelScore / maxScore) * 100 : 0;
+  let conf =
+    pct >= 80 ? 78 :
+    pct >= 70 ? 68 :
+    pct >= 60 ? 58 :
+    pct >= 50 ? 50 :
+    42;
+
+  // Agreement and completeness are hard gates for "high accuracy"
+  if (agreementCount >= 5) conf += 6;
+  else if (agreementCount === 4) conf += 2;
+  else conf -= 10;
+
+  if (completeness >= 90) conf += 4;
+  else if (completeness < 80) conf -= 12;
+
+  // Regime adjustment (trend = slightly more reliable for trend-following signals)
+  if (regime === 'TREND') conf += 3;
+  if (regime === 'HIGH_VOL') conf -= 4;
+
+  conf = Math.max(5, Math.min(95, Math.round(conf)));
+  const bucket = conf >= 75 ? 'HIGH' : conf >= 60 ? 'MED' : 'LOW';
+  return { confidence: conf, bucket, calibrationVersion: 'v1.0-conservative' as const };
+}
+
+function buildNoTrade(reason: string[], asOfIso: string) {
+  return [{
+    type: 'NO_TRADE',
+    timeHorizon: 'N/A',
+    setup: 'NO_TRADE',
+    entry: null,
+    target: null,
+    stop: null,
+    invalidation: null,
+    confidence: 0,
+    reasoning: reason.length ? reason : ['No trade conditions met.'],
+    asOf: asOfIso
+  }];
+}
+
+// ============================================================
 // TOKEN CACHE - Schwab access tokens last 30 minutes
 // Cache them to avoid hitting rate limits on the oauth endpoint
 // ============================================================
@@ -1418,7 +1496,71 @@ export async function GET(
     }
   }
 
-  return NextResponse.json({
+  
+  // ============================================================
+  // Accuracy-first trade decision (NO_TRADE gating + calibration)
+  // ============================================================
+  const combinedModelScore = fundamentalAnalysis.score + technicalAnalysis.score;
+  const combinedModelRating =
+    combinedModelScore >= 14 ? 'STRONG_BUY' :
+    combinedModelScore >= 11 ? 'BUY' :
+    combinedModelScore >= 7 ? 'HOLD' :
+    combinedModelScore >= 4 ? 'SELL' : 'STRONG_SELL';
+
+  const completenessScore = calculateCompletenessScore({
+    hasPrice: price > 0,
+    hasFundamentals: fundamentalMetrics.pe > 0 || fundamentalMetrics.roe !== 0,
+    hasTechnicals: priceHistory.length >= 20,
+    hasNews: newsAnalysis.headlines.length > 0,
+    hasAnalysts: analystAnalysis.buyPercent >= 0,
+    hasInsiders: insiderAnalysis.totalTransactions >= 0,
+    hasEarnings: !!earningsData,
+    hasPatterns: chartPatterns.allDetected.length > 0,
+  });
+
+  const agreementCount = [
+    fundamentalAnalysis.score >= 5,
+    technicalAnalysis.score >= 5,
+    newsAnalysis.signal === 'BULLISH',
+    analystAnalysis.buyPercent >= 50,
+    insiderAnalysis.netActivity === 'BUYING',
+    chartPatterns.dominantDirection === 'BULLISH' && chartPatterns.actionable,
+  ].filter(Boolean).length;
+
+  const trustLevel = (chartPatterns.hasConflict ? 'LOW' : (chartPatterns.actionable && chartPatterns.confirmed.length > 0 ? 'HIGH' : (chartPatterns.allDetected.length > 0 ? 'MEDIUM' : 'NEUTRAL')));
+  const quoteAsOfMs = (q as any)?.quoteTimeInLong || (q as any)?.tradeTimeInLong || Date.now();
+  const freshness = {
+    asOf: new Date(quoteAsOfMs).toISOString(),
+    ageMs: Date.now() - quoteAsOfMs,
+    isStale: (Date.now() - quoteAsOfMs) > 60_000,
+  };
+
+  const regimeInfo = computeRegime(priceHistory, technicalIndicators.sma50, technicalIndicators.sma200);
+  const calib = calibratedConfidence(combinedModelScore, 18, agreementCount, completenessScore, regimeInfo.regime);
+
+  const gateFailures: string[] = [];
+  if (freshness.isStale) gateFailures.push('Stale price quote (>60s). Refresh required for accurate suggestions.');
+  if (completenessScore < 80) gateFailures.push('Data completeness below 80/100. Not enough confirmed inputs for high-accuracy suggestions.');
+  if (agreementCount < 4) gateFailures.push('Signals do not sufficiently agree (needs at least 4 of 6).');
+  if (trustLevel === 'LOW') gateFailures.push('Chart pattern signals conflict or are not actionable.');
+
+  // "No contradiction" rule: if we cannot meet the quality bar, we explicitly return NO_TRADE.
+  const tradeDecision = gateFailures.length === 0
+    ? { action: combinedModelRating, confidence: calib.confidence, confidenceBucket: calib.bucket, calibrationVersion: calib.calibrationVersion, rationale: [] as string[] }
+    : { action: 'NO_TRADE', confidence: 0, confidenceBucket: 'N/A', calibrationVersion: calib.calibrationVersion, rationale: gateFailures };
+
+  if (tradeDecision.action === 'NO_TRADE') {
+    suggestions.splice(0, suggestions.length, ...buildNoTrade(gateFailures, freshness.asOf));
+  } else {
+    // Apply calibrated confidence to the top suggestion to keep confidence consistent with measured gates
+    if (suggestions[0] && typeof suggestions[0].confidence === 'number') suggestions[0].confidence = calib.confidence;
+    if (suggestions[0] && Array.isArray(suggestions[0].reasoning)) {
+      suggestions[0].reasoning.unshift(`Calibration: ${calib.calibrationVersion} (${calib.bucket})`);
+      suggestions[0].reasoning.unshift(`Regime: ${regimeInfo.regime} (ATR% ${regimeInfo.atrPct}, trendStrength ${regimeInfo.trendStrength})`);
+    }
+  }
+
+return NextResponse.json({
     ticker,
     name: profile?.name || `${ticker}`,
     exchange: profile?.exchange || 'NASDAQ',
@@ -1427,6 +1569,16 @@ export async function GET(
     price: Math.round(price * 100) / 100,
     change: Math.round((q.netChange || 0) * 100) / 100,
     changePercent: Math.round((q.netPercentChange || 0) * 100) / 100,
+
+    meta: {
+      asOf: freshness.asOf,
+      quoteAgeMs: freshness.ageMs,
+      isStale: freshness.isStale,
+      regime: regimeInfo.regime,
+      atrPct: regimeInfo.atrPct,
+      trendStrength: regimeInfo.trendStrength,
+      tradeDecision,
+    },
 
     fundamentals: {
       pe: Math.round(fundamentalMetrics.pe * 100) / 100,
@@ -1482,12 +1634,13 @@ export async function GET(
         factors: technicalAnalysis.factors,
       },
       combined: {
-        score: fundamentalAnalysis.score + technicalAnalysis.score,
+        score: combinedModelScore,
         maxScore: 18,
-        rating: (fundamentalAnalysis.score + technicalAnalysis.score) >= 14 ? 'STRONG_BUY' :
-                (fundamentalAnalysis.score + technicalAnalysis.score) >= 11 ? 'BUY' :
-                (fundamentalAnalysis.score + technicalAnalysis.score) >= 7 ? 'HOLD' :
-                (fundamentalAnalysis.score + technicalAnalysis.score) >= 4 ? 'SELL' : 'STRONG_SELL',
+        modelRating: combinedModelRating,
+        rating: tradeDecision.action === 'NO_TRADE' ? 'NO_TRADE' : combinedModelRating,
+        calibratedConfidence: tradeDecision.action === 'NO_TRADE' ? 0 : tradeDecision.confidence,
+        confidenceBucket: tradeDecision.action === 'NO_TRADE' ? 'N/A' : tradeDecision.confidenceBucket,
+        calibrationVersion: tradeDecision.calibrationVersion,
       },
     },
 
