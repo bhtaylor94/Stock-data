@@ -1515,7 +1515,7 @@ export async function GET(
     hasAnalysts: analystAnalysis.buyPercent >= 0,
     // Insider activity is considered "present" only when we have at least one parsed transaction
     hasInsiders: insiderAnalysis.recentTransactions.length > 0,
-    hasEarnings: !!earningsData,
+    hasEarnings: !!(earnings && (earnings.earningsCalendar?.[0] || (Array.isArray(earnings.earningsCalendar) && earnings.earningsCalendar.length > 0))),
     hasPatterns: chartPatterns.allDetected.length > 0,
   });
 
