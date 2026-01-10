@@ -1,0 +1,1293 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { evaluateOptionsSetup, type OptionsSetupContext } from '@/lib/setupRegistry';
+import { getSnapshotStore, buildSnapshotFromPayload } from '@/lib/storage/snapshotStore';
+import { buildEvidencePacket } from '@/lib/evidencePacket';
+
+export const runtime = 'nodejs';
+
+// Expected move helper: IV * sqrt(T) using annualized IV.
+// Returns percent move over `dte` days. Used for conservative risk gating.
+function expectedMovePct(atmIV: number, dte: number): number {
+  const t = Math.max(1, dte) / 365;
+  const pct = Math.max(0, atmIV) * Math.sqrt(t) * 100;
+  return Math.round(pct * 100) / 100;
+}
+
+// Liquidity / tradability gate (accuracy-first: reject illiquid, wide-spread contracts)
+// Must be module-scope because both the suggestion engine and the setup registry rely on it.
+function liquidityOk(c: OptionContract): boolean {
+  const spreadOk = Number((c as any).spreadPercent ?? 999) <= 12;
+  const interestOk = (Number((c as any).openInterest ?? 0) >= 500) || (Number((c as any).volume ?? 0) >= 200);
+  const priceOk = Number((c as any).mark ?? 0) >= 0.10 && Number((c as any).bid ?? 0) >= 0.05;
+  return Boolean(spreadOk && interestOk && priceOk);
+}
+
+// Liquidity evidence breakdown (for auditability in the UI)
+function liquidityEvidence(c: OptionContract | null): {
+  spreadOk: boolean;
+  interestOk: boolean;
+  priceOk: boolean;
+  spreadPercent: number | null;
+  openInterest: number | null;
+  volume: number | null;
+  mark: number | null;
+  bid: number | null;
+} {
+  if (!c) {
+    return {
+      spreadOk: false,
+      interestOk: false,
+      priceOk: false,
+      spreadPercent: null,
+      openInterest: null,
+      volume: null,
+      mark: null,
+      bid: null,
+    };
+  }
+  const spreadPercent = Number((c as any).spreadPercent ?? NaN);
+  const openInterest = Number((c as any).openInterest ?? NaN);
+  const volume = Number((c as any).volume ?? NaN);
+  const mark = Number((c as any).mark ?? NaN);
+  const bid = Number((c as any).bid ?? NaN);
+
+  const spreadOk = Number.isFinite(spreadPercent) ? spreadPercent <= 12 : false;
+  const interestOk = (Number.isFinite(openInterest) && openInterest >= 500) || (Number.isFinite(volume) && volume >= 200);
+  const priceOk = (Number.isFinite(mark) && mark >= 0.10) && (Number.isFinite(bid) && bid >= 0.05);
+
+  return {
+    spreadOk,
+    interestOk,
+    priceOk,
+    spreadPercent: Number.isFinite(spreadPercent) ? spreadPercent : null,
+    openInterest: Number.isFinite(openInterest) ? openInterest : null,
+    volume: Number.isFinite(volume) ? volume : null,
+    mark: Number.isFinite(mark) ? mark : null,
+    bid: Number.isFinite(bid) ? bid : null,
+  };
+}
+
+// ============================================================
+// COMPREHENSIVE OPTIONS API
+// Features:
+// - All expiration dates
+// - Unusual options activity detection
+// - Volume/OI analysis
+// - Smart money indicators
+// - IV analysis
+// - Put/Call skew
+// - Professional-grade scoring
+// ============================================================
+
+const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
+const SCHWAB_APP_KEY = process.env.SCHWAB_APP_KEY;
+const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
+const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
+
+// ---- Earnings helper (best effort) ----
+// Uses Finnhub earnings calendar if API key present. This keeps the app up-to-date
+// and lets the options setup registry apply IV-crush-aware structures.
+async function fetchDaysToEarnings(symbol: string): Promise<number | null> {
+  try {
+    if (!FINNHUB_KEY) return null;
+    const now = new Date();
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const to = new Date(from.getTime() + 1000 * 60 * 60 * 24 * 120); // 120d lookahead
+    const fromStr = from.toISOString().slice(0, 10);
+    const toStr = to.toISOString().slice(0, 10);
+    const url = `https://finnhub.io/api/v1/calendar/earnings?symbol=${encodeURIComponent(symbol)}&from=${fromStr}&to=${toStr}&token=${encodeURIComponent(FINNHUB_KEY)}`;
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const data: any = await r.json();
+    const list = Array.isArray(data?.earningsCalendar) ? data.earningsCalendar : [];
+    if (list.length === 0 || !list[0]?.date) return null;
+    const next = new Date(`${list[0].date}T00:00:00Z`);
+    if (Number.isNaN(next.getTime())) return null;
+    const dteMs = next.getTime() - from.getTime();
+    return Math.ceil(dteMs / (1000 * 60 * 60 * 24));
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================
+// TOKEN CACHE - Schwab access tokens last 30 minutes
+// Note: In serverless (Vercel), this cache is per-instance
+// Each cold start gets a fresh instance, so we refresh often
+// ============================================================
+interface TokenCache {
+  accessToken: string;
+  expiresAt: number; // Unix timestamp
+  createdAt: number;
+}
+
+let tokenCache: TokenCache | null = null;
+let tokenRefreshAttempts = 0;
+const MAX_REFRESH_ATTEMPTS = 3;
+
+// ============================================================
+// SCHWAB AUTH WITH ROBUST ERROR HANDLING
+// ============================================================
+async function getSchwabToken(forceRefresh = false): Promise<{ token: string | null; error: string | null; errorCode: number | null }> {
+  if (!SCHWAB_APP_KEY || !SCHWAB_APP_SECRET || !SCHWAB_REFRESH_TOKEN) {
+    return { token: null, error: 'Missing Schwab credentials in environment variables', errorCode: null };
+  }
+  
+  const now = Date.now();
+  
+  // Use cached token if valid (with 5 minute buffer for safety)
+  // But in serverless, be more conservative - only use cache if very fresh
+  if (!forceRefresh && tokenCache && tokenCache.expiresAt > now + 300000) {
+    // Additional check: don't use tokens older than 25 minutes even if "valid"
+    const tokenAge = now - tokenCache.createdAt;
+    if (tokenAge < 25 * 60 * 1000) {
+      console.log('[Schwab] Using cached access token, age:', Math.round(tokenAge / 1000), 's');
+      return { token: tokenCache.accessToken, error: null, errorCode: null };
+    }
+  }
+  
+  // Prevent infinite refresh loops
+  if (tokenRefreshAttempts >= MAX_REFRESH_ATTEMPTS) {
+    const error = 'Too many token refresh attempts. The refresh token may be invalid or Schwab API is having issues.';
+    console.error('[Schwab]', error);
+    // Reset after 5 minutes
+    setTimeout(() => { tokenRefreshAttempts = 0; }, 5 * 60 * 1000);
+    return { token: null, error, errorCode: 401 };
+  }
+  
+  tokenRefreshAttempts++;
+  console.log(`[Schwab] Requesting new access token (attempt ${tokenRefreshAttempts})`);
+  
+  try {
+    const credentials = Buffer.from(`${SCHWAB_APP_KEY}:${SCHWAB_APP_SECRET}`).toString('base64');
+    const response = await fetch('https://api.schwabapi.com/v1/oauth/token', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${credentials}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: SCHWAB_REFRESH_TOKEN,
+      }).toString(),
+    });
+
+    if (!response.ok) {
+      const status = response.status;
+      const errorBody = await response.text().catch(() => 'No body');
+      console.error(`[Schwab] Auth failed: ${status} - ${errorBody}`);
+      
+      // Clear cache on auth failure
+      tokenCache = null;
+      
+      if (status === 401) {
+        return { 
+          token: null, 
+          error: `Refresh token rejected (401). This usually means: 1) Token expired (7-day limit), 2) Token was invalidated, or 3) Schwab API is rejecting requests. You may need to generate a new refresh token. Raw error: ${errorBody}`, 
+          errorCode: 401 
+        };
+      } else if (status === 400) {
+        return { token: null, error: `Bad request (400): ${errorBody}`, errorCode: 400 };
+      } else if (status === 429) {
+        return { token: null, error: 'Rate limited by Schwab - wait 60 seconds and try again', errorCode: 429 };
+      } else if (status === 503 || status === 502) {
+        return { token: null, error: `Schwab API temporarily unavailable (${status}) - try again in a few minutes`, errorCode: status };
+      }
+      return { token: null, error: `Auth failed (${status}): ${errorBody}`, errorCode: status };
+    }
+    
+    const data = await response.json();
+    
+    // Reset attempt counter on success
+    tokenRefreshAttempts = 0;
+    
+    // Cache the token
+    const expiresIn = data.expires_in || 1800;
+    tokenCache = {
+      accessToken: data.access_token,
+      expiresAt: now + (expiresIn * 1000),
+      createdAt: now,
+    };
+    
+    // Note: Schwab may return a new refresh_token - in production you'd want to store this
+    if (data.refresh_token && data.refresh_token !== SCHWAB_REFRESH_TOKEN) {
+      console.warn('[Schwab] ⚠️ API returned a NEW refresh token. In production, you should save this to maintain access.');
+    }
+    
+    console.log(`[Schwab] Got new access token, expires in ${expiresIn}s`);
+    return { token: data.access_token, error: null, errorCode: null };
+  } catch (err) {
+    console.error('[Schwab] Network error:', err);
+    return { token: null, error: `Network error connecting to Schwab: ${err}`, errorCode: null };
+  }
+}
+
+// ============================================================
+// FETCH SCHWAB DATA WITH RETRY AND TOKEN REFRESH
+// ============================================================
+async function fetchOptionsChain(token: string, symbol: string, retryCount = 0): Promise<{ data: any; error: string | null }> {
+  const url = `https://api.schwabapi.com/marketdata/v1/chains?symbol=${symbol}&contractType=ALL&strikeCount=50&includeUnderlyingQuote=true&range=ALL`;
+  
+  try {
+    const res = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    
+    if (!res.ok) {
+      const status = res.status;
+      const errorText = await res.text().catch(() => 'No details');
+      
+      // If 401 on the data endpoint, the access token might be stale
+      // Try getting a fresh token and retry ONCE
+      if (status === 401 && retryCount === 0) {
+        console.log('[Schwab] Got 401 on market data - forcing token refresh and retrying');
+        tokenCache = null; // Clear cache to force refresh
+        const { token: newToken, error: tokenError } = await getSchwabToken(true);
+        
+        if (newToken) {
+          return fetchOptionsChain(newToken, symbol, retryCount + 1);
+        } else {
+          return { data: null, error: `Token refresh failed after 401: ${tokenError}` };
+        }
+      }
+      
+      if (status === 401) {
+        return { 
+          data: null, 
+          error: `Token rejected by market data API (401) even after refresh. This suggests the refresh token itself is invalid. Details: ${errorText}` 
+        };
+      }
+      
+      if (status === 429 && retryCount < 2) {
+        // Rate limited - wait and retry
+        await new Promise(r => setTimeout(r, 2000));
+        return fetchOptionsChain(token, symbol, retryCount + 1);
+      }
+      
+      if (status === 404) {
+        return { data: null, error: `Symbol '${symbol}' not found or has no options` };
+      }
+      
+      return { data: null, error: `Chain fetch failed (${status}): ${errorText}` };
+    }
+    return { data: await res.json(), error: null };
+  } catch (err) {
+    if (retryCount < 2) {
+      // Network error - retry once
+      await new Promise(r => setTimeout(r, 1000));
+      return fetchOptionsChain(token, symbol, retryCount + 1);
+    }
+    return { data: null, error: `Network error: ${err}` };
+  }
+}
+
+async function fetchPriceHistory(token: string, symbol: string): Promise<number[]> {
+  try {
+    const res = await fetch(`https://api.schwabapi.com/marketdata/v1/pricehistory?symbol=${symbol}&periodType=month&period=2&frequencyType=daily&frequency=1`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    return (data.candles || []).map((c: any) => c.close);
+  } catch { return []; }
+}
+
+// ============================================================
+// OPTION CONTRACT TYPE
+// ============================================================
+interface OptionContract {
+  symbol: string;
+  strike: number;
+  expiration: string;
+  dte: number;
+  type: 'call' | 'put';
+  bid: number;
+  ask: number;
+  last: number;
+  mark: number;
+  volume: number;
+  openInterest: number;
+  delta: number;
+  gamma: number;
+  theta: number;
+  vega: number;
+  rho: number;
+  iv: number;
+  itm: boolean;
+  intrinsicValue: number;
+  extrinsicValue: number;
+  bidAskSpread: number;
+  spreadPercent: number;
+  // Unusual activity flags
+  volumeOIRatio: number;
+  isUnusual: boolean;
+  unusualScore: number;
+}
+
+// ============================================================
+// PARSE OPTIONS CHAIN - ALL EXPIRATIONS
+// ============================================================
+function parseOptionsChain(chainData: any, currentPrice: number): {
+  calls: OptionContract[];
+  puts: OptionContract[];
+  expirations: string[];
+  byExpiration: { [exp: string]: { calls: OptionContract[]; puts: OptionContract[] } };
+} {
+  const calls: OptionContract[] = [];
+  const puts: OptionContract[] = [];
+  const expirationSet = new Set<string>();
+  const byExpiration: { [exp: string]: { calls: OptionContract[]; puts: OptionContract[] } } = {};
+
+  const parseMap = (expDateMap: any, type: 'call' | 'put') => {
+    if (!expDateMap) return;
+    
+    for (const [expKey, strikes] of Object.entries(expDateMap)) {
+      const expDate = expKey.split(':')[0];
+      expirationSet.add(expDate);
+      
+      if (!byExpiration[expDate]) {
+        byExpiration[expDate] = { calls: [], puts: [] };
+      }
+      
+      for (const [strikeStr, contracts] of Object.entries(strikes as any)) {
+        const contractArr = contracts as any[];
+        if (!contractArr || contractArr.length === 0) continue;
+        
+        const c = contractArr[0];
+        const strike = parseFloat(strikeStr);
+        
+        // Include strikes within 30% of current price
+        if (Math.abs(strike - currentPrice) / currentPrice > 0.30) continue;
+        
+        const bid = c.bid || 0;
+        const ask = c.ask || 0;
+        const mark = (bid + ask) / 2 || c.last || 0;
+        const itm = type === 'call' ? strike < currentPrice : strike > currentPrice;
+        const intrinsic = type === 'call' 
+          ? Math.max(0, currentPrice - strike)
+          : Math.max(0, strike - currentPrice);
+        const volume = c.totalVolume || 0;
+        const openInterest = c.openInterest || 0;
+        const volumeOIRatio = openInterest > 0 ? volume / openInterest : volume > 0 ? 999 : 0;
+        const bidAskSpread = ask - bid;
+        const spreadPercent = mark > 0 ? (bidAskSpread / mark) * 100 : 0;
+        
+        // Calculate unusual score
+        let unusualScore = 0;
+        if (volumeOIRatio >= 3) unusualScore += 30;
+        else if (volumeOIRatio >= 1.5) unusualScore += 15;
+        if (volume >= 1000) unusualScore += 20;
+        else if (volume >= 500) unusualScore += 10;
+        if (volume >= openInterest && openInterest > 100) unusualScore += 25;
+        if (mark * volume * 100 >= 100000) unusualScore += 15; // Premium > $100k
+        if (Math.abs(c.delta || 0) >= 0.3 && Math.abs(c.delta || 0) <= 0.7) unusualScore += 10;
+        
+        const contract: OptionContract = {
+          symbol: c.symbol || '',
+          strike,
+          expiration: expDate,
+          dte: c.daysToExpiration || 0,
+          type,
+          bid,
+          ask,
+          last: c.last || mark,
+          mark,
+          volume,
+          openInterest,
+          delta: c.delta || 0,
+          gamma: c.gamma || 0,
+          theta: c.theta || 0,
+          vega: c.vega || 0,
+          rho: c.rho || 0,
+          iv: (c.volatility || 0) / 100,
+          itm,
+          intrinsicValue: intrinsic,
+          extrinsicValue: Math.max(0, mark - intrinsic),
+          bidAskSpread,
+          spreadPercent,
+          volumeOIRatio: Math.round(volumeOIRatio * 100) / 100,
+          isUnusual: unusualScore >= 50,
+          unusualScore,
+        };
+        
+        if (type === 'call') {
+          calls.push(contract);
+          byExpiration[expDate].calls.push(contract);
+        } else {
+          puts.push(contract);
+          byExpiration[expDate].puts.push(contract);
+        }
+      }
+    }
+  };
+
+  parseMap(chainData.callExpDateMap, 'call');
+  parseMap(chainData.putExpDateMap, 'put');
+
+  // Sort
+  const sortFn = (a: OptionContract, b: OptionContract) => a.dte - b.dte || a.strike - b.strike;
+  calls.sort(sortFn);
+  puts.sort(sortFn);
+  
+  // Sort each expiration's options
+  for (const exp of Object.keys(byExpiration)) {
+    byExpiration[exp].calls.sort((a, b) => a.strike - b.strike);
+    byExpiration[exp].puts.sort((a, b) => a.strike - b.strike);
+  }
+
+  return {
+    calls,
+    puts,
+    expirations: Array.from(expirationSet).sort(),
+    byExpiration,
+  };
+}
+
+// ============================================================
+// DETECT UNUSUAL OPTIONS ACTIVITY
+// ============================================================
+interface UnusualActivity {
+  contract: OptionContract;
+  signals: string[];
+  score: number;
+  sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  premiumValue: number;
+  convictionLevel: 'HIGH' | 'MEDIUM' | 'LOW';
+  interpretation: string;
+  // NEW: Hedge vs Directional classification
+  tradeType: 'DIRECTIONAL' | 'LIKELY_HEDGE' | 'UNCERTAIN';
+  tradeTypeReason: string;
+  insiderProbability: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY';
+  insiderSignals: string[];
+}
+
+// Research-based criteria for determining hedge vs directional
+function classifyTradeType(
+  contract: OptionContract, 
+  currentPrice: number, 
+  stockTrend: 'UP' | 'DOWN' | 'SIDEWAYS',
+  isNearEarnings: boolean
+): { 
+  tradeType: 'DIRECTIONAL' | 'LIKELY_HEDGE' | 'UNCERTAIN'; 
+  reason: string;
+  insiderProbability: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY';
+  insiderSignals: string[];
+} {
+  const insiderSignals: string[] = [];
+  let hedgeScore = 0;
+  let directionalScore = 0;
+  let insiderScore = 0;
+  
+  // KEY RESEARCH FINDINGS:
+  // 1. Short-dated options (< 30 DTE) = more likely directional/speculative
+  // 2. Long-dated options (> 90 DTE) = more likely hedge
+  // 3. Trend contradiction (puts in uptrend, calls in downtrend) = likely hedge
+  // 4. Near-ATM with high volume = directional
+  // 5. Deep OTM with high premium = possible insider knowledge
+  
+  // Factor 1: Expiration - Research shows short-term = conviction, long-term = hedge
+  if (contract.dte < 14) {
+    directionalScore += 3;
+    insiderSignals.push('Short-dated (< 2 weeks) - high urgency');
+    insiderScore += 2;
+  } else if (contract.dte < 30) {
+    directionalScore += 2;
+    insiderSignals.push('Near-term expiration - elevated conviction');
+    insiderScore += 1;
+  } else if (contract.dte > 90) {
+    hedgeScore += 3;
+  } else if (contract.dte > 60) {
+    hedgeScore += 1;
+  }
+  
+  // Factor 2: Moneyness - Deep OTM with high premium = unusual
+  const otmPercent = contract.type === 'call' 
+    ? (contract.strike - currentPrice) / currentPrice * 100
+    : (currentPrice - contract.strike) / currentPrice * 100;
+  
+  if (otmPercent > 20) {
+    // Deep OTM - very speculative or hedge
+    if (contract.dte < 30 && contract.volume > contract.openInterest) {
+      directionalScore += 3;
+      insiderSignals.push(`Deep OTM (${otmPercent.toFixed(0)}%) with new positions - possible insider knowledge`);
+      insiderScore += 3;
+    } else {
+      hedgeScore += 2;
+    }
+  } else if (otmPercent > 10) {
+    // Moderately OTM
+    directionalScore += 1;
+  } else if (otmPercent < 5) {
+    // ATM or ITM - strong directional conviction
+    directionalScore += 2;
+  }
+  
+  // Factor 3: Trend contradiction - KEY HEDGE SIGNAL
+  // Puts during uptrend or calls during downtrend = likely hedge
+  if (contract.type === 'put' && stockTrend === 'UP') {
+    hedgeScore += 3;
+  } else if (contract.type === 'call' && stockTrend === 'DOWN') {
+    hedgeScore += 3;
+  } else {
+    // Trade aligns with trend = directional
+    directionalScore += 2;
+  }
+  
+  // Factor 4: Volume vs Open Interest - New positions = directional
+  if (contract.volume > contract.openInterest * 2) {
+    directionalScore += 2;
+    insiderSignals.push('Volume >> OI - significant new positioning');
+    insiderScore += 1;
+  } else if (contract.volume > contract.openInterest) {
+    directionalScore += 1;
+  }
+  
+  // Factor 5: Earnings proximity - hedging common before earnings
+  if (isNearEarnings && contract.type === 'put') {
+    hedgeScore += 2;
+  } else if (isNearEarnings && contract.type === 'call' && contract.dte < 14) {
+    directionalScore += 1;
+    insiderSignals.push('Near-dated call before earnings - possible catalyst knowledge');
+    insiderScore += 2;
+  }
+  
+  // Factor 6: Premium size relative to typical - institutional or insider
+  const premiumValue = contract.mark * contract.volume * 100;
+  if (premiumValue > 1000000) {
+    insiderSignals.push(`$${(premiumValue/1e6).toFixed(1)}M premium - institutional size`);
+    if (contract.dte < 30 && otmPercent > 10) {
+      insiderScore += 2;
+    }
+  }
+  
+  // Factor 7: Execution urgency (if available through spread)
+  // Paying above mid-price indicates urgency
+  if (contract.bid > 0 && contract.ask > 0) {
+    const midPrice = (contract.bid + contract.ask) / 2;
+    if (contract.last > midPrice * 1.02) {
+      directionalScore += 1;
+      insiderSignals.push('Paid above mid-price - urgency to enter');
+      insiderScore += 1;
+    }
+  }
+  
+  // Determine trade type
+  let tradeType: 'DIRECTIONAL' | 'LIKELY_HEDGE' | 'UNCERTAIN';
+  let reason: string;
+  
+  if (directionalScore >= hedgeScore + 3) {
+    tradeType = 'DIRECTIONAL';
+    reason = 'Strong directional signals: short-dated, aligned with trend, new positions';
+  } else if (hedgeScore >= directionalScore + 2) {
+    tradeType = 'LIKELY_HEDGE';
+    reason = 'Hedge characteristics: contradicts trend, longer-dated, or near earnings';
+  } else {
+    tradeType = 'UNCERTAIN';
+    reason = 'Mixed signals - could be directional or hedge';
+  }
+  
+  // Determine insider probability
+  let insiderProbability: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY';
+  if (insiderScore >= 6) {
+    insiderProbability = 'HIGH';
+  } else if (insiderScore >= 4) {
+    insiderProbability = 'MEDIUM';
+  } else if (insiderScore >= 2) {
+    insiderProbability = 'LOW';
+  } else {
+    insiderProbability = 'UNLIKELY';
+  }
+  
+  return { tradeType, reason, insiderProbability, insiderSignals };
+}
+
+function detectUnusualActivity(
+  calls: OptionContract[], 
+  puts: OptionContract[], 
+  currentPrice: number,
+  stockTrend: 'UP' | 'DOWN' | 'SIDEWAYS' = 'SIDEWAYS',
+  isNearEarnings: boolean = false
+): UnusualActivity[] {
+  const unusual: UnusualActivity[] = [];
+  
+  const analyzeContract = (c: OptionContract) => {
+    if (c.dte < 10 || c.dte > 180) return;
+    if (c.volume < 50 || c.openInterest < 10) return;
+    
+    const signals: string[] = [];
+    let unusualScore = 0;
+    
+    if (c.volumeOIRatio >= 5) {
+      signals.push(`🔥🔥 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Extreme)`);
+      unusualScore += 40;
+    } else if (c.volumeOIRatio >= 3) {
+      signals.push(`🔥 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Very High)`);
+      unusualScore += 30;
+    } else if (c.volumeOIRatio >= 1.5) {
+      signals.push(`📈 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Elevated)`);
+      unusualScore += 15;
+    } else {
+      return;
+    }
+    
+    const premiumValue = c.mark * c.volume * 100;
+    if (premiumValue >= 1000000) {
+      signals.push(`🐋 Premium: $${(premiumValue / 1e6).toFixed(2)}M (Whale)`);
+      unusualScore += 35;
+    } else if (premiumValue >= 500000) {
+      signals.push(`💰 Premium: $${(premiumValue / 1e3).toFixed(0)}K (Institutional)`);
+      unusualScore += 25;
+    } else if (premiumValue >= 100000) {
+      signals.push(`💵 Premium: $${(premiumValue / 1e3).toFixed(0)}K`);
+      unusualScore += 15;
+    }
+    
+    if (c.volume >= c.openInterest && c.openInterest > 100) {
+      signals.push(`🆕 New Positions Opening`);
+      unusualScore += 20;
+    }
+    
+    if (c.volume >= 10000) {
+      signals.push(`📊 Volume: ${c.volume.toLocaleString()} (Massive)`);
+      unusualScore += 20;
+    } else if (c.volume >= 5000) {
+      signals.push(`📊 Volume: ${c.volume.toLocaleString()} (High)`);
+      unusualScore += 10;
+    }
+    
+    if (c.dte >= 30 && c.dte <= 90) {
+      signals.push(`📅 ${c.dte} DTE - Optimal timeframe`);
+      unusualScore += 10;
+    }
+    
+    if (unusualScore < 40) return;
+    
+    const sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = c.type === 'call' ? 'BULLISH' : 'BEARISH';
+    
+    let convictionLevel: 'HIGH' | 'MEDIUM' | 'LOW';
+    if (unusualScore >= 80) convictionLevel = 'HIGH';
+    else if (unusualScore >= 55) convictionLevel = 'MEDIUM';
+    else convictionLevel = 'LOW';
+    
+    // NEW: Classify as hedge vs directional
+    const classification = classifyTradeType(c, currentPrice, stockTrend, isNearEarnings);
+    
+    // Adjust interpretation based on trade type
+    let interpretation = `${convictionLevel} conviction ${sentiment.toLowerCase()} bet targeting $${c.strike} within ${c.dte} days.`;
+    if (classification.tradeType === 'LIKELY_HEDGE') {
+      interpretation = `LIKELY HEDGE: ${sentiment.toLowerCase()} protection targeting $${c.strike}. ${classification.reason}`;
+    } else if (classification.tradeType === 'DIRECTIONAL') {
+      interpretation = `DIRECTIONAL BET: ${convictionLevel} conviction ${sentiment.toLowerCase()} position targeting $${c.strike}. ${classification.reason}`;
+    }
+    
+    // Add insider warning if applicable
+    if (classification.insiderProbability === 'HIGH' || classification.insiderProbability === 'MEDIUM') {
+      signals.push(`🔍 Insider probability: ${classification.insiderProbability}`);
+    }
+    
+    unusual.push({
+      contract: c,
+      signals,
+      score: unusualScore,
+      sentiment,
+      premiumValue,
+      convictionLevel,
+      interpretation,
+      tradeType: classification.tradeType,
+      tradeTypeReason: classification.reason,
+      insiderProbability: classification.insiderProbability,
+      insiderSignals: classification.insiderSignals,
+    });
+  };
+  
+  calls.forEach(analyzeContract);
+  puts.forEach(analyzeContract);
+  
+  unusual.sort((a, b) => b.score - a.score);
+  
+  return unusual.slice(0, 10);
+}
+
+// ============================================================
+// IV ANALYSIS
+// ============================================================
+interface IVAnalysis {
+  avgCallIV: number;
+  avgPutIV: number;
+  putCallIVSkew: number;
+  ivRank: number;
+  ivPercentile: number;
+  ivSignal: 'HIGH' | 'ELEVATED' | 'NORMAL' | 'LOW';
+  recommendation: 'BUY_PREMIUM' | 'SELL_PREMIUM' | 'NEUTRAL';
+  atmIV: number;
+}
+
+function analyzeIV(calls: OptionContract[], puts: OptionContract[], currentPrice: number): IVAnalysis {
+  const atmCalls = calls.filter(c => Math.abs(c.strike - currentPrice) / currentPrice < 0.05 && c.iv > 0);
+  const atmPuts = puts.filter(p => Math.abs(p.strike - currentPrice) / currentPrice < 0.05 && p.iv > 0);
+  
+  const avgCallIV = atmCalls.length > 0 ? atmCalls.reduce((sum, c) => sum + c.iv, 0) / atmCalls.length : 0.30;
+  const avgPutIV = atmPuts.length > 0 ? atmPuts.reduce((sum, p) => sum + p.iv, 0) / atmPuts.length : 0.30;
+  const atmIV = (avgCallIV + avgPutIV) / 2;
+  
+  const putCallIVSkew = avgPutIV - avgCallIV;
+  const ivRank = Math.min(100, Math.max(0, ((atmIV - 0.15) / 0.50) * 100));
+  
+  let ivSignal: 'HIGH' | 'ELEVATED' | 'NORMAL' | 'LOW' = 'NORMAL';
+  let recommendation: 'BUY_PREMIUM' | 'SELL_PREMIUM' | 'NEUTRAL' = 'NEUTRAL';
+  
+  if (ivRank >= 70) {
+    ivSignal = 'HIGH';
+    recommendation = 'SELL_PREMIUM';
+  } else if (ivRank >= 50) {
+    ivSignal = 'ELEVATED';
+  } else if (ivRank <= 30) {
+    ivSignal = 'LOW';
+    recommendation = 'BUY_PREMIUM';
+  }
+  
+  return {
+    avgCallIV: Math.round(avgCallIV * 1000) / 10,
+    avgPutIV: Math.round(avgPutIV * 1000) / 10,
+    putCallIVSkew: Math.round(putCallIVSkew * 1000) / 10,
+    ivRank: Math.round(ivRank),
+    ivPercentile: Math.round(ivRank),
+    ivSignal,
+    recommendation,
+    atmIV: Math.round(atmIV * 1000) / 10,
+  };
+}
+
+// ============================================================
+// MARKET METRICS
+// ============================================================
+interface MarketMetrics {
+  totalCallVolume: number;
+  totalPutVolume: number;
+  totalCallOI: number;
+  totalPutOI: number;
+  putCallRatio: number;
+  putCallOIRatio: number;
+  sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  maxPain: number;
+}
+
+function calculateMarketMetrics(calls: OptionContract[], puts: OptionContract[], currentPrice: number): MarketMetrics {
+  const totalCallVolume = calls.reduce((sum, c) => sum + c.volume, 0);
+  const totalPutVolume = puts.reduce((sum, p) => sum + p.volume, 0);
+  const totalCallOI = calls.reduce((sum, c) => sum + c.openInterest, 0);
+  const totalPutOI = puts.reduce((sum, p) => sum + p.openInterest, 0);
+  
+  const putCallRatio = totalCallVolume > 0 ? totalPutVolume / totalCallVolume : 1;
+  const putCallOIRatio = totalCallOI > 0 ? totalPutOI / totalCallOI : 1;
+  
+  let sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+  if (putCallRatio < 0.7) sentiment = 'BULLISH';
+  else if (putCallRatio > 1.2) sentiment = 'BEARISH';
+  
+  const strikeOI: { [strike: number]: number } = {};
+  [...calls, ...puts].forEach(c => {
+    strikeOI[c.strike] = (strikeOI[c.strike] || 0) + c.openInterest;
+  });
+  const maxPain = Object.entries(strikeOI).reduce((max, [strike, oi]) => 
+    oi > (strikeOI[max] || 0) ? parseFloat(strike) : max, currentPrice);
+  
+  return {
+    totalCallVolume,
+    totalPutVolume,
+    totalCallOI,
+    totalPutOI,
+    putCallRatio: Math.round(putCallRatio * 100) / 100,
+    putCallOIRatio: Math.round(putCallOIRatio * 100) / 100,
+    sentiment,
+    maxPain: Math.round(maxPain * 100) / 100,
+  };
+}
+
+// ============================================================
+// TECHNICAL CALCULATIONS
+// ============================================================
+function calculateRSI(prices: number[], period = 14): number {
+  if (prices.length < period + 1) return 50;
+  const changes = prices.slice(-period - 1).map((p, i, arr) => i > 0 ? p - arr[i-1] : 0).slice(1);
+  const gains = changes.filter(c => c > 0).reduce((a, b) => a + b, 0) / period;
+  const losses = Math.abs(changes.filter(c => c < 0).reduce((a, b) => a + b, 0)) / period;
+  if (losses === 0) return 100;
+  return 100 - (100 / (1 + gains / losses));
+}
+
+function calculateSMA(prices: number[], period: number): number {
+  if (prices.length < period) return prices[prices.length - 1] || 0;
+  return prices.slice(-period).reduce((a, b) => a + b, 0) / period;
+}
+
+// ============================================================
+// GENERATE SUGGESTIONS
+// ============================================================
+interface OptionScore {
+  total: number;
+  delta: number;
+  iv: number;
+  liquidity: number;
+  timing: number;
+  technical: number;
+  unusual: number;
+}
+
+function scoreOption(
+  option: OptionContract,
+  trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL',
+  avgIV: number,
+): OptionScore {
+  let deltaScore = 0;
+  let ivScore = 0;
+  let liquidityScore = 0;
+  let timingScore = 0;
+  let technicalScore = 0;
+  let unusualScore = 0;
+
+  // Delta scoring
+  const absDelta = Math.abs(option.delta);
+  if (absDelta >= 0.35 && absDelta <= 0.65) deltaScore = 2;
+  else if (absDelta >= 0.25 && absDelta <= 0.75) deltaScore = 1;
+
+  // IV scoring
+  const optIV = option.iv * 100;
+  if (optIV < avgIV * 0.9) ivScore = 2;
+  else if (optIV <= avgIV) ivScore = 1;
+
+  // Liquidity scoring
+  if (option.spreadPercent < 3 && option.volume > 200) liquidityScore = 2;
+  else if (option.spreadPercent < 5 && option.volume > 50) liquidityScore = 1;
+
+  // Timing scoring
+  if (option.dte >= 21 && option.dte <= 45) timingScore = 2;
+  else if (option.dte >= 14 && option.dte <= 60) timingScore = 1;
+
+  // Technical scoring
+  if (option.type === 'call' && trend === 'BULLISH') technicalScore = 2;
+  else if (option.type === 'put' && trend === 'BEARISH') technicalScore = 2;
+  else if (trend === 'NEUTRAL') technicalScore = 1;
+
+  // Unusual activity bonus
+  if (option.isUnusual) unusualScore = 2;
+  else if (option.unusualScore >= 30) unusualScore = 1;
+
+  return {
+    total: deltaScore + ivScore + liquidityScore + timingScore + technicalScore + unusualScore,
+    delta: deltaScore,
+    iv: ivScore,
+    liquidity: liquidityScore,
+    timing: timingScore,
+    technical: technicalScore,
+    unusual: unusualScore,
+  };
+}
+
+
+function calibratedOptionConfidence(totalScore: number, trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL', isTrendAligned: boolean, spreadPct: number, oi: number, volume: number) {
+  // Conservative calibration to avoid overconfidence. (Measured framework placeholder - calibrate with future backtests.)
+  let conf =
+    totalScore >= 10 ? 76 :
+    totalScore >= 8 ? 68 :
+    totalScore >= 6 ? 58 :
+    totalScore >= 5 ? 52 :
+    44;
+
+  if (trend === 'NEUTRAL') conf -= 10;
+  if (isTrendAligned) conf += 4;
+
+  // Tradability boosts/penalties
+  if (spreadPct <= 3) conf += 3;
+  else if (spreadPct >= 8) conf -= 6;
+
+  if (oi >= 1500 || volume >= 500) conf += 3;
+  else if (oi < 500 && volume < 200) conf -= 6;
+
+  conf = Math.max(5, Math.min(95, Math.round(conf)));
+  const bucket = conf >= 75 ? 'HIGH' : conf >= 60 ? 'MED' : 'LOW';
+  return { confidence: conf, bucket, calibrationVersion: 'v1.0-conservative' as const };
+}
+
+function generateSuggestions(
+  calls: OptionContract[],
+  puts: OptionContract[],
+  trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL',
+  rsi: number,
+  ivAnalysis: IVAnalysis,
+  metrics: MarketMetrics,
+  unusualActivity: UnusualActivity[],
+): any[] {
+  const suggestions: any[] = [];
+
+  const validCalls = calls.filter(c => c.dte >= 7 && c.dte <= 90 && liquidityOk(c));
+  const validPuts = puts.filter(p => p.dte >= 7 && p.dte <= 90 && liquidityOk(p));
+
+  const scoredCalls = validCalls.map(c => ({ contract: c, score: scoreOption(c, trend, ivAnalysis.atmIV) }));
+  const scoredPuts = validPuts.map(p => ({ contract: p, score: scoreOption(p, trend, ivAnalysis.atmIV) }));
+
+  scoredCalls.sort((a, b) => b.score.total - a.score.total);
+  scoredPuts.sort((a, b) => b.score.total - a.score.total);
+
+  const emPct = expectedMovePct(ivAnalysis.atmIV, 30);
+
+  // Best call
+  if (scoredCalls.length > 0 && trend !== 'BEARISH') {
+    const best = scoredCalls[0];
+    const c = best.contract;
+    const s = best.score;
+    
+    suggestions.push({
+      type: 'CALL',
+      strategy: trend === 'BULLISH' ? 'Long Call (Trend Aligned)' : 'Long Call (Speculative)',
+      contract: c,
+      score: s,
+      reasoning: [
+        `Delta: ${c.delta.toFixed(2)} (${Math.round(Math.abs(c.delta) * 100)}% prob ITM)`,
+        `IV: ${(c.iv * 100).toFixed(0)}%`,
+        `DTE: ${c.dte} days | Spread: ${c.spreadPercent.toFixed(1)}%`,
+        `Score: ${s.total}/12`,
+      ],
+      warnings: s.total < 6 ? ['Lower confidence - manage size'] : [],
+      confidence: calibratedOptionConfidence(s.total, trend, (trend === 'BULLISH'), c.spreadPercent, c.openInterest, c.volume).confidence,
+      riskLevel: s.total >= 8 ? 'LOW' : s.total >= 5 ? 'MEDIUM' : 'HIGH',
+    });
+  }
+
+  // Best put
+  if (scoredPuts.length > 0) {
+    const best = scoredPuts[0];
+    const p = best.contract;
+    const s = best.score;
+    
+    suggestions.push({
+      type: 'PUT',
+      strategy: trend === 'BEARISH' ? 'Long Put (Trend Aligned)' : 'Protective Put (Hedge)',
+      contract: p,
+      score: s,
+      reasoning: [
+        `Delta: ${p.delta.toFixed(2)} (${Math.round(Math.abs(p.delta) * 100)}% prob ITM)`,
+        `IV: ${(p.iv * 100).toFixed(0)}%`,
+        `DTE: ${p.dte} days | Spread: ${p.spreadPercent.toFixed(1)}%`,
+        `Score: ${s.total}/12`,
+      ],
+      warnings: trend !== 'BEARISH' ? ['Counter-trend - use as hedge'] : [],
+      confidence: calibratedOptionConfidence(s.total, trend, (trend === 'BEARISH'), p.spreadPercent, p.openInterest, p.volume).confidence,
+      riskLevel: s.total >= 8 ? 'LOW' : s.total >= 5 ? 'MEDIUM' : 'HIGH',
+    });
+  }
+
+  // Unusual activity alert
+  if (unusualActivity.length > 0) {
+    const topUnusual = unusualActivity[0];
+    suggestions.push({
+      type: 'ALERT',
+      strategy: `🔥 Unusual Activity: ${topUnusual.contract.type.toUpperCase()} $${topUnusual.contract.strike}`,
+      contract: topUnusual.contract,
+      reasoning: topUnusual.signals,
+      warnings: [],
+      confidence: topUnusual.score,
+      riskLevel: 'WARNING',
+      sentiment: topUnusual.sentiment,
+    });
+  }
+
+  // IV alerts
+  if (ivAnalysis.ivSignal === 'HIGH') {
+    suggestions.push({
+      type: 'ALERT',
+      strategy: `⚠️ High IV Environment (${ivAnalysis.atmIV.toFixed(0)}%)`,
+      reasoning: ['Options are expensive', 'Consider selling premium or spreads'],
+      warnings: [],
+      confidence: 0,
+      riskLevel: 'WARNING',
+    });
+  } else if (ivAnalysis.ivSignal === 'LOW') {
+    suggestions.push({
+      type: 'ALERT',
+      strategy: `💡 Low IV Environment (${ivAnalysis.atmIV.toFixed(0)}%)`,
+      reasoning: ['Options are cheap', 'Good time to buy premium'],
+      warnings: [],
+      confidence: 0,
+      riskLevel: 'WARNING',
+    });
+  }
+
+  // RSI alert
+  if (rsi > 70 || rsi < 30) {
+    suggestions.push({
+      type: 'ALERT',
+      strategy: rsi > 70 ? `⚠️ RSI Overbought (${rsi.toFixed(0)})` : `⚠️ RSI Oversold (${rsi.toFixed(0)})`,
+      reasoning: [rsi > 70 ? 'Stock may be extended' : 'Stock may bounce'],
+      warnings: [],
+      confidence: 0,
+      riskLevel: 'WARNING',
+    });
+  }
+
+  
+  const tradable = suggestions.filter(s => s.type === 'CALL' || s.type === 'PUT');
+  if (tradable.length === 0) {
+    const reasons: string[] = [];
+    reasons.push('No contracts passed liquidity/spread gates (spread% ≤ 12, OI ≥ 500 or volume ≥ 200, mark ≥ 0.10).');
+    if (trend === 'NEUTRAL') reasons.push('Underlying trend is NEUTRAL; skipping directional options suggestions for accuracy.');
+    reasons.push(`Expected move (30D, IV-based): ~${emPct}%`);
+    return [{
+      type: 'NO_TRADE',
+      strategy: 'NO_TRADE',
+      confidence: 0,
+      riskLevel: 'N/A',
+      reasoning: reasons,
+      warnings: [],
+    }];
+  }
+
+  return suggestions;
+
+}
+
+// ============================================================
+// MAIN API HANDLER
+// ============================================================
+export async function GET(request: NextRequest, { params }: { params: { ticker: string } }) {
+  const ticker = params.ticker.toUpperCase();
+  const startTime = Date.now();
+
+  const { token, error: tokenError, errorCode } = await getSchwabToken();
+  
+  if (!token) {
+    return NextResponse.json({
+      error: 'Schwab authentication failed',
+      details: tokenError,
+      errorCode,
+      ticker,
+      instructions: errorCode === 401 
+        ? ['Schwab refresh token has expired (7-day limit)', 'Generate a new refresh token']
+        : ['Set SCHWAB_APP_KEY, SCHWAB_APP_SECRET, SCHWAB_REFRESH_TOKEN'],
+      lastUpdated: new Date().toISOString(),
+      dataSource: 'none',
+    });
+  }
+
+  const { data: chainData, error: chainError } = await fetchOptionsChain(token, ticker);
+  
+  if (!chainData || chainError) {
+    return NextResponse.json({
+      error: 'Failed to fetch options chain',
+      details: chainError,
+      ticker,
+      lastUpdated: new Date().toISOString(),
+      dataSource: 'none',
+    });
+  }
+
+  const currentPrice = chainData.underlyingPrice || 0;
+  
+  if (currentPrice === 0) {
+    return NextResponse.json({ error: 'Invalid underlying price', ticker });
+  }
+
+  const { calls, puts, expirations, byExpiration } = parseOptionsChain(chainData, currentPrice);
+  const priceHistory = await fetchPriceHistory(token, ticker);
+  
+  const rsi = priceHistory.length > 14 ? calculateRSI(priceHistory) : 50;
+  const sma20 = priceHistory.length > 20 ? calculateSMA(priceHistory, 20) : currentPrice;
+  const sma50 = priceHistory.length > 50 ? calculateSMA(priceHistory, 50) : currentPrice * 0.95;
+  const support = priceHistory.length > 0 ? Math.min(...priceHistory.slice(-20)) : currentPrice * 0.95;
+  const resistance = priceHistory.length > 0 ? Math.max(...priceHistory.slice(-20)) : currentPrice * 1.05;
+  
+  let trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+  if (currentPrice > sma20 && currentPrice > sma50) trend = 'BULLISH';
+  else if (currentPrice < sma20 && currentPrice < sma50) trend = 'BEARISH';
+  
+  // Convert trend for unusual activity detection
+  const stockTrend: 'UP' | 'DOWN' | 'SIDEWAYS' = trend === 'BULLISH' ? 'UP' : trend === 'BEARISH' ? 'DOWN' : 'SIDEWAYS';
+
+  const ivAnalysis = analyzeIV(calls, puts, currentPrice);
+  const marketMetrics = calculateMarketMetrics(calls, puts, currentPrice);
+  const unusualActivity = detectUnusualActivity(calls, puts, currentPrice, stockTrend, false);
+  const suggestions = generateSuggestions(calls, puts, trend, rsi, ivAnalysis, marketMetrics, unusualActivity);
+  const tradable = suggestions.filter((s: any) => s.type === 'CALL' || s.type === 'PUT');
+
+  // Phase 2: Options setup registry (structure selection based on evidence)
+  // We only use the top-ranked tradable contract as an evidence anchor (spread/OI/volume/DTE).
+  const bestContract = tradable.length > 0 ? (tradable[0] as any).contract : null;
+
+  // Earnings proximity matters for options structure selection (IV crush). Best effort.
+  const daysToEarnings = await fetchDaysToEarnings(ticker);
+
+  const setupCtx: OptionsSetupContext = {
+    trend,
+    ivPercentile: typeof ivAnalysis?.ivPercentile === 'number' ? ivAnalysis.ivPercentile : 50,
+    daysToEarnings,
+    liquidityOk: bestContract ? liquidityOk(bestContract) : false,
+    spreadPercent: bestContract ? Number((bestContract as any).spreadPercent ?? null) : null,
+    openInterest: bestContract ? Number((bestContract as any).openInterest ?? null) : null,
+    volume: bestContract ? Number((bestContract as any).volume ?? null) : null,
+    dte: bestContract ? Number((bestContract as any).dte ?? null) : null,
+    atmIV: typeof ivAnalysis?.atmIV === 'number' ? ivAnalysis.atmIV : null,
+  };
+  const optionsSetup = evaluateOptionsSetup(setupCtx);
+
+  // Add a transparent, evidence-first "preferred structure" note so the UI always shows
+  // *why* the engine prefers a certain options structure (debit spread vs long premium, etc.).
+  // This card is informational (not trackable) and helps users trust the decision.
+  if (optionsSetup && optionsSetup.structure && optionsSetup.structure !== 'NO_TRADE') {
+    suggestions.unshift({
+      type: 'ALERT',
+      strategy: `📘 Preferred Structure: ${optionsSetup.structure.replace(/_/g, ' ')}`,
+      reasoning: [
+        ...(optionsSetup.reasons || []),
+        'Note: The current UI tracks single-leg calls/puts. Structure guidance is provided for risk-defined execution.',
+      ],
+      warnings: [],
+      confidence: 0,
+      riskLevel: 'INFO',
+    });
+  }
+
+  // If the setup registry says NO_TRADE, we keep unusual alerts but do not recommend directional trades.
+  const setupBlocksTrade = optionsSetup.structure === 'NO_TRADE';
+  if (setupBlocksTrade && tradable.length > 0) {
+    // Remove existing directional suggestions and replace with a single NO_TRADE card (alerts remain).
+    const alerts = suggestions.filter((s: any) => s.type === 'ALERT');
+    suggestions.splice(0, suggestions.length,
+      {
+        type: 'NO_TRADE',
+        strategy: 'No Trade (Setup Registry)',
+        reasoning: [...optionsSetup.reasons],
+        warnings: ['Waiting for a higher-quality setup improves accuracy.'],
+        confidence: 0,
+      },
+      ...alerts,
+    );
+  }
+  const tradeDecision = (setupBlocksTrade || tradable.length === 0 || suggestions[0]?.type === 'NO_TRADE')
+    ? { action: 'NO_TRADE', confidence: 0, rationale: suggestions[0]?.reasoning || optionsSetup.reasons || ['No trade'] }
+    : {
+        action: `OPTIONS_TRADE_${optionsSetup.structure}`,
+        confidence: Math.max(0, Math.min(95, Math.round(tradable[0]?.confidence || 0))),
+        rationale: [...(optionsSetup.reasons || []), ...(tradable[0]?.reasoning || [])],
+      };
+
+
+  const firstExp = expirations[0] || '';
+
+  const payload = {
+    ticker,
+    currentPrice: Math.round(currentPrice * 100) / 100,
+    lastUpdated: new Date().toISOString(),
+    dataSource: 'schwab-live',
+    responseTimeMs: Date.now() - startTime,
+    meta: { asOf: new Date().toISOString(), calibrationVersion: 'v1.0-conservative', tradeDecision,
+      setup: {
+        structure: optionsSetup.structure,
+        passed: optionsSetup.passed,
+        score: optionsSetup.score,
+        reasons: optionsSetup.reasons,
+      },
+      evidence: {
+        technicals: { trend, rsi: Math.round(rsi), sma20: Math.round(sma20 * 100) / 100, sma50: Math.round(sma50 * 100) / 100, support: Math.round(support * 100) / 100, resistance: Math.round(resistance * 100) / 100 },
+        iv: { atmIV: Math.round(ivAnalysis.atmIV * 10000) / 10000, ivRank: Math.round(ivAnalysis.ivRank), ivPercentile: Math.round(ivAnalysis.ivPercentile), ivSignal: ivAnalysis.ivSignal, putCallIVSkew: Math.round(ivAnalysis.putCallIVSkew * 10000) / 10000, expectedMove30dPct: expectedMovePct(ivAnalysis.atmIV, 30) },
+        earnings: { daysToEarnings },
+        market: { putCallRatio: Math.round(marketMetrics.putCallRatio * 1000) / 1000, putCallOIRatio: Math.round(marketMetrics.putCallOIRatio * 1000) / 1000, sentiment: marketMetrics.sentiment, maxPain: Math.round(marketMetrics.maxPain * 100) / 100 },
+        liquidity: liquidityEvidence(bestContract),
+        unusual: { count: unusualActivity.length, top: unusualActivity.slice(0, 5) },
+      }
+    },
+    expirations,
+    selectedExpiration: firstExp,
+    byExpiration,
+    technicals: {
+      trend,
+      rsi: Math.round(rsi),
+      sma20: Math.round(sma20 * 100) / 100,
+      sma50: Math.round(sma50 * 100) / 100,
+      support: Math.round(support * 100) / 100,
+      resistance: Math.round(resistance * 100) / 100,
+    },
+    ivAnalysis,
+    metrics: {
+      putCallRatio: marketMetrics.putCallRatio,
+      putCallOIRatio: marketMetrics.putCallOIRatio,
+      totalCallVolume: marketMetrics.totalCallVolume,
+      totalPutVolume: marketMetrics.totalPutVolume,
+      totalCallOI: marketMetrics.totalCallOI,
+      totalPutOI: marketMetrics.totalPutOI,
+      sentiment: marketMetrics.sentiment,
+      maxPain: marketMetrics.maxPain,
+      avgIV: ivAnalysis.atmIV,
+      ivRank: ivAnalysis.ivRank,
+    },
+    unusualActivity: unusualActivity.map(u => ({
+      strike: u.contract.strike,
+      type: u.contract.type,
+      expiration: u.contract.expiration,
+      dte: u.contract.dte,
+      volume: u.contract.volume,
+      openInterest: u.contract.openInterest,
+      volumeOIRatio: u.contract.volumeOIRatio,
+      delta: u.contract.delta,
+      iv: u.contract.iv,
+      bid: u.contract.bid,
+      ask: u.contract.ask,
+      mark: u.contract.mark,
+      premium: Math.round(u.premiumValue),
+      premiumFormatted: u.premiumValue >= 1000000 
+        ? `$${(u.premiumValue / 1e6).toFixed(2)}M` 
+        : `$${(u.premiumValue / 1e3).toFixed(0)}K`,
+      signals: u.signals,
+      score: u.score,
+      sentiment: u.sentiment,
+      convictionLevel: u.convictionLevel,
+      interpretation: u.interpretation,
+      // NEW: Hedge vs Directional classification
+      tradeType: u.tradeType,
+      tradeTypeReason: u.tradeTypeReason,
+      insiderProbability: u.insiderProbability,
+      insiderSignals: u.insiderSignals,
+      // Full contract for tracking
+      contract: {
+        strike: u.contract.strike,
+        type: u.contract.type,
+        expiration: u.contract.expiration,
+        dte: u.contract.dte,
+        delta: u.contract.delta,
+        volume: u.contract.volume,
+        openInterest: u.contract.openInterest,
+        volumeOIRatio: u.contract.volumeOIRatio,
+        bid: u.contract.bid,
+        ask: u.contract.ask,
+        mark: u.contract.mark,
+      },
+    })),
+    suggestions,
+    optionsChain: {
+      calls: byExpiration[firstExp]?.calls || [],
+      puts: byExpiration[firstExp]?.puts || [],
+    },
+    allCalls: calls,
+    allPuts: puts,
+  };
+
+  // Phase 4 (foundation): Evidence packet (auditable decision support)
+  try {
+    const packet = buildEvidencePacket('options', payload);
+    (payload as any).evidencePacket = packet;
+    (payload as any).meta = (payload as any).meta || {};
+    (payload as any).meta.evidencePacketVersion = packet.version;
+    (payload as any).meta.evidencePacketHash = packet.hash;
+  } catch (e) {
+    console.warn('evidence_packet_failed', e);
+  }
+
+  // Phase 3: Snapshot logging (best-effort; durable on Optiplex/local, ephemeral on Vercel)
+  try {
+    const store = await getSnapshotStore();
+    await store.saveSnapshot(buildSnapshotFromPayload({ source: 'options', ticker, payload }));
+  } catch (e) {
+    console.warn('snapshot_log_failed', e);
+  }
+
+  return NextResponse.json(payload);
+}
