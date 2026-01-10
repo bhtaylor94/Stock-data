@@ -1636,7 +1636,14 @@ return NextResponse.json({
         },
         patterns: {
           dominant: chartPatterns?.dominantPattern || null,
-          status: chartPatterns?.status || 'NONE',
+          // Derive a stable, explicit pattern status (the pattern engine does not expose a `status` field)
+          status: chartPatterns
+            ? (chartPatterns.hasConflict
+                ? 'CONFLICT'
+                : (chartPatterns.confirmed.length > 0
+                    ? 'CONFIRMED'
+                    : ((chartPatterns.forming || []).length > 0 ? 'FORMING' : 'NONE')))
+            : 'NONE',
           confidence: asNumber(chartPatterns?.dominantConfidence, 0),
         },
         verification: {
