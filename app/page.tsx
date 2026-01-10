@@ -606,7 +606,7 @@ function OptionsTab({ optionsData, loading, searchedTicker }: any) {
               <div key={i} className="p-4 rounded-lg bg-slate-900/40 border border-slate-700/30">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <span className={u.putCall === 'CALL' ? 'text-emerald-400' : 'text-red-400'} className="font-bold">
+                    <span className={`${u.putCall === 'CALL' ? 'text-emerald-400' : 'text-red-400'} font-bold`}>
                       {u.putCall}
                     </span>
                     <span className="text-white font-semibold">
