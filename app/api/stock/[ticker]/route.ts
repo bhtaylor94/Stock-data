@@ -1651,7 +1651,8 @@ return NextResponse.json({
                     ? 'CONFIRMED'
                     : ((chartPatterns.forming || []).length > 0 ? 'FORMING' : 'NONE')))
             : 'NONE',
-          confidence: asNumber(chartPatterns?.dominantConfidence, 0),
+          // Pattern confidence lives on the dominant pattern's result object
+          confidence: asNumber(chartPatterns?.dominantPattern?.result?.confidence, 0),
         },
         verification: {
           completenessScore,
