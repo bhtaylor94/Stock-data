@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getSchwabAccessToken } from '@/lib/schwab';
 import { evaluateStockSetups, type StockSetupContext, type PatternSummary } from '@/lib/setupRegistry';
+import { getSnapshotStore, buildSnapshotFromPayload } from '@/lib/storage/snapshotStore';
 
 export const runtime = 'nodejs';
 
@@ -1693,7 +1694,7 @@ export async function GET(
     }
   }
 
-return NextResponse.json({
+const payload = {
     ticker,
     name: profile?.name || `${ticker}`,
     exchange: profile?.exchange || 'NASDAQ',
@@ -1994,7 +1995,17 @@ return NextResponse.json({
     lastUpdated: new Date().toISOString(),
     dataSource,
     responseTimeMs: Date.now() - startTime,
-  });
+  ;
+
+  // Phase 3: Snapshot logging (best-effort; durable on Optiplex/local, ephemeral on Vercel)
+  try {
+    const store = getSnapshotStore();
+    await store.saveSnapshot(buildSnapshotFromPayload({ source: 'stock', ticker, payload }));
+  } catch (e) {
+    console.warn('snapshot_log_failed', e);
+  }
+
+  return NextResponse.json(payload);
 }
 
 // Helper functions for verification

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getSnapshotStore } from '@/lib/storage/snapshotStore';
 import { getSchwabAccessToken, schwabFetchJson } from '@/lib/schwab';
 import { TTLCache } from '@/lib/cache';
 import {
@@ -143,7 +144,21 @@ function computeSuggestionPnl(s: TrackedSuggestion, currentUnderlying: number | 
   return { pnl, pnlPct, currentPrice: curOpt as number };
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+
+// Phase 3: Snapshot audit trail (best-effort on Vercel, durable on Optiplex/local)
+try {
+  const url = new URL(request.url);
+  const ticker = (url.searchParams.get('ticker') || '').trim().toUpperCase();
+  const wantSnapshots = url.searchParams.get('snapshots') === '1' || url.searchParams.get('snapshots') === 'true';
+  if (wantSnapshots && ticker) {
+    const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') || 50)));
+    const store = getSnapshotStore();
+    const rows = await store.listSnapshotsByTicker(ticker, limit);
+    return NextResponse.json({ ticker, count: rows.length, snapshots: rows });
+  }
+} catch {}
+
   try {
     const tokenRes = await getSchwabAccessToken('tracker');
     if (!tokenRes.token) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { evaluateOptionsSetup, type OptionsSetupContext } from '@/lib/setupRegistry';
+import { getSnapshotStore, buildSnapshotFromPayload } from '@/lib/storage/snapshotStore';
 
 export const runtime = 'nodejs';
 
@@ -1171,7 +1172,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
 
   const firstExp = expirations[0] || '';
 
-  return NextResponse.json({
+  const payload = {
     ticker,
     currentPrice: Math.round(currentPrice * 100) / 100,
     lastUpdated: new Date().toISOString(),
@@ -1266,5 +1267,14 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     },
     allCalls: calls,
     allPuts: puts,
-  });
-}
+  ;
+
+  // Phase 3: Snapshot logging (best-effort; durable on Optiplex/local, ephemeral on Vercel)
+  try {
+    const store = getSnapshotStore();
+    await store.saveSnapshot(buildSnapshotFromPayload({ source: 'options', ticker, payload }));
+  } catch (e) {
+    console.warn('snapshot_log_failed', e);
+  }
+
+  return NextResponse.json(payload);}
