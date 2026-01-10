@@ -249,6 +249,177 @@ function setupPatternConfirmed(ctx: StockSetupContext): SetupResult {
   };
 }
 
+// Trend pullback setup: buy pullbacks within an established trend.
+// Uses SMA20/SMA50 proximity + RSI reset while maintaining trend structure.
+function setupTrendPullbackBull(ctx: StockSetupContext): SetupResult {
+  const reasons: string[] = [];
+
+  const trendOk = ctx.price > ctx.sma50 && ctx.sma50 > ctx.sma200;
+  if (trendOk) reasons.push('Trend intact: price > SMA50 > SMA200.');
+
+  const pullbackLevel = Math.max(ctx.sma20, ctx.sma50);
+  const nearPullback = ctx.atr > 0
+    ? Math.abs(ctx.price - pullbackLevel) <= 1.0 * ctx.atr
+    : Math.abs(ctx.price - pullbackLevel) / Math.max(pullbackLevel, 1) <= 0.02;
+  if (nearPullback) reasons.push('Price near trend support (SMA20/SMA50 zone).');
+
+  const rsiReset = inRange(ctx.rsi14, 38, 55);
+  if (rsiReset) reasons.push('RSI reset (38-55) within uptrend.');
+
+  const momentumOk = ctx.macdHist >= 0;
+  if (momentumOk) reasons.push('MACD histogram not negative (momentum holding).');
+
+  const passed = trendOk && nearPullback && rsiReset && momentumOk;
+
+  let score = 0;
+  score += trendOk ? 4 : 0;
+  score += nearPullback ? 3 : 0;
+  score += rsiReset ? 2 : 0;
+  score += (ctx.regime === 'TREND') ? 1 : 0;
+  score = clamp(score, 0, 10);
+
+  const atrStop = ctx.atr > 0 ? round2(pullbackLevel - 1.2 * ctx.atr) : round2(pullbackLevel * 0.985);
+  const target1 = ctx.atr > 0 ? round2(ctx.price + 2 * ctx.atr) : round2(ctx.resistance);
+
+  return {
+    id: 'trend_pullback_bull',
+    name: 'Trend Pullback (Bullish)',
+    direction: 'BULLISH',
+    score,
+    passed,
+    reasons: passed ? reasons : reasons.concat(['Did not meet bullish pullback gates.']),
+    entry: `Pullback entry near SMA support. Current: ${round2(ctx.price)}`,
+    stop: `Below pullback zone / ATR buffer (~ ${atrStop})`,
+    targets: [`Target ~ ${target1}`],
+    invalidation: 'Break below SMA50 with negative MACD histogram.',
+    requiredEvidenceKeys: ['indicators.rsi14', 'indicators.macdHist', 'indicators.sma20', 'indicators.sma50', 'indicators.sma200'],
+  };
+}
+
+function setupTrendPullbackBear(ctx: StockSetupContext): SetupResult {
+  const reasons: string[] = [];
+
+  const trendOk = ctx.price < ctx.sma50 && ctx.sma50 < ctx.sma200;
+  if (trendOk) reasons.push('Downtrend intact: price < SMA50 < SMA200.');
+
+  const pullbackLevel = Math.min(ctx.sma20, ctx.sma50);
+  const nearPullback = ctx.atr > 0
+    ? Math.abs(ctx.price - pullbackLevel) <= 1.0 * ctx.atr
+    : Math.abs(ctx.price - pullbackLevel) / Math.max(pullbackLevel, 1) <= 0.02;
+  if (nearPullback) reasons.push('Price near bearish pullback zone (SMA20/SMA50).');
+
+  const rsiReset = inRange(ctx.rsi14, 45, 62);
+  if (rsiReset) reasons.push('RSI rebound (45-62) within downtrend.');
+
+  const momentumOk = ctx.macdHist <= 0;
+  if (momentumOk) reasons.push('MACD histogram not positive (bearish momentum holding).');
+
+  const passed = trendOk && nearPullback && rsiReset && momentumOk;
+
+  let score = 0;
+  score += trendOk ? 4 : 0;
+  score += nearPullback ? 3 : 0;
+  score += rsiReset ? 2 : 0;
+  score += (ctx.regime === 'TREND') ? 1 : 0;
+  score = clamp(score, 0, 10);
+
+  const atrStop = ctx.atr > 0 ? round2(pullbackLevel + 1.2 * ctx.atr) : round2(pullbackLevel * 1.015);
+  const target1 = ctx.atr > 0 ? round2(ctx.price - 2 * ctx.atr) : round2(ctx.support);
+
+  return {
+    id: 'trend_pullback_bear',
+    name: 'Trend Pullback (Bearish)',
+    direction: 'BEARISH',
+    score,
+    passed,
+    reasons: passed ? reasons : reasons.concat(['Did not meet bearish pullback gates.']),
+    entry: `Pullback short entry near SMA resistance. Current: ${round2(ctx.price)}`,
+    stop: `Above pullback zone / ATR buffer (~ ${atrStop})`,
+    targets: [`Target ~ ${target1}`],
+    invalidation: 'Break above SMA50 with positive MACD histogram.',
+    requiredEvidenceKeys: ['indicators.rsi14', 'indicators.macdHist', 'indicators.sma20', 'indicators.sma50', 'indicators.sma200'],
+  };
+}
+
+// Range mean-reversion: take bounces near support / fades near resistance in RANGE regime.
+function setupRangeReversionBull(ctx: StockSetupContext): SetupResult {
+  const reasons: string[] = [];
+  const rangeOk = ctx.regime === 'RANGE';
+  if (rangeOk) reasons.push('Regime: RANGE (mean reversion playbook).');
+
+  const nearSupport = ctx.atr > 0
+    ? Math.abs(ctx.price - ctx.support) <= 0.8 * ctx.atr
+    : Math.abs(ctx.price - ctx.support) / Math.max(ctx.support, 1) <= 0.015;
+  if (nearSupport) reasons.push('Price near support zone.');
+
+  const oversold = ctx.rsi14 <= 35;
+  if (oversold) reasons.push(`RSI oversold-ish (${round2(ctx.rsi14)}).`);
+
+  const passed = rangeOk && nearSupport && oversold;
+  let score = 0;
+  score += rangeOk ? 4 : 0;
+  score += nearSupport ? 4 : 0;
+  score += oversold ? 2 : 0;
+  score = clamp(score, 0, 10);
+
+  const stop = ctx.atr > 0 ? round2(ctx.support - 1.0 * ctx.atr) : round2(ctx.support * 0.98);
+  const target1 = round2(ctx.bbMiddle);
+  const target2 = round2(ctx.resistance);
+
+  return {
+    id: 'range_reversion_bull',
+    name: 'Range Reversion (Bullish Bounce)',
+    direction: 'BULLISH',
+    score,
+    passed,
+    reasons: passed ? reasons : reasons.concat(['Did not meet range reversion bounce gates.']),
+    entry: `Bounce trigger off support. Current: ${round2(ctx.price)}`,
+    stop: `Below support / ATR buffer (~ ${stop})`,
+    targets: [`Mean reversion ~ ${target1}`, `Range high ~ ${target2}`],
+    invalidation: 'Clean break below support (range failure).',
+    requiredEvidenceKeys: ['regime', 'indicators.rsi14', 'levels.support', 'levels.resistance', 'indicators.bbMiddle'],
+  };
+}
+
+function setupRangeReversionBear(ctx: StockSetupContext): SetupResult {
+  const reasons: string[] = [];
+  const rangeOk = ctx.regime === 'RANGE';
+  if (rangeOk) reasons.push('Regime: RANGE (mean reversion playbook).');
+
+  const nearRes = ctx.atr > 0
+    ? Math.abs(ctx.price - ctx.resistance) <= 0.8 * ctx.atr
+    : Math.abs(ctx.price - ctx.resistance) / Math.max(ctx.resistance, 1) <= 0.015;
+  if (nearRes) reasons.push('Price near resistance zone.');
+
+  const overbought = ctx.rsi14 >= 65;
+  if (overbought) reasons.push(`RSI overbought-ish (${round2(ctx.rsi14)}).`);
+
+  const passed = rangeOk && nearRes && overbought;
+  let score = 0;
+  score += rangeOk ? 4 : 0;
+  score += nearRes ? 4 : 0;
+  score += overbought ? 2 : 0;
+  score = clamp(score, 0, 10);
+
+  const stop = ctx.atr > 0 ? round2(ctx.resistance + 1.0 * ctx.atr) : round2(ctx.resistance * 1.02);
+  const target1 = round2(ctx.bbMiddle);
+  const target2 = round2(ctx.support);
+
+  return {
+    id: 'range_reversion_bear',
+    name: 'Range Reversion (Bearish Fade)',
+    direction: 'BEARISH',
+    score,
+    passed,
+    reasons: passed ? reasons : reasons.concat(['Did not meet range reversion fade gates.']),
+    entry: `Fade trigger off resistance. Current: ${round2(ctx.price)}`,
+    stop: `Above resistance / ATR buffer (~ ${stop})`,
+    targets: [`Mean reversion ~ ${target1}`, `Range low ~ ${target2}`],
+    invalidation: 'Clean break above resistance (range breakout).',
+    requiredEvidenceKeys: ['regime', 'indicators.rsi14', 'levels.support', 'levels.resistance', 'indicators.bbMiddle'],
+  };
+}
+
 export function evaluateStockSetups(ctx: StockSetupContext): {
   best: SetupResult | null;
   passed: SetupResult[];
@@ -258,6 +429,10 @@ export function evaluateStockSetups(ctx: StockSetupContext): {
   const setups: SetupResult[] = [
     setupTrendContinuationBull(ctx),
     setupTrendContinuationBear(ctx),
+    setupTrendPullbackBull(ctx),
+    setupTrendPullbackBear(ctx),
+    setupRangeReversionBull(ctx),
+    setupRangeReversionBear(ctx),
     setupBollingerSqueezeBreakout(ctx),
     setupBollingerSqueezeBreakdown(ctx),
     setupPatternConfirmed(ctx),
