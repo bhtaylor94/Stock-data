@@ -540,91 +540,6 @@ function StockTab({ data, loading, onTrack }: { data: any; loading: boolean; onT
         </div>
       </div>
 
-      {/* v2.0: Evidence Packet Display */}
-      {suggestions?.[0]?.evidencePacket && (
-        <div className="p-5 rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/5 to-blue-500/5">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <span className="text-2xl">🔐</span>
-              <div>
-                <h3 className="text-md font-semibold text-white">Evidence Verified</h3>
-                <p className="text-xs text-slate-400">Cryptographically secured recommendation</p>
-              </div>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-slate-400">Verification</p>
-              <p className="text-sm font-bold text-emerald-400">
-                {suggestions[0].evidencePacket.checks?.filter((c: any) => c.pass).length || 0}/
-                {suggestions[0].evidencePacket.checks?.length || 0} Passed
-              </p>
-            </div>
-          </div>
-          
-          <div className="bg-slate-900/50 rounded-lg p-3 font-mono text-xs mb-3">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-slate-400">SHA-256 Hash:</span>
-              <span className="text-purple-300">{suggestions[0].evidencePacket.version || 'v1.0.0'}</span>
-            </div>
-            <p className="text-purple-300 break-all">
-              {suggestions[0].evidencePacket.hash?.slice(0, 16)}...{suggestions[0].evidencePacket.hash?.slice(-16)}
-            </p>
-          </div>
-          
-          {suggestions[0].evidencePacket.checks?.length > 0 && (
-            <div className="space-y-1">
-              {suggestions[0].evidencePacket.checks.map((check: any, i: number) => (
-                <div key={i} className="flex items-center gap-2 text-xs">
-                  <span className={check.pass ? 'text-emerald-400' : 'text-red-400'}>
-                    {check.pass ? '✓' : '✗'}
-                  </span>
-                  <span className="text-slate-300">{check.name}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* v2.0: Setup/Playbook Display */}
-      {data.meta?.setup && (
-        <div className="p-5 rounded-2xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/5 to-green-500/5">
-          <div className="flex items-start justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <span className="text-2xl">📊</span>
-              <div>
-                <h3 className="text-lg font-bold text-white">{data.meta.setup}</h3>
-                <p className="text-xs text-slate-400">
-                  Active Trading Playbook • Regime: <span className="text-emerald-300">{data.meta.regime || 'N/A'}</span>
-                </p>
-              </div>
-            </div>
-          </div>
-          
-          {(suggestions?.[0]?.entry || suggestions?.[0]?.stop || suggestions?.[0]?.targets) && (
-            <div className="grid grid-cols-3 gap-3 mt-3">
-              {suggestions[0].entry && (
-                <div className="bg-slate-900/40 rounded-lg p-3">
-                  <p className="text-xs text-slate-400 mb-1">Entry</p>
-                  <p className="text-sm font-bold text-emerald-400">{suggestions[0].entry}</p>
-                </div>
-              )}
-              {suggestions[0].stop && (
-                <div className="bg-slate-900/40 rounded-lg p-3">
-                  <p className="text-xs text-slate-400 mb-1">Stop Loss</p>
-                  <p className="text-sm font-bold text-red-400">{suggestions[0].stop}</p>
-                </div>
-              )}
-              {suggestions[0].targets?.[0] && (
-                <div className="bg-slate-900/40 rounded-lg p-3">
-                  <p className="text-xs text-slate-400 mb-1">Target</p>
-                  <p className="text-sm font-bold text-blue-400">{suggestions[0].targets[0]}</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* News Headlines */}
       {news?.headlines?.length > 0 && (
         <div className="p-5 rounded-2xl border border-slate-700/50 bg-slate-800/30">
@@ -1437,151 +1352,6 @@ function OptionsTab({ data, loading, onTrack }: { data: any; loading: boolean; o
 }
 
 // ============================================================
-// CALIBRATION TAB - NEW in v2.0
-// ============================================================
-function CalibrationTab() {
-  const [calibration, setCalibration] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  
-  useEffect(() => {
-    fetch('/api/calibration')
-      .then(res => res.json())
-      .then(data => {
-        setCalibration(data);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
-  
-  if (loading) return <LoadingSpinner />;
-  
-  if (!calibration || calibration.realizedCount === 0) {
-    return (
-      <div className="text-center py-12">
-        <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-slate-800/50 flex items-center justify-center">
-          <span className="text-4xl">🎯</span>
-        </div>
-        <h3 className="text-lg font-semibold text-white mb-2">No Calibration Data Yet</h3>
-        <p className="text-slate-400 text-sm">Track positions and close them to build calibration history.</p>
-        <p className="text-slate-400 text-xs mt-2">Calibration measures how well predictions match reality.</p>
-      </div>
-    );
-  }
-  
-  const { byBucket, bySetup, realizedCount, totalTracked } = calibration;
-  
-  return (
-    <div className="space-y-6">
-      {/* Header Stats */}
-      <div className="p-5 rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-slate-700/50">
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-xl font-bold text-white mb-1">📊 Forecast Accuracy</h2>
-            <p className="text-sm text-slate-400">
-              {realizedCount} realized / {totalTracked} total tracked
-            </p>
-          </div>
-          <div className="text-4xl">🎯</div>
-        </div>
-      </div>
-      
-      {/* By Confidence Bucket */}
-      <div className="p-5 rounded-2xl border border-slate-700/50 bg-slate-800/30">
-        <h3 className="text-md font-semibold text-white mb-4">Performance by Confidence Bucket</h3>
-        <div className="grid grid-cols-3 gap-4">
-          {['HIGH', 'MED', 'LOW'].map(bucket => {
-            const data = byBucket[bucket];
-            if (!data || data.count === 0) return (
-              <div key={bucket} className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/30 text-center">
-                <p className="text-xs text-slate-500 mb-2">{bucket}</p>
-                <p className="text-2xl text-slate-600">—</p>
-                <p className="text-xs text-slate-500 mt-1">No data</p>
-              </div>
-            );
-            
-            const winRate = (data.winRate * 100).toFixed(0);
-            const avgPnl = data.avgPnlPct.toFixed(1);
-            
-            const colorClass = 
-              bucket === 'HIGH' ? 'border-emerald-500/40 bg-emerald-500/10' :
-              bucket === 'MED' ? 'border-blue-500/40 bg-blue-500/10' :
-              'border-yellow-500/40 bg-yellow-500/10';
-            
-            const textColor =
-              bucket === 'HIGH' ? 'text-emerald-400' :
-              bucket === 'MED' ? 'text-blue-400' :
-              'text-yellow-400';
-            
-            return (
-              <div key={bucket} className={`p-4 rounded-xl border ${colorClass}`}>
-                <p className="text-xs text-slate-400 mb-2">{bucket} Confidence</p>
-                <p className={`text-3xl font-bold ${textColor}`}>{winRate}%</p>
-                <p className="text-xs text-slate-400 mt-2">
-                  {data.count} trades • {avgPnl}% avg P&L
-                </p>
-                <div className="mt-2 flex items-center justify-between text-xs">
-                  <span className="text-emerald-400">{data.wins}W</span>
-                  <span className="text-red-400">{data.count - data.wins}L</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-      
-      {/* By Setup Type */}
-      {Object.keys(bySetup).length > 0 && (
-        <div className="p-5 rounded-2xl border border-slate-700/50 bg-slate-800/30">
-          <h3 className="text-md font-semibold text-white mb-4">Performance by Setup/Strategy</h3>
-          <div className="space-y-3">
-            {Object.entries(bySetup)
-              .sort(([,a]: any, [,b]: any) => b.winRate - a.winRate)
-              .slice(0, 10)
-              .map(([name, data]: [string, any]) => {
-                const winRate = (data.winRate * 100).toFixed(0);
-                const avgPnl = data.avgPnlPct.toFixed(1);
-                
-                return (
-                  <div key={name} className="flex items-center justify-between p-3 rounded-lg bg-slate-800/50 border border-slate-700/30">
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-white truncate">{name}</p>
-                      <p className="text-xs text-slate-400">{data.count} trades</p>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <p className="text-xs text-slate-400">Win Rate</p>
-                        <p className={`text-lg font-bold ${
-                          data.winRate >= 0.7 ? 'text-emerald-400' :
-                          data.winRate >= 0.5 ? 'text-blue-400' :
-                          'text-yellow-400'
-                        }`}>{winRate}%</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xs text-slate-400">Avg P&L</p>
-                        <p className={`text-lg font-bold ${
-                          parseFloat(avgPnl) > 0 ? 'text-emerald-400' : 'text-red-400'
-                        }`}>{avgPnl}%</p>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-        </div>
-      )}
-      
-      {/* Info box */}
-      <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/30">
-        <p className="text-xs text-blue-300">
-          💡 <strong>How it works:</strong> Calibration measures how accurately confidence levels predict outcomes. 
-          HIGH confidence (75%+) predictions should win ~75%+ of the time. Track more positions to improve accuracy.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================
 // POPULAR TICKERS
 // ============================================================
 const POPULAR_TICKERS = [
@@ -1608,7 +1378,7 @@ const POPULAR_TICKERS = [
 export default function Home() {
   const [ticker, setTicker] = useState('');
   const [searchedTicker, setSearchedTicker] = useState('');
-  const [activeTab, setActiveTab] = useState<'stocks' | 'options' | 'tracker' | 'calibration'>('stocks');
+  const [activeTab, setActiveTab] = useState<'stocks' | 'options' | 'tracker'>('stocks');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
   const [loadingStock, setLoadingStock] = useState(false);
@@ -1716,9 +1486,8 @@ export default function Home() {
             <button onClick={() => setActiveTab('stocks')} className={`px-5 py-2.5 rounded-xl font-medium transition ${activeTab === 'stocks' ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'text-slate-400 hover:text-white bg-slate-800/30'}`}>📊 Stock</button>
             <button onClick={() => setActiveTab('options')} className={`px-5 py-2.5 rounded-xl font-medium transition ${activeTab === 'options' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'text-slate-400 hover:text-white bg-slate-800/30'}`}>📈 Options</button>
             <button onClick={() => setActiveTab('tracker')} className={`px-5 py-2.5 rounded-xl font-medium transition ${activeTab === 'tracker' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'text-slate-400 hover:text-white bg-slate-800/30'}`}>📌 Tracker</button>
-            <button onClick={() => setActiveTab('calibration')} className={`px-5 py-2.5 rounded-xl font-medium transition ${activeTab === 'calibration' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-slate-400 hover:text-white bg-slate-800/30'}`}>🎯 Calibration</button>
           </div>
-          {searchedTicker && activeTab !== 'tracker' && activeTab !== 'calibration' && <button onClick={handleRefresh} disabled={loadingStock || loadingOptions} className="px-4 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-300 hover:text-white text-sm flex items-center gap-2 disabled:opacity-50"><span className={loadingStock || loadingOptions ? 'animate-spin' : ''}>🔄</span> Refresh</button>}
+          {searchedTicker && activeTab !== 'tracker' && <button onClick={handleRefresh} disabled={loadingStock || loadingOptions} className="px-4 py-2 rounded-xl bg-slate-800/50 border border-slate-700/50 text-slate-300 hover:text-white text-sm flex items-center gap-2 disabled:opacity-50"><span className={loadingStock || loadingOptions ? 'animate-spin' : ''}>🔄</span> Refresh</button>}
         </div>
 
         {/* Track Message Toast */}
@@ -1731,7 +1500,6 @@ export default function Home() {
         {activeTab === 'stocks' && <StockTab data={stockData} loading={loadingStock} onTrack={handleTrack} />}
         {activeTab === 'options' && <OptionsTab data={optionsData} loading={loadingOptions} onTrack={handleTrack} />}
         {activeTab === 'tracker' && <TrackerTab />}
-        {activeTab === 'calibration' && <CalibrationTab />}
 
         <div className="mt-8 p-4 rounded-xl bg-slate-800/20 border border-slate-700/30">
           <p className="text-xs text-slate-500 text-center">⚠️ Educational purposes only. Not financial advice. Data: Schwab, Finnhub</p>

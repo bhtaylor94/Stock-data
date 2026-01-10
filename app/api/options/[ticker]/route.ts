@@ -1,7 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { evaluateOptionsSetup, type OptionsSetupContext } from '@/lib/setupRegistry';
-import { getSnapshotStore, buildSnapshotFromPayload } from '@/lib/storage/snapshotStore';
-import { buildEvidencePacket } from '@/lib/evidencePacket';
 
 export const runtime = 'nodejs';
 
@@ -11,60 +8,6 @@ function expectedMovePct(atmIV: number, dte: number): number {
   const t = Math.max(1, dte) / 365;
   const pct = Math.max(0, atmIV) * Math.sqrt(t) * 100;
   return Math.round(pct * 100) / 100;
-}
-
-// Liquidity / tradability gate (accuracy-first: reject illiquid, wide-spread contracts)
-// Must be module-scope because both the suggestion engine and the setup registry rely on it.
-function liquidityOk(c: OptionContract): boolean {
-  const spreadOk = Number((c as any).spreadPercent ?? 999) <= 12;
-  const interestOk = (Number((c as any).openInterest ?? 0) >= 500) || (Number((c as any).volume ?? 0) >= 200);
-  const priceOk = Number((c as any).mark ?? 0) >= 0.10 && Number((c as any).bid ?? 0) >= 0.05;
-  return Boolean(spreadOk && interestOk && priceOk);
-}
-
-// Liquidity evidence breakdown (for auditability in the UI)
-function liquidityEvidence(c: OptionContract | null): {
-  spreadOk: boolean;
-  interestOk: boolean;
-  priceOk: boolean;
-  spreadPercent: number | null;
-  openInterest: number | null;
-  volume: number | null;
-  mark: number | null;
-  bid: number | null;
-} {
-  if (!c) {
-    return {
-      spreadOk: false,
-      interestOk: false,
-      priceOk: false,
-      spreadPercent: null,
-      openInterest: null,
-      volume: null,
-      mark: null,
-      bid: null,
-    };
-  }
-  const spreadPercent = Number((c as any).spreadPercent ?? NaN);
-  const openInterest = Number((c as any).openInterest ?? NaN);
-  const volume = Number((c as any).volume ?? NaN);
-  const mark = Number((c as any).mark ?? NaN);
-  const bid = Number((c as any).bid ?? NaN);
-
-  const spreadOk = Number.isFinite(spreadPercent) ? spreadPercent <= 12 : false;
-  const interestOk = (Number.isFinite(openInterest) && openInterest >= 500) || (Number.isFinite(volume) && volume >= 200);
-  const priceOk = (Number.isFinite(mark) && mark >= 0.10) && (Number.isFinite(bid) && bid >= 0.05);
-
-  return {
-    spreadOk,
-    interestOk,
-    priceOk,
-    spreadPercent: Number.isFinite(spreadPercent) ? spreadPercent : null,
-    openInterest: Number.isFinite(openInterest) ? openInterest : null,
-    volume: Number.isFinite(volume) ? volume : null,
-    mark: Number.isFinite(mark) ? mark : null,
-    bid: Number.isFinite(bid) ? bid : null,
-  };
 }
 
 // ============================================================
@@ -83,32 +26,6 @@ const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
 const SCHWAB_APP_KEY = process.env.SCHWAB_APP_KEY;
 const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
 const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
-
-// ---- Earnings helper (best effort) ----
-// Uses Finnhub earnings calendar if API key present. This keeps the app up-to-date
-// and lets the options setup registry apply IV-crush-aware structures.
-async function fetchDaysToEarnings(symbol: string): Promise<number | null> {
-  try {
-    if (!FINNHUB_KEY) return null;
-    const now = new Date();
-    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    const to = new Date(from.getTime() + 1000 * 60 * 60 * 24 * 120); // 120d lookahead
-    const fromStr = from.toISOString().slice(0, 10);
-    const toStr = to.toISOString().slice(0, 10);
-    const url = `https://finnhub.io/api/v1/calendar/earnings?symbol=${encodeURIComponent(symbol)}&from=${fromStr}&to=${toStr}&token=${encodeURIComponent(FINNHUB_KEY)}`;
-    const r = await fetch(url);
-    if (!r.ok) return null;
-    const data: any = await r.json();
-    const list = Array.isArray(data?.earningsCalendar) ? data.earningsCalendar : [];
-    if (list.length === 0 || !list[0]?.date) return null;
-    const next = new Date(`${list[0].date}T00:00:00Z`);
-    if (Number.isNaN(next.getTime())) return null;
-    const dteMs = next.getTime() - from.getTime();
-    return Math.ceil(dteMs / (1000 * 60 * 60 * 24));
-  } catch {
-    return null;
-  }
-}
 
 // ============================================================
 // TOKEN CACHE - Schwab access tokens last 30 minutes
@@ -920,6 +837,14 @@ function generateSuggestions(
 ): any[] {
   const suggestions: any[] = [];
 
+// Liquidity / tradability gate (accuracy-first: reject illiquid, wide-spread contracts)
+function liquidityOk(c: OptionContract): boolean {
+  const spreadOk = Number(c.spreadPercent ?? 999) <= 12;
+  const interestOk = (Number(c.openInterest ?? 0) >= 500) || (Number(c.volume ?? 0) >= 200);
+  const priceOk = Number(c.mark ?? 0) >= 0.10 && Number(c.bid ?? 0) >= 0.05;
+  return Boolean(spreadOk && interestOk && priceOk);
+}
+
   const validCalls = calls.filter(c => c.dte >= 7 && c.dte <= 90 && liquidityOk(c));
   const validPuts = puts.filter(p => p.dte >= 7 && p.dte <= 90 && liquidityOk(p));
 
@@ -1108,93 +1033,20 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   const unusualActivity = detectUnusualActivity(calls, puts, currentPrice, stockTrend, false);
   const suggestions = generateSuggestions(calls, puts, trend, rsi, ivAnalysis, marketMetrics, unusualActivity);
   const tradable = suggestions.filter((s: any) => s.type === 'CALL' || s.type === 'PUT');
-
-  // Phase 2: Options setup registry (structure selection based on evidence)
-  // We only use the top-ranked tradable contract as an evidence anchor (spread/OI/volume/DTE).
-  const bestContract = tradable.length > 0 ? (tradable[0] as any).contract : null;
-
-  // Earnings proximity matters for options structure selection (IV crush). Best effort.
-  const daysToEarnings = await fetchDaysToEarnings(ticker);
-
-  const setupCtx: OptionsSetupContext = {
-    trend,
-    ivPercentile: typeof ivAnalysis?.ivPercentile === 'number' ? ivAnalysis.ivPercentile : 50,
-    daysToEarnings,
-    liquidityOk: bestContract ? liquidityOk(bestContract) : false,
-    spreadPercent: bestContract ? Number((bestContract as any).spreadPercent ?? null) : null,
-    openInterest: bestContract ? Number((bestContract as any).openInterest ?? null) : null,
-    volume: bestContract ? Number((bestContract as any).volume ?? null) : null,
-    dte: bestContract ? Number((bestContract as any).dte ?? null) : null,
-    atmIV: typeof ivAnalysis?.atmIV === 'number' ? ivAnalysis.atmIV : null,
-  };
-  const optionsSetup = evaluateOptionsSetup(setupCtx);
-
-  // Add a transparent, evidence-first "preferred structure" note so the UI always shows
-  // *why* the engine prefers a certain options structure (debit spread vs long premium, etc.).
-  // This card is informational (not trackable) and helps users trust the decision.
-  if (optionsSetup && optionsSetup.structure && optionsSetup.structure !== 'NO_TRADE') {
-    suggestions.unshift({
-      type: 'ALERT',
-      strategy: `📘 Preferred Structure: ${optionsSetup.structure.replace(/_/g, ' ')}`,
-      reasoning: [
-        ...(optionsSetup.reasons || []),
-        'Note: The current UI tracks single-leg calls/puts. Structure guidance is provided for risk-defined execution.',
-      ],
-      warnings: [],
-      confidence: 0,
-      riskLevel: 'INFO',
-    });
-  }
-
-  // If the setup registry says NO_TRADE, we keep unusual alerts but do not recommend directional trades.
-  const setupBlocksTrade = optionsSetup.structure === 'NO_TRADE';
-  if (setupBlocksTrade && tradable.length > 0) {
-    // Remove existing directional suggestions and replace with a single NO_TRADE card (alerts remain).
-    const alerts = suggestions.filter((s: any) => s.type === 'ALERT');
-    suggestions.splice(0, suggestions.length,
-      {
-        type: 'NO_TRADE',
-        strategy: 'No Trade (Setup Registry)',
-        reasoning: [...optionsSetup.reasons],
-        warnings: ['Waiting for a higher-quality setup improves accuracy.'],
-        confidence: 0,
-      },
-      ...alerts,
-    );
-  }
-  const tradeDecision = (setupBlocksTrade || tradable.length === 0 || suggestions[0]?.type === 'NO_TRADE')
-    ? { action: 'NO_TRADE', confidence: 0, rationale: suggestions[0]?.reasoning || optionsSetup.reasons || ['No trade'] }
-    : {
-        action: `OPTIONS_TRADE_${optionsSetup.structure}`,
-        confidence: Math.max(0, Math.min(95, Math.round(tradable[0]?.confidence || 0))),
-        rationale: [...(optionsSetup.reasons || []), ...(tradable[0]?.reasoning || [])],
-      };
+  const tradeDecision = tradable.length === 0 || suggestions[0]?.type === 'NO_TRADE'
+    ? { action: 'NO_TRADE', confidence: 0, rationale: suggestions[0]?.reasoning || ['No trade'] }
+    : { action: 'OPTIONS_TRADE', confidence: Math.max(0, Math.min(95, Math.round(tradable[0]?.confidence || 0))), rationale: tradable[0]?.reasoning || [] };
 
 
   const firstExp = expirations[0] || '';
 
-  const payload = {
+  return NextResponse.json({
     ticker,
     currentPrice: Math.round(currentPrice * 100) / 100,
     lastUpdated: new Date().toISOString(),
     dataSource: 'schwab-live',
     responseTimeMs: Date.now() - startTime,
-    meta: { asOf: new Date().toISOString(), calibrationVersion: 'v1.0-conservative', tradeDecision,
-      setup: {
-        structure: optionsSetup.structure,
-        passed: optionsSetup.passed,
-        score: optionsSetup.score,
-        reasons: optionsSetup.reasons,
-      },
-      evidence: {
-        technicals: { trend, rsi: Math.round(rsi), sma20: Math.round(sma20 * 100) / 100, sma50: Math.round(sma50 * 100) / 100, support: Math.round(support * 100) / 100, resistance: Math.round(resistance * 100) / 100 },
-        iv: { atmIV: Math.round(ivAnalysis.atmIV * 10000) / 10000, ivRank: Math.round(ivAnalysis.ivRank), ivPercentile: Math.round(ivAnalysis.ivPercentile), ivSignal: ivAnalysis.ivSignal, putCallIVSkew: Math.round(ivAnalysis.putCallIVSkew * 10000) / 10000, expectedMove30dPct: expectedMovePct(ivAnalysis.atmIV, 30) },
-        earnings: { daysToEarnings },
-        market: { putCallRatio: Math.round(marketMetrics.putCallRatio * 1000) / 1000, putCallOIRatio: Math.round(marketMetrics.putCallOIRatio * 1000) / 1000, sentiment: marketMetrics.sentiment, maxPain: Math.round(marketMetrics.maxPain * 100) / 100 },
-        liquidity: liquidityEvidence(bestContract),
-        unusual: { count: unusualActivity.length, top: unusualActivity.slice(0, 5) },
-      }
-    },
+    meta: { asOf: new Date().toISOString(), calibrationVersion: 'v1.0-conservative', tradeDecision },
     expirations,
     selectedExpiration: firstExp,
     byExpiration,
@@ -1268,26 +1120,5 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     },
     allCalls: calls,
     allPuts: puts,
-  };
-
-  // Phase 4 (foundation): Evidence packet (auditable decision support)
-  try {
-    const packet = buildEvidencePacket('options', payload);
-    (payload as any).evidencePacket = packet;
-    (payload as any).meta = (payload as any).meta || {};
-    (payload as any).meta.evidencePacketVersion = packet.version;
-    (payload as any).meta.evidencePacketHash = packet.hash;
-  } catch (e) {
-    console.warn('evidence_packet_failed', e);
-  }
-
-  // Phase 3: Snapshot logging (best-effort; durable on Optiplex/local, ephemeral on Vercel)
-  try {
-    const store = await getSnapshotStore();
-    await store.saveSnapshot(buildSnapshotFromPayload({ source: 'options', ticker, payload }));
-  } catch (e) {
-    console.warn('snapshot_log_failed', e);
-  }
-
-  return NextResponse.json(payload);
+  });
 }

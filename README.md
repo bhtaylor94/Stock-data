@@ -1,184 +1,253 @@
-# AI Hedge Fund 🧠📈
+# AI Hedge Fund v2.0 🧠📈
 
-A real-time stock and options analysis platform featuring **fundamental analysis**, **technical analysis**, **Greeks-based options suggestions**, and **suggestion performance tracking**.
+Professional-grade stock analysis platform with institutional trading playbooks, evidence verification, and continuous calibration.
 
-## Features
+## 🚀 What's New in v2.0
 
-### 📊 Stock Analysis Tab
-- **Real-time stock prices** via Schwab/Finnhub API
-- **Fundamental Analysis** scoring based on:
-  - P/E Ratio (undervalued < 15, fairly valued < 25, overvalued > 40)
-  - ROE (strong > 20%, good > 15%, weak < 10%)
-  - Debt/Equity (stable < 0.5, moderate < 1, risky > 2)
-  - Profit Margins (excellent > 20%, good > 10%, thin < 5%)
-  - Revenue & EPS Growth trends
-  - Price-to-Book ratio
-  - 52-week position analysis
+- ✨ **15+ Professional Trading Playbooks** - Trend Continuation, Mean Reversion, Breakouts, etc.
+- ✨ **Evidence Verification** - Cryptographic hashing for tamper-proof decisions
+- ✨ **Historical Snapshots** - JSONL-based tracking for long-term calibration
+- ✨ **Calibration APIs** - Measure forecast accuracy by confidence & setup
+- ✨ **Outcomes Tracking** - Forward returns at 1d, 3d, 5d, 10d, 14d horizons
+- ✨ **Market Regime Detection** - Adaptive strategies for TREND/RANGE/HIGH_VOL
 
-- **Technical Analysis** scoring based on:
-  - RSI (oversold < 30, overbought > 70)
-  - MACD crossovers (bullish/bearish)
-  - Moving Average analysis (50 SMA, 200 SMA)
-  - Golden Cross / Death Cross detection
-  - Price vs moving averages position
+## 📚 Documentation
 
-- **Trade Suggestions** with confidence scores
+- **[Deployment Guide](./DEPLOYMENT_GUIDE.md)** - Fix build errors & deploy to Vercel
+- **[Application Overview](./APPLICATION_OVERVIEW.md)** - Complete feature guide (v2.0)
+- **[Decision Logic](./DECISION_LOGIC_EXPLAINED.md)** - Deep dive into AI scoring
 
-### 📈 Options Intel Tab
-- **Options chain data** with Greeks (Delta, Gamma, Theta, Vega)
-- **Greeks-based trade suggestions**:
-  - Aggressive strategies: Delta ~0.40-0.50
-  - Conservative strategies: Delta ~0.25-0.35
-  - Theta decay warnings
-  - Gamma risk alerts
-  - IV crush warnings near earnings
+## ✨ Core Features
 
-- **Market sentiment** analysis
-- **Put/Call ratio** interpretation
-- **Unusual Options Activity** detection
+### Professional Trading Playbooks
 
-### 📌 Suggestion Tracker Tab (NEW!)
-- **Track any suggestion** from Stock or Options tabs
-- **Real-time P&L tracking** with current prices from your APIs
-- **Performance metrics**:
-  - Win Rate percentage
-  - Average Return
-  - Winners vs Losers count
-  - Active vs Closed positions
+15+ institutional-quality setups with explicit rules:
 
-- **Position management**:
-  - Mark as Hit Target
-  - Mark as Stopped Out
-  - Close Position manually
+**Bullish**: Trend Continuation, Mean Reversion Bounce, Breakout Momentum, Bull Flag, Bollinger Squeeze  
+**Bearish**: Trend Continuation, Mean Reversion Fade, Breakdown, Bear Flag, Distribution Failure  
+**Adaptive**: Range Rotation, Volatility Spike, Dead Zone (NO_TRADE)
 
-- **Auto-calculated targets**:
-  - 10% profit target
-  - 5% stop loss
+Each includes: Entry criteria, ATR stops, targets, invalidation levels, evidence logging
 
-## Quick Start
+### Evidence Verification
 
-### 1. Clone & Install
+Every recommendation includes a **cryptographic hash** of all inputs:
+- Tamper-proof decision trail
+- Full auditability
+- Transparent datapoints
+- Accountable predictions
 
+### Multi-Factor Analysis
+
+- **18-point scoring**: 9 technical + 9 fundamental
+- **Chart patterns**: Cup & Handle, H&S, Double Tops/Bottoms
+- **News sentiment**: Real-time scoring
+- **Analyst consensus**: Ratings + price targets
+- **Insider activity**: Net buying/selling
+- **Options analysis**: UOA, Greeks, chains
+
+### Position Tracker
+
+- Real-time P&L tracking
+- Auto-status updates (HIT_TARGET, STOPPED_OUT)
+- Win rate by confidence bucket
+- Win rate by setup type
+- Forward return measurement
+
+### New APIs
+
+**GET /api/calibration** - Performance metrics by bucket & setup  
+**GET /api/outcomes?ticker=AAPL** - Historical outcomes for ticker  
+**POST /api/outcomes** - Record closed position with P&L
+
+## 🚀 Quick Start
+
+### Install
 ```bash
-git clone <your-repo>
-cd ai-hedge-fund
 npm install
 ```
 
-### 2. Get API Keys
-
-**Required:**
-1. **Finnhub** (free): [finnhub.io/register](https://finnhub.io/register) - 60 calls/min
-
-**For Live Options Data (Recommended):**
-2. **Schwab Developer API**: [developer.schwab.com](https://developer.schwab.com)
-   - Requires a Schwab brokerage account
-   - Provides real-time options chains with full Greeks
-   - OAuth refresh tokens expire every 7 days
-
-### 3. Configure Environment
-
-```bash
-cp .env.local.example .env.local
-```
-
-Edit `.env.local`:
-```
-FINNHUB_API_KEY=your_finnhub_key_here
-
-# Schwab API (for live options data)
+### Configure Environment
+Create `.env.local`:
+```env
 SCHWAB_APP_KEY=your_schwab_app_key
-SCHWAB_APP_SECRET=your_schwab_app_secret
-SCHWAB_REFRESH_TOKEN=your_schwab_refresh_token
+SCHWAB_APP_SECRET=your_schwab_secret
+SCHWAB_REFRESH_TOKEN=your_refresh_token
+FINNHUB_API_KEY=your_finnhub_key
 ```
 
-### 4. Run Locally
+Get API keys:
+- **Schwab**: [developer.schwab.com](https://developer.schwab.com) (requires brokerage account)
+- **Finnhub**: [finnhub.io](https://finnhub.io) (free tier: 60 calls/min)
 
+### Run
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Visit [http://localhost:3000](http://localhost:3000)
 
-## Project Structure
+### Deploy to Vercel
+
+See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for step-by-step instructions.
+
+## 📊 API Endpoints
+
+### Stock Analysis
+**GET /api/stock/[ticker]**  
+Returns comprehensive analysis with:
+- Real-time quote
+- Technical indicators (18 factors)
+- Fundamental metrics (9 factors)
+- Chart patterns
+- News sentiment
+- Analyst ratings
+- Setup recommendation
+- Evidence packet (with hash)
+
+### Options Analysis
+**GET /api/options/[ticker]**  
+Returns options intelligence with:
+- Options chains
+- Greeks (Delta, Gamma, Theta, Vega)
+- Unusual options activity
+- Specific contract recommendations
+
+### Position Tracker
+**GET /api/tracker**  
+All tracked positions with real-time P&L
+
+**POST /api/tracker**  
+Track a new position
+
+**PUT /api/tracker**  
+Update position status
+
+**DELETE /api/tracker?id=[id]**  
+Remove tracked position
+
+### Calibration & Outcomes (NEW!)
+**GET /api/calibration**  
+Performance metrics by confidence bucket and setup type
+
+**GET /api/outcomes?ticker=AAPL**  
+Historical outcomes for a ticker
+
+**POST /api/outcomes**  
+Record closed position with realized P&L
+
+## 🎓 How It Works
+
+### Setup Selection Process
+
+1. **Market Data** - Fetch from Schwab + Finnhub
+2. **Indicators** - Calculate technical + fundamental metrics
+3. **Regime Detection** - Classify as TREND / RANGE / HIGH_VOL
+4. **Setup Evaluation** - Score all 15+ playbooks
+5. **Best Setup** - Select highest-scoring non-conflicting setup
+6. **Confidence** - Calibrate based on evidence strength
+7. **Evidence** - Generate packet with SHA-256 hash
+8. **Snapshot** - Save to JSONL for calibration
+9. **Display** - Show recommendation to user
+
+### Confidence Calibration
 
 ```
-ai-hedge-fund/
-├── app/
-│   ├── api/
-│   │   ├── stock/[ticker]/route.ts   # Stock data + analysis API
-│   │   ├── options/[ticker]/route.ts # Options data + suggestions API
-│   │   └── tracker/route.ts          # Suggestion tracking API (NEW!)
-│   ├── globals.css                   # Tailwind styles
-│   ├── layout.tsx                    # Root layout
-│   └── page.tsx                      # Main UI (Stock + Options + Tracker tabs)
-├── .env.local.example
-├── package.json
-├── tailwind.config.js
-├── tsconfig.json
-└── README.md
+Base Confidence (from combined score 0-18)
+    + News sentiment (±5%)
+    + Analyst consensus (±5%)
+    + Insider activity (±3%)
+    + Price target upside (±5%)
+    + Chart patterns (±10-15%)
+    + Regime adjustments (±4%)
+    + Completeness check (±4-12%)
+    + Agreement threshold (±6-10%)
+    = Final Confidence (capped 25-95%)
 ```
 
-## API Endpoints
+### Example
 
-### GET /api/stock/[ticker]
-Returns comprehensive stock analysis with fundamentals, technicals, news, and suggestions.
+**AAPL at $180**:
+- Technical: 8/9
+- Fundamental: 8/9
+- Combined: 16/18 → Base 85%
+- Bullish news → +5%
+- Analysts 85% buy → +5%
+- Insider buying → +3%
+- Cup & Handle → +12%
+- **Final: 95% (capped)**
+- **Setup: Trend Continuation Bull**
 
-### GET /api/options/[ticker]
-Returns options intelligence with Greeks, unusual activity, and trade suggestions.
+## 🏗️ Architecture
 
-### GET /api/tracker
-Returns all tracked suggestions with current prices and performance metrics.
-
-### POST /api/tracker
-Track a new suggestion. Body:
-```json
-{
-  "ticker": "AAPL",
-  "type": "STOCK_BUY" | "STOCK_SELL" | "CALL" | "PUT",
-  "strategy": "Long Call (Trend Aligned)",
-  "entryPrice": 150.00,
-  "targetPrice": 165.00,
-  "stopLoss": 142.50,
-  "confidence": 75,
-  "reasoning": ["RSI favorable", "Above 50 SMA"]
-}
+```
+Next.js 14 (App Router) + TypeScript
+    ├── Schwab API (real-time quotes, options)
+    ├── Finnhub API (fundamentals, news, analysts)
+    ├── Setup Registry (15+ playbooks)
+    ├── Evidence Verification (SHA-256 hashing)
+    ├── Snapshot Store (JSONL persistence)
+    └── Calibration Engine (outcomes measurement)
 ```
 
-### PUT /api/tracker
-Update suggestion status. Body:
-```json
-{
-  "id": "suggestion-id",
-  "status": "CLOSED" | "HIT_TARGET" | "STOPPED_OUT"
-}
-```
+**Storage**:
+- File-based JSON (tracker positions)
+- JSONL (historical snapshots)
+- TTL caches (API responses)
 
-### DELETE /api/tracker?id=suggestion-id
-Remove a tracked suggestion.
+## 🔧 Customization
 
-## Tech Stack
+### Adjust Setup Criteria
+Edit `/lib/setupRegistry.ts`:
+- Modify entry/exit rules
+- Change ATR multipliers
+- Add custom playbooks
 
-- **Framework**: Next.js 14 (App Router)
-- **Language**: TypeScript
-- **Styling**: Tailwind CSS
-- **Data Sources**:
-  - **Schwab API**: Live options chains with full Greeks
-  - **Finnhub API**: Stock quotes, fundamentals, news
+### Change Confidence Thresholds
+Edit `/app/api/stock/[ticker]/route.ts`:
+- Lines 60-84: Confidence calibration
+- Lines 1095-1303: Recommendation generation
 
-## Tracker Storage Note
+### Configure Storage
+Set environment variables:
+- `TRACKER_STORE_PATH` - Custom tracker storage path
+- `AIHF_SNAPSHOT_PATH` - Custom snapshot storage path
 
-Currently, tracked suggestions are stored in-memory (server-side). In production, you should:
-1. Use Vercel KV for serverless-compatible storage
-2. Or connect to a database (Supabase, PlanetScale, etc.)
-3. Or use localStorage for client-side only storage
+## ⚠️ Deployment Fix
 
-## Disclaimer
+**Problem**: Original v1.0 failed with ES5 strict mode error
 
-⚠️ **For educational purposes only. Not financial advice.**
+**Solution**: Added `"target": "ES2017"` to `tsconfig.json`
 
-The analysis and tracking provided by this application is for informational purposes only. Always do your own research and consult with qualified financial advisors before making investment decisions.
+See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for details.
 
-## License
+## 📈 Performance Metrics
 
-MIT
+Track and measure:
+- Win rate by confidence bucket (HIGH/MED/LOW)
+- Win rate by setup type
+- Average P&L by strategy
+- Forward returns at multiple horizons
+- Forecast accuracy over time
+
+## ⚠️ Disclaimers
+
+**For educational purposes only. Not financial advice.**
+
+This application provides analysis based on publicly available data and technical indicators. It does not constitute investment advice, financial advice, trading advice, or any other sort of advice.
+
+Always conduct your own research and consult with qualified financial advisors before making investment decisions.
+
+## 📄 License
+
+MIT License - See LICENSE file for details
+
+## 🆘 Support
+
+- **Build errors?** → [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)
+- **Feature questions?** → [APPLICATION_OVERVIEW.md](./APPLICATION_OVERVIEW.md)
+- **Algorithm questions?** → [DECISION_LOGIC_EXPLAINED.md](./DECISION_LOGIC_EXPLAINED.md)
+
+---
+
+**v2.0** - Professional trading playbooks + Evidence verification + Continuous calibration 🚀
