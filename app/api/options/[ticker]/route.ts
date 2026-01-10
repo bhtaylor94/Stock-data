@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { evaluateOptionsSetup, type OptionsSetupContext } from '@/lib/setupRegistry';
 
 export const runtime = 'nodejs';
 
@@ -1033,9 +1034,40 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   const unusualActivity = detectUnusualActivity(calls, puts, currentPrice, stockTrend, false);
   const suggestions = generateSuggestions(calls, puts, trend, rsi, ivAnalysis, marketMetrics, unusualActivity);
   const tradable = suggestions.filter((s: any) => s.type === 'CALL' || s.type === 'PUT');
-  const tradeDecision = tradable.length === 0 || suggestions[0]?.type === 'NO_TRADE'
-    ? { action: 'NO_TRADE', confidence: 0, rationale: suggestions[0]?.reasoning || ['No trade'] }
-    : { action: 'OPTIONS_TRADE', confidence: Math.max(0, Math.min(95, Math.round(tradable[0]?.confidence || 0))), rationale: tradable[0]?.reasoning || [] };
+
+  // Phase 2: Options setup registry (structure selection based on evidence)
+  const bestContract = tradable.length > 0 ? (tradable[0] as any).contract : null;
+  const setupCtx: OptionsSetupContext = {
+    trend,
+    ivPercentile: typeof ivAnalysis?.ivPercentile === 'number' ? ivAnalysis.ivPercentile : 50,
+    daysToEarnings: null,
+    liquidityOk: bestContract ? liquidityOk(bestContract) : false,
+  };
+  const optionsSetup = evaluateOptionsSetup(setupCtx);
+
+  // If the setup registry says NO_TRADE, we keep unusual alerts but do not recommend directional trades.
+  const setupBlocksTrade = optionsSetup.structure === 'NO_TRADE';
+  if (setupBlocksTrade && tradable.length > 0) {
+    // Remove existing directional suggestions and replace with a single NO_TRADE card (alerts remain).
+    const alerts = suggestions.filter((s: any) => s.type === 'ALERT');
+    suggestions.splice(0, suggestions.length,
+      {
+        type: 'NO_TRADE',
+        strategy: 'No Trade (Setup Registry)',
+        reasoning: [...optionsSetup.reasons],
+        warnings: ['Waiting for a higher-quality setup improves accuracy.'],
+        confidence: 0,
+      },
+      ...alerts,
+    );
+  }
+  const tradeDecision = (setupBlocksTrade || tradable.length === 0 || suggestions[0]?.type === 'NO_TRADE')
+    ? { action: 'NO_TRADE', confidence: 0, rationale: suggestions[0]?.reasoning || optionsSetup.reasons || ['No trade'] }
+    : {
+        action: `OPTIONS_TRADE_${optionsSetup.structure}`,
+        confidence: Math.max(0, Math.min(95, Math.round(tradable[0]?.confidence || 0))),
+        rationale: [...(optionsSetup.reasons || []), ...(tradable[0]?.reasoning || [])],
+      };
 
 
   const firstExp = expirations[0] || '';
@@ -1047,6 +1079,12 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     dataSource: 'schwab-live',
     responseTimeMs: Date.now() - startTime,
     meta: { asOf: new Date().toISOString(), calibrationVersion: 'v1.0-conservative', tradeDecision,
+      setup: {
+        structure: optionsSetup.structure,
+        passed: optionsSetup.passed,
+        score: optionsSetup.score,
+        reasons: optionsSetup.reasons,
+      },
       evidence: {
         technicals: { trend, rsi: Math.round(rsi), sma20: Math.round(sma20 * 100) / 100, sma50: Math.round(sma50 * 100) / 100, support: Math.round(support * 100) / 100, resistance: Math.round(resistance * 100) / 100 },
         iv: { atmIV: Math.round(ivAnalysis.atmIV * 10000) / 10000, ivRank: Math.round(ivAnalysis.ivRank), ivPercentile: Math.round(ivAnalysis.ivPercentile), ivSignal: ivAnalysis.ivSignal, putCallIVSkew: Math.round(ivAnalysis.putCallIVSkew * 10000) / 10000 },

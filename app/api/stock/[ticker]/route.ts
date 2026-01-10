@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getSchwabAccessToken } from '@/lib/schwab';
+import { evaluateStockSetups, type StockSetupContext, type PatternSummary } from '@/lib/setupRegistry';
 
 export const runtime = 'nodejs';
 
@@ -1585,15 +1586,85 @@ export async function GET(
   const regimeInfo = computeRegime(priceHistory, sma50, sma200);
   const calib = calibratedConfidence(combinedModelScore, 18, agreementCount, completenessScore, regimeInfo.regime);
 
+  // ------------------------------
+  // Phase 2: Setup Registry (rules-based playbooks)
+  // Build a stable, typed context for setup evaluation.
+  // ------------------------------
+  const patternStatus: 'CONFIRMED' | 'FORMING' | 'CONFLICT' | 'NONE' = chartPatterns
+    ? (chartPatterns.hasConflict
+        ? 'CONFLICT'
+        : (chartPatterns.confirmed.length > 0
+            ? 'CONFIRMED'
+            : ((chartPatterns.forming || []).length > 0 ? 'FORMING' : 'NONE')))
+    : 'NONE';
+
+  const patternSummary: PatternSummary = {
+    dominantName: chartPatterns?.dominantPattern?.name || null,
+    dominantType: chartPatterns?.dominantPattern?.type || null,
+    status: patternStatus,
+    confidence: asNumber(chartPatterns?.dominantPattern?.result?.confidence, 0),
+  };
+
+  const bbWidthPct = (bbands.middle > 0)
+    ? ((bbands.upper - bbands.lower) / bbands.middle) * 100
+    : 0;
+
+  const setupCtx: StockSetupContext = {
+    price,
+    atr,
+    atrPct: regimeInfo.atrPct,
+    rsi14: rsi,
+    macdHist: macd.histogram,
+    sma20,
+    sma50,
+    sma200,
+    bbUpper: bbands.upper,
+    bbMiddle: bbands.middle,
+    bbLower: bbands.lower,
+    bbWidthPct,
+    support,
+    resistance,
+    regime: regimeInfo.regime,
+    fundamentalScore: fundamentalAnalysis.score,
+    technicalScore: technicalAnalysis.score,
+    pattern: patternSummary,
+  };
+
+  const setupEval = evaluateStockSetups(setupCtx);
+
   const gateFailures: string[] = [];
   if (freshness.isStale) gateFailures.push('Stale price quote (>60s). Refresh required for accurate suggestions.');
   if (completenessScore < 80) gateFailures.push('Data completeness below 80/100. Not enough confirmed inputs for high-accuracy suggestions.');
   if (agreementCount < 4) gateFailures.push('Signals do not sufficiently agree (needs at least 4 of 6).');
   if (trustLevel === 'LOW') gateFailures.push('Chart pattern signals conflict or are not actionable.');
+  if (setupEval.conflicts) gateFailures.push(setupEval.conflictReason || 'Setup registry conflict (bullish and bearish setups both triggered).');
+  if (!setupEval.best) gateFailures.push('No high-quality setup passed the Setup Registry gates.');
 
   // "No contradiction" rule: if we cannot meet the quality bar, we explicitly return NO_TRADE.
+  // If the Setup Registry produces a best setup, we align the final decision to it to avoid contradictions.
+  const alignedAction = setupEval.best
+    ? (setupEval.best.direction === 'BULLISH'
+        ? (setupEval.best.score >= 8 ? 'STRONG_BUY' : 'BUY')
+        : (setupEval.best.direction === 'BEARISH'
+            ? (setupEval.best.score >= 8 ? 'STRONG_SELL' : 'SELL')
+            : 'HOLD'))
+    : combinedModelRating;
+
   const tradeDecision = gateFailures.length === 0
-    ? { action: combinedModelRating, confidence: calib.confidence, confidenceBucket: calib.bucket, calibrationVersion: calib.calibrationVersion, rationale: [] as string[] }
+    ? {
+        action: alignedAction,
+        confidence: calib.confidence,
+        confidenceBucket: calib.bucket,
+        calibrationVersion: calib.calibrationVersion,
+        rationale: (
+          setupEval.best
+            ? [
+                `Setup: ${setupEval.best.name} (score ${setupEval.best.score}/10)`,
+                ...setupEval.best.reasons,
+              ]
+            : []
+        ) as string[],
+      }
     : { action: 'NO_TRADE', confidence: 0, confidenceBucket: 'N/A', calibrationVersion: calib.calibrationVersion, rationale: gateFailures };
 
   if (tradeDecision.action === 'NO_TRADE') {
@@ -1625,6 +1696,13 @@ return NextResponse.json({
       atrPct: regimeInfo.atrPct,
       trendStrength: regimeInfo.trendStrength,
       tradeDecision,
+
+      setup: {
+        best: setupEval.best,
+        passedCount: setupEval.passed.length,
+        conflicts: setupEval.conflicts,
+        conflictReason: setupEval.conflictReason,
+      },
 
       evidence: {
         // Raw datapoints used for the decision (audit-friendly)
