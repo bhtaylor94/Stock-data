@@ -1561,14 +1561,17 @@ export async function GET(
     hasPatterns: chartPatterns.allDetected.length > 0,
   });
 
-  const agreementCount = [
+  const signalChecks = [
     fundamentalAnalysis.score >= 5,
     technicalAnalysis.score >= 5,
     newsAnalysis.signal === 'BULLISH',
     analystAnalysis.buyPercent >= 50,
     insiderAnalysis.netActivity === 'BUYING',
     chartPatterns.dominantDirection === 'BULLISH' && chartPatterns.actionable,
-  ].filter(Boolean).length;
+  ];
+
+  const agreementCount = signalChecks.filter(Boolean).length;
+  const totalSignals = signalChecks.length;
 
   const trustLevel = (chartPatterns.hasConflict ? 'LOW' : (chartPatterns.actionable && chartPatterns.confirmed.length > 0 ? 'HIGH' : (chartPatterns.allDetected.length > 0 ? 'MEDIUM' : 'NEUTRAL')));
   const quoteAsOfMs = (q as any)?.quoteTimeInLong || (q as any)?.tradeTimeInLong || Date.now();
