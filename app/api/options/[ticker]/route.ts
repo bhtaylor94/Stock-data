@@ -1046,7 +1046,14 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     lastUpdated: new Date().toISOString(),
     dataSource: 'schwab-live',
     responseTimeMs: Date.now() - startTime,
-    meta: { asOf: new Date().toISOString(), calibrationVersion: 'v1.0-conservative', tradeDecision },
+    meta: { asOf: new Date().toISOString(), calibrationVersion: 'v1.0-conservative', tradeDecision,
+      evidence: {
+        technicals: { trend, rsi: Math.round(rsi), sma20: Math.round(sma20 * 100) / 100, sma50: Math.round(sma50 * 100) / 100, support: Math.round(support * 100) / 100, resistance: Math.round(resistance * 100) / 100 },
+        iv: { atmIV: Math.round(ivAnalysis.atmIV * 10000) / 10000, ivRank: Math.round(ivAnalysis.ivRank), ivPercentile: Math.round(ivAnalysis.ivPercentile), ivSignal: ivAnalysis.ivSignal, putCallIVSkew: Math.round(ivAnalysis.putCallIVSkew * 10000) / 10000 },
+        market: { putCallRatio: Math.round(marketMetrics.putCallRatio * 1000) / 1000, putCallOIRatio: Math.round(marketMetrics.putCallOIRatio * 1000) / 1000, sentiment: marketMetrics.sentiment, maxPain: Math.round(marketMetrics.maxPain * 100) / 100 },
+        unusual: { count: unusualActivity.length, top: unusualActivity.slice(0, 5) },
+      }
+    },
     expirations,
     selectedExpiration: firstExp,
     byExpiration,

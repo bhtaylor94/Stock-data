@@ -9,6 +9,10 @@ export type TrackedSuggestion = {
   type: string;
   strategy: string;
   entryPrice: number;
+  // Position sizing assumptions (defaults: stocks=100 shares, options=5 contracts)
+  positionShares?: number;
+  positionContracts?: number;
+  contractMultiplier?: number;
   targetPrice: number;
   stopLoss: number;
   confidence: number;

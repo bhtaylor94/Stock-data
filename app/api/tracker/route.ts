@@ -126,7 +126,7 @@ function computeSuggestionPnl(s: TrackedSuggestion, currentUnderlying: number | 
   if (!isOption) {
     if (!Number.isFinite(currentUnderlying ?? NaN)) return { pnl: 0, pnlPct: 0, currentPrice: null };
     const cur = currentUnderlying as number;
-    const shares = 100;
+    const shares = asNumber((s as any).positionShares, 100);
     const pnl = (cur - entry) * shares;
     const pnlPct = ((cur - entry) / entry) * 100;
     return { pnl, pnlPct, currentPrice: cur };
@@ -136,8 +136,8 @@ function computeSuggestionPnl(s: TrackedSuggestion, currentUnderlying: number | 
   const curOpt = currentOption;
   if (!Number.isFinite(curOpt ?? NaN)) return { pnl: 0, pnlPct: 0, currentPrice: null };
 
-  const contracts = 5; // default sizing assumption (document in UI later if desired)
-  const multiplier = 100;
+  const contracts = asNumber((s as any).positionContracts, 5);
+  const multiplier = asNumber((s as any).contractMultiplier, 100);
   const pnl = ((curOpt as number) - entry) * contracts * multiplier;
   const pnlPct = (((curOpt as number) - entry) / entry) * 100;
   return { pnl, pnlPct, currentPrice: curOpt as number };
@@ -292,6 +292,9 @@ export async function POST(req: NextRequest) {
       targetPrice: asNumber(body.targetPrice, 0),
       stopLoss: asNumber(body.stopLoss, 0),
       confidence: asNumber(body.confidence, 0),
+      positionShares: body.optionContract ? undefined : 100,
+      positionContracts: body.optionContract ? 5 : undefined,
+      contractMultiplier: body.optionContract ? 100 : undefined,
       reasoning: Array.isArray(body.reasoning) ? body.reasoning.map(String) : [],
       status: (body.status as TrackedSuggestionStatus) || 'ACTIVE',
       createdAt: now,

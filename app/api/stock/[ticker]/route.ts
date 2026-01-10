@@ -231,14 +231,49 @@ function calculateRSI(prices: number[], period = 14): number {
   return 100 - (100 / (1 + gains / losses));
 }
 
+function calculateEMASeries(prices: number[], period: number): number[] {
+  const out: number[] = new Array(prices.length).fill(NaN);
+  if (prices.length === 0) return out;
+  if (prices.length < period) {
+    // Not enough data: treat last price as EMA for the tail to keep downstream stable.
+    out[prices.length - 1] = prices[prices.length - 1] || 0;
+    return out;
+  }
+  const k = 2 / (period + 1);
+  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  out[period - 1] = ema;
+  for (let i = period; i < prices.length; i++) {
+    ema = prices[i] * k + ema * (1 - k);
+    out[i] = ema;
+  }
+  return out;
+}
+
 function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } {
-  const ema12 = calculateEMA(prices, 12);
-  const ema26 = calculateEMA(prices, 26);
-  const macd = ema12 - ema26;
-  // Signal line is 9-period EMA of MACD (simplified)
-  const signal = macd * 0.9; // Approximation
+  // True MACD: EMA(12) - EMA(26); signal = EMA(9) of MACD series.
+  const ema12 = calculateEMASeries(prices, 12);
+  const ema26 = calculateEMASeries(prices, 26);
+
+  const macdSeries: number[] = prices.map((_, i) => {
+    const a = ema12[i];
+    const b = ema26[i];
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return NaN;
+    return (a as number) - (b as number);
+  });
+
+  // Build a compact series for signal EMA (skip NaNs)
+  const macdFinite: number[] = macdSeries.filter(v => Number.isFinite(v)) as number[];
+  if (macdFinite.length < 10) {
+    const macdFallback = Number.isFinite(macdSeries[macdSeries.length - 1]) ? (macdSeries[macdSeries.length - 1] as number) : 0;
+    return { macd: macdFallback, signal: macdFallback, histogram: 0 };
+  }
+
+  const signalSeries = calculateEMASeries(macdFinite, 9);
+  const macd = macdFinite[macdFinite.length - 1] || 0;
+  const signal = signalSeries[signalSeries.length - 1] || 0;
   return { macd, signal, histogram: macd - signal };
 }
+
 
 function calculateBollingerBands(prices: number[], period = 20): { upper: number; middle: number; lower: number } {
   const sma = calculateSMA(prices, period);
@@ -1580,6 +1615,37 @@ return NextResponse.json({
       atrPct: regimeInfo.atrPct,
       trendStrength: regimeInfo.trendStrength,
       tradeDecision,
+
+      evidence: {
+        // Raw datapoints used for the decision (audit-friendly)
+        indicators: {
+          rsi14: Math.round(rsi * 100) / 100,
+          macd: Math.round(macd.macd * 10000) / 10000,
+          macdSignal: Math.round(macd.signal * 10000) / 10000,
+          macdHist: Math.round(macd.histogram * 10000) / 10000,
+          sma20: Math.round(sma20 * 100) / 100,
+          sma50: Math.round(sma50 * 100) / 100,
+          sma200: Math.round(sma200 * 100) / 100,
+          bbUpper: Math.round(bbands.upper * 100) / 100,
+          bbMiddle: Math.round(bbands.middle * 100) / 100,
+          bbLower: Math.round(bbands.lower * 100) / 100,
+        },
+        levels: {
+          support: Math.round(support * 100) / 100,
+          resistance: Math.round(resistance * 100) / 100,
+        },
+        patterns: {
+          dominant: chartPatterns?.dominantPattern || null,
+          status: chartPatterns?.status || 'NONE',
+          confidence: asNumber(chartPatterns?.dominantConfidence, 0),
+        },
+        verification: {
+          completenessScore,
+          agreementCount,
+          totalSignals,
+          isStale: freshness.isStale,
+        },
+      },
     },
 
     fundamentals: {
