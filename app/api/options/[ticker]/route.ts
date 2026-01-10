@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { evaluateOptionsSetup, type OptionsSetupContext } from '@/lib/setupRegistry';
 import { getSnapshotStore, buildSnapshotFromPayload } from '@/lib/storage/snapshotStore';
+import { buildEvidencePacket } from '@/lib/evidencePacket';
 
 export const runtime = 'nodejs';
 
@@ -1269,6 +1270,17 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     allPuts: puts,
   };
 
+  // Phase 4 (foundation): Evidence packet (auditable decision support)
+  try {
+    const packet = buildEvidencePacket('options', payload);
+    (payload as any).evidencePacket = packet;
+    (payload as any).meta = (payload as any).meta || {};
+    (payload as any).meta.evidencePacketVersion = packet.version;
+    (payload as any).meta.evidencePacketHash = packet.hash;
+  } catch (e) {
+    console.warn('evidence_packet_failed', e);
+  }
+
   // Phase 3: Snapshot logging (best-effort; durable on Optiplex/local, ephemeral on Vercel)
   try {
     const store = await getSnapshotStore();
@@ -1277,4 +1289,5 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     console.warn('snapshot_log_failed', e);
   }
 
-  return NextResponse.json(payload);}
+  return NextResponse.json(payload);
+}

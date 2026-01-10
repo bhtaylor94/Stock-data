@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSchwabAccessToken } from '@/lib/schwab';
 import { evaluateStockSetups, type StockSetupContext, type PatternSummary } from '@/lib/setupRegistry';
 import { getSnapshotStore, buildSnapshotFromPayload } from '@/lib/storage/snapshotStore';
+import { buildEvidencePacket } from '@/lib/evidencePacket';
 
 export const runtime = 'nodejs';
 
@@ -1996,6 +1997,18 @@ const payload = {
     dataSource,
     responseTimeMs: Date.now() - startTime,
   };
+
+  // Phase 4 (foundation): Evidence packet (auditable decision support)
+  try {
+    const packet = buildEvidencePacket('stock', payload);
+    (payload as any).evidencePacket = packet;
+    (payload as any).meta = (payload as any).meta || {};
+    (payload as any).meta.evidencePacketVersion = packet.version;
+    (payload as any).meta.evidencePacketHash = packet.hash;
+  } catch (e) {
+    // Never fail the endpoint if evidence formatting breaks
+    console.warn('evidence_packet_failed', e);
+  }
 
   // Phase 3: Snapshot logging (best-effort; durable on Optiplex/local, ephemeral on Vercel)
   try {

@@ -50,6 +50,8 @@ export type TrackedSuggestion = {
 
   // Optional: evidence payload (kept small) to explain historical decisions.
   evidence?: any;
+  // Optional: full evidence packet (structured + hashed) captured at entry time.
+  evidencePacket?: any;
   optionContract?: {
     strike: number;
     expiration: string; // ISO date

@@ -434,6 +434,7 @@ export async function POST(req: NextRequest) {
       // Keep this reasonably small; it is meant to back up the suggestion
       // with concrete indicator readings and detected setups.
       evidence: body.evidence ?? undefined,
+      evidencePacket: body.evidencePacket ?? undefined,
       optionContract: body.optionContract
         ? {
             strike: asNumber(body.optionContract.strike, 0),
