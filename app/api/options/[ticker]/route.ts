@@ -20,6 +20,51 @@ function liquidityOk(c: OptionContract): boolean {
   return Boolean(spreadOk && interestOk && priceOk);
 }
 
+// Liquidity evidence breakdown (for auditability in the UI)
+function liquidityEvidence(c: OptionContract | null): {
+  spreadOk: boolean;
+  interestOk: boolean;
+  priceOk: boolean;
+  spreadPercent: number | null;
+  openInterest: number | null;
+  volume: number | null;
+  mark: number | null;
+  bid: number | null;
+} {
+  if (!c) {
+    return {
+      spreadOk: false,
+      interestOk: false,
+      priceOk: false,
+      spreadPercent: null,
+      openInterest: null,
+      volume: null,
+      mark: null,
+      bid: null,
+    };
+  }
+  const spreadPercent = Number((c as any).spreadPercent ?? NaN);
+  const openInterest = Number((c as any).openInterest ?? NaN);
+  const volume = Number((c as any).volume ?? NaN);
+  const mark = Number((c as any).mark ?? NaN);
+  const bid = Number((c as any).bid ?? NaN);
+
+  const spreadOk = Number.isFinite(spreadPercent) ? spreadPercent <= 12 : false;
+  const interestOk = (Number.isFinite(openInterest) && openInterest >= 500) || (Number.isFinite(volume) && volume >= 200);
+  const priceOk = (Number.isFinite(mark) && mark >= 0.10) && (Number.isFinite(bid) && bid >= 0.05);
+
+  return {
+    spreadOk,
+    interestOk,
+    priceOk,
+    spreadPercent: Number.isFinite(spreadPercent) ? spreadPercent : null,
+    openInterest: Number.isFinite(openInterest) ? openInterest : null,
+    volume: Number.isFinite(volume) ? volume : null,
+    mark: Number.isFinite(mark) ? mark : null,
+    bid: Number.isFinite(bid) ? bid : null,
+  };
+}
+
 // ============================================================
 // COMPREHENSIVE OPTIONS API
 // Features:
@@ -1082,6 +1127,23 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   };
   const optionsSetup = evaluateOptionsSetup(setupCtx);
 
+  // Add a transparent, evidence-first "preferred structure" note so the UI always shows
+  // *why* the engine prefers a certain options structure (debit spread vs long premium, etc.).
+  // This card is informational (not trackable) and helps users trust the decision.
+  if (optionsSetup && optionsSetup.structure && optionsSetup.structure !== 'NO_TRADE') {
+    suggestions.unshift({
+      type: 'ALERT',
+      strategy: `📘 Preferred Structure: ${optionsSetup.structure.replace(/_/g, ' ')}`,
+      reasoning: [
+        ...(optionsSetup.reasons || []),
+        'Note: The current UI tracks single-leg calls/puts. Structure guidance is provided for risk-defined execution.',
+      ],
+      warnings: [],
+      confidence: 0,
+      riskLevel: 'INFO',
+    });
+  }
+
   // If the setup registry says NO_TRADE, we keep unusual alerts but do not recommend directional trades.
   const setupBlocksTrade = optionsSetup.structure === 'NO_TRADE';
   if (setupBlocksTrade && tradable.length > 0) {
@@ -1127,6 +1189,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
         iv: { atmIV: Math.round(ivAnalysis.atmIV * 10000) / 10000, ivRank: Math.round(ivAnalysis.ivRank), ivPercentile: Math.round(ivAnalysis.ivPercentile), ivSignal: ivAnalysis.ivSignal, putCallIVSkew: Math.round(ivAnalysis.putCallIVSkew * 10000) / 10000, expectedMove30dPct: expectedMovePct(ivAnalysis.atmIV, 30) },
         earnings: { daysToEarnings },
         market: { putCallRatio: Math.round(marketMetrics.putCallRatio * 1000) / 1000, putCallOIRatio: Math.round(marketMetrics.putCallOIRatio * 1000) / 1000, sentiment: marketMetrics.sentiment, maxPain: Math.round(marketMetrics.maxPain * 100) / 100 },
+        liquidity: liquidityEvidence(bestContract),
         unusual: { count: unusualActivity.length, top: unusualActivity.slice(0, 5) },
       }
     },
