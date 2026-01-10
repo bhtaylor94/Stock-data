@@ -37,6 +37,32 @@ const SCHWAB_APP_KEY = process.env.SCHWAB_APP_KEY;
 const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
 const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
 
+// ---- Earnings helper (best effort) ----
+// Uses Finnhub earnings calendar if API key present. This keeps the app up-to-date
+// and lets the options setup registry apply IV-crush-aware structures.
+async function fetchDaysToEarnings(symbol: string): Promise<number | null> {
+  try {
+    if (!FINNHUB_KEY) return null;
+    const now = new Date();
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const to = new Date(from.getTime() + 1000 * 60 * 60 * 24 * 120); // 120d lookahead
+    const fromStr = from.toISOString().slice(0, 10);
+    const toStr = to.toISOString().slice(0, 10);
+    const url = `https://finnhub.io/api/v1/calendar/earnings?symbol=${encodeURIComponent(symbol)}&from=${fromStr}&to=${toStr}&token=${encodeURIComponent(FINNHUB_KEY)}`;
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const data: any = await r.json();
+    const list = Array.isArray(data?.earningsCalendar) ? data.earningsCalendar : [];
+    if (list.length === 0 || !list[0]?.date) return null;
+    const next = new Date(`${list[0].date}T00:00:00Z`);
+    if (Number.isNaN(next.getTime())) return null;
+    const dteMs = next.getTime() - from.getTime();
+    return Math.ceil(dteMs / (1000 * 60 * 60 * 24));
+  } catch {
+    return null;
+  }
+}
+
 // ============================================================
 // TOKEN CACHE - Schwab access tokens last 30 minutes
 // Note: In serverless (Vercel), this cache is per-instance
@@ -1037,12 +1063,22 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   const tradable = suggestions.filter((s: any) => s.type === 'CALL' || s.type === 'PUT');
 
   // Phase 2: Options setup registry (structure selection based on evidence)
+  // We only use the top-ranked tradable contract as an evidence anchor (spread/OI/volume/DTE).
   const bestContract = tradable.length > 0 ? (tradable[0] as any).contract : null;
+
+  // Earnings proximity matters for options structure selection (IV crush). Best effort.
+  const daysToEarnings = await fetchDaysToEarnings(ticker);
+
   const setupCtx: OptionsSetupContext = {
     trend,
     ivPercentile: typeof ivAnalysis?.ivPercentile === 'number' ? ivAnalysis.ivPercentile : 50,
-    daysToEarnings: null,
+    daysToEarnings,
     liquidityOk: bestContract ? liquidityOk(bestContract) : false,
+    spreadPercent: bestContract ? Number((bestContract as any).spreadPercent ?? null) : null,
+    openInterest: bestContract ? Number((bestContract as any).openInterest ?? null) : null,
+    volume: bestContract ? Number((bestContract as any).volume ?? null) : null,
+    dte: bestContract ? Number((bestContract as any).dte ?? null) : null,
+    atmIV: typeof ivAnalysis?.atmIV === 'number' ? ivAnalysis.atmIV : null,
   };
   const optionsSetup = evaluateOptionsSetup(setupCtx);
 
@@ -1088,7 +1124,8 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       },
       evidence: {
         technicals: { trend, rsi: Math.round(rsi), sma20: Math.round(sma20 * 100) / 100, sma50: Math.round(sma50 * 100) / 100, support: Math.round(support * 100) / 100, resistance: Math.round(resistance * 100) / 100 },
-        iv: { atmIV: Math.round(ivAnalysis.atmIV * 10000) / 10000, ivRank: Math.round(ivAnalysis.ivRank), ivPercentile: Math.round(ivAnalysis.ivPercentile), ivSignal: ivAnalysis.ivSignal, putCallIVSkew: Math.round(ivAnalysis.putCallIVSkew * 10000) / 10000 },
+        iv: { atmIV: Math.round(ivAnalysis.atmIV * 10000) / 10000, ivRank: Math.round(ivAnalysis.ivRank), ivPercentile: Math.round(ivAnalysis.ivPercentile), ivSignal: ivAnalysis.ivSignal, putCallIVSkew: Math.round(ivAnalysis.putCallIVSkew * 10000) / 10000, expectedMove30dPct: expectedMovePct(ivAnalysis.atmIV, 30) },
+        earnings: { daysToEarnings },
         market: { putCallRatio: Math.round(marketMetrics.putCallRatio * 1000) / 1000, putCallOIRatio: Math.round(marketMetrics.putCallOIRatio * 1000) / 1000, sentiment: marketMetrics.sentiment, maxPain: Math.round(marketMetrics.maxPain * 100) / 100 },
         unusual: { count: unusualActivity.length, top: unusualActivity.slice(0, 5) },
       }

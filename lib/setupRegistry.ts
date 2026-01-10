@@ -676,6 +676,13 @@ export interface OptionsSetupContext {
   ivPercentile: number;  // 0..100 (best effort)
   daysToEarnings?: number | null;
   liquidityOk: boolean;
+
+  // Optional evidence details about the best contract (if available)
+  spreadPercent?: number | null;
+  openInterest?: number | null;
+  volume?: number | null;
+  dte?: number | null;
+  atmIV?: number | null;
 }
 
 export interface OptionsSetupResult {
@@ -688,12 +695,24 @@ export interface OptionsSetupResult {
 export function evaluateOptionsSetup(ctx: OptionsSetupContext): OptionsSetupResult {
   const reasons: string[] = [];
 
+  // Evidence-first context (safe, optional)
+  const sp = (typeof ctx.spreadPercent === 'number' && Number.isFinite(ctx.spreadPercent)) ? ctx.spreadPercent : null;
+  const oi = (typeof ctx.openInterest === 'number' && Number.isFinite(ctx.openInterest)) ? ctx.openInterest : null;
+  const vol = (typeof ctx.volume === 'number' && Number.isFinite(ctx.volume)) ? ctx.volume : null;
+  const dte = (typeof ctx.dte === 'number' && Number.isFinite(ctx.dte)) ? ctx.dte : null;
+  const atmIV = (typeof ctx.atmIV === 'number' && Number.isFinite(ctx.atmIV)) ? ctx.atmIV : null;
+  if (sp !== null) reasons.push(`Best-contract spread ~ ${Math.round(sp * 100) / 100}%`);
+  if (oi !== null) reasons.push(`Best-contract OI ~ ${Math.round(oi)}`);
+  if (vol !== null) reasons.push(`Best-contract volume ~ ${Math.round(vol)}`);
+  if (dte !== null) reasons.push(`Best-contract DTE ~ ${Math.round(dte)}`);
+  if (atmIV !== null && atmIV > 0) reasons.push(`ATM IV ~ ${Math.round(atmIV * 10000) / 10000}`);
+
   if (!ctx.liquidityOk) {
     return {
       structure: 'NO_TRADE',
       score: 0,
       passed: false,
-      reasons: ['Options liquidity gate failed (spread/OI/volume).'],
+      reasons: reasons.concat(['Options liquidity gate failed (spread/OI/volume).']),
     };
   }
 
@@ -706,10 +725,20 @@ export function evaluateOptionsSetup(ctx: OptionsSetupContext): OptionsSetupResu
   const ivHigh = ctx.ivPercentile >= 70;
   const ivLow = ctx.ivPercentile <= 35;
 
+  // Expected move (non-gating) – helps explain why risk-defined structures may be preferred.
+  if (typeof ctx.atmIV === 'number' && typeof ctx.dte === 'number' && ctx.dte > 0) {
+    const emPct = (ctx.atmIV * Math.sqrt(ctx.dte / 365)) * 100;
+    if (Number.isFinite(emPct)) reasons.push(`Implied move (≈${Math.round(ctx.dte)}d) ~ ±${Math.round(emPct * 10) / 10}%.`);
+  }
+
   if (ctx.trend === 'BULLISH') {
     if (ivHigh || nearEarnings) {
       reasons.push('Bullish bias + elevated IV → prefer debit spread (risk-defined).');
       return { structure: 'CALL_DEBIT_SPREAD', score: 8, passed: true, reasons };
+    }
+    if (ivLow && !nearEarnings) {
+      reasons.push('Bullish bias + low IV → long call is favored (premium is cheaper).');
+      return { structure: 'LONG_CALL', score: 8, passed: true, reasons };
     }
     reasons.push('Bullish bias + normal IV → long call acceptable.');
     return { structure: 'LONG_CALL', score: 7, passed: true, reasons };
@@ -719,6 +748,10 @@ export function evaluateOptionsSetup(ctx: OptionsSetupContext): OptionsSetupResu
     if (ivHigh || nearEarnings) {
       reasons.push('Bearish bias + elevated IV → prefer debit spread (risk-defined).');
       return { structure: 'PUT_DEBIT_SPREAD', score: 8, passed: true, reasons };
+    }
+    if (ivLow && !nearEarnings) {
+      reasons.push('Bearish bias + low IV → long put is favored (premium is cheaper).');
+      return { structure: 'LONG_PUT', score: 8, passed: true, reasons };
     }
     reasons.push('Bearish bias + normal IV → long put acceptable.');
     return { structure: 'LONG_PUT', score: 7, passed: true, reasons };
