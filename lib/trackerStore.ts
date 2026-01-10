@@ -27,22 +27,23 @@ export type TrackedSuggestion = {
   closedAt?: string;
   closedPrice?: number;
 
-  // Optional: post-entry outcome measurements (best-effort; computed lazily)
+  // Optional: post-entry outcome measurements (best-effort; computed lazily).
+  // We keep a single outcomes object to avoid drift/duplication.
   outcomes?: {
+    // Snapshot-style outcome bookkeeping
     asOf?: string;
     horizonDays?: number[];
     // keyed like d1, d3, d5, d10, d14
     returnsPct?: Record<string, number>;
     prices?: Record<string, number>;
-  };
 
-  // Optional: computed forward returns (stocks only) for calibration.
-  // Values are percentages (e.g., 2.5 = +2.5%).
-  outcomes?: {
+    // Computed forward returns (stocks only) for calibration.
+    // Values are percentages (e.g., 2.5 = +2.5%).
     d1?: number;
     d3?: number;
     d5?: number;
     d10?: number;
+    d14?: number;
     d20?: number;
     computedAt?: string;
   };
