@@ -11,6 +11,15 @@ function expectedMovePct(atmIV: number, dte: number): number {
   return Math.round(pct * 100) / 100;
 }
 
+// Liquidity / tradability gate (accuracy-first: reject illiquid, wide-spread contracts)
+// Must be module-scope because both the suggestion engine and the setup registry rely on it.
+function liquidityOk(c: OptionContract): boolean {
+  const spreadOk = Number((c as any).spreadPercent ?? 999) <= 12;
+  const interestOk = (Number((c as any).openInterest ?? 0) >= 500) || (Number((c as any).volume ?? 0) >= 200);
+  const priceOk = Number((c as any).mark ?? 0) >= 0.10 && Number((c as any).bid ?? 0) >= 0.05;
+  return Boolean(spreadOk && interestOk && priceOk);
+}
+
 // ============================================================
 // COMPREHENSIVE OPTIONS API
 // Features:
@@ -837,14 +846,6 @@ function generateSuggestions(
   unusualActivity: UnusualActivity[],
 ): any[] {
   const suggestions: any[] = [];
-
-// Liquidity / tradability gate (accuracy-first: reject illiquid, wide-spread contracts)
-function liquidityOk(c: OptionContract): boolean {
-  const spreadOk = Number(c.spreadPercent ?? 999) <= 12;
-  const interestOk = (Number(c.openInterest ?? 0) >= 500) || (Number(c.volume ?? 0) >= 200);
-  const priceOk = Number(c.mark ?? 0) >= 0.10 && Number(c.bid ?? 0) >= 0.05;
-  return Boolean(spreadOk && interestOk && priceOk);
-}
 
   const validCalls = calls.filter(c => c.dte >= 7 && c.dte <= 90 && liquidityOk(c));
   const validPuts = puts.filter(p => p.dte >= 7 && p.dte <= 90 && liquidityOk(p));
