@@ -26,6 +26,13 @@ const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
 
 type MarketRegime = 'TREND' | 'RANGE' | 'HIGH_VOL';
 
+// Safe numeric coercion used across evidence/verification blocks
+const asNumber = (v: any, fallback = 0): number => {
+  const n = (typeof v === 'number') ? v : Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+
 function computeRegime(priceHistory: { close: number; high: number; low: number }[], sma50: number, sma200: number) : { regime: MarketRegime; atrPct: number; trendStrength: number } {
   if (!priceHistory || priceHistory.length < 60) return { regime: 'RANGE', atrPct: 0, trendStrength: 0 };
   const last = priceHistory[priceHistory.length - 1];
