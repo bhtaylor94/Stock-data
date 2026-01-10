@@ -8,6 +8,10 @@ export type TrackedSuggestion = {
   ticker: string;
   type: string;
   strategy: string;
+  // Optional: normalized setup name (used for calibration stats)
+  setup?: string;
+  // Optional: market regime label at the time of the suggestion
+  regime?: string;
   entryPrice: number;
   // Position sizing assumptions (defaults: stocks=100 shares, options=5 contracts)
   positionShares?: number;
@@ -22,6 +26,29 @@ export type TrackedSuggestion = {
   updatedAt: string;
   closedAt?: string;
   closedPrice?: number;
+
+  // Optional: post-entry outcome measurements (best-effort; computed lazily)
+  outcomes?: {
+    asOf?: string;
+    horizonDays?: number[];
+    // keyed like d1, d3, d5, d10, d14
+    returnsPct?: Record<string, number>;
+    prices?: Record<string, number>;
+  };
+
+  // Optional: computed forward returns (stocks only) for calibration.
+  // Values are percentages (e.g., 2.5 = +2.5%).
+  outcomes?: {
+    d1?: number;
+    d3?: number;
+    d5?: number;
+    d10?: number;
+    d20?: number;
+    computedAt?: string;
+  };
+
+  // Optional: evidence payload (kept small) to explain historical decisions.
+  evidence?: any;
   optionContract?: {
     strike: number;
     expiration: string; // ISO date

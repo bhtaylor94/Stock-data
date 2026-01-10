@@ -144,6 +144,65 @@ function computeSuggestionPnl(s: TrackedSuggestion, currentUnderlying: number | 
   return { pnl, pnlPct, currentPrice: curOpt as number };
 }
 
+type DailyCandle = { datetime: number; close: number };
+
+async function fetchDailyCandles(token: string, ticker: string, startMs: number, endMs: number): Promise<DailyCandle[]> {
+  try {
+    const url = `https://api.schwabapi.com/marketdata/v1/pricehistory?symbol=${encodeURIComponent(
+      ticker
+    )}&periodType=day&period=30&frequencyType=daily&frequency=1&startDate=${startMs}&endDate=${endMs}`;
+    const r = await schwabFetchJson<any>(token, url);
+    if (!r.ok) return [];
+    const candles = Array.isArray(r.data?.candles) ? r.data.candles : [];
+    return candles
+      .map((c: any) => ({ datetime: asNumber(c.datetime, 0), close: asNumber(c.close, NaN) }))
+      .filter((c: any) => Number.isFinite(c.close) && c.datetime > 0)
+      .sort((a: any, b: any) => a.datetime - b.datetime);
+  } catch {
+    return [];
+  }
+}
+
+function candleCloseOnOrAfter(candles: DailyCandle[], targetMs: number): number | null {
+  for (const c of candles) {
+    if (c.datetime >= targetMs && Number.isFinite(c.close)) return c.close;
+  }
+  // If we don't have a candle on/after, use last available.
+  const last = candles.length ? candles[candles.length - 1] : null;
+  return last && Number.isFinite(last.close) ? last.close : null;
+}
+
+async function computeStockOutcomesBestEffort(token: string, ticker: string, entryIso: string, entryPrice: number) {
+  const entryMs = new Date(entryIso).getTime();
+  if (!Number.isFinite(entryMs) || entryMs <= 0) return null;
+  if (!Number.isFinite(entryPrice) || entryPrice <= 0) return null;
+
+  const horizons = [1, 3, 5, 10, 14];
+  const startMs = entryMs - 2 * 24 * 60 * 60 * 1000;
+  const endMs = entryMs + 20 * 24 * 60 * 60 * 1000;
+  const candles = await fetchDailyCandles(token, ticker, startMs, endMs);
+  if (!candles.length) return null;
+
+  const returnsPct: Record<string, number> = {};
+  const prices: Record<string, number> = {};
+  for (const d of horizons) {
+    const targetMs = entryMs + d * 24 * 60 * 60 * 1000;
+    const px = candleCloseOnOrAfter(candles, targetMs);
+    if (Number.isFinite(px ?? NaN)) {
+      const key = `d${d}`;
+      prices[key] = px as number;
+      returnsPct[key] = (((px as number) - entryPrice) / entryPrice) * 100;
+    }
+  }
+
+  return {
+    asOf: new Date().toISOString(),
+    horizonDays: horizons,
+    returnsPct,
+    prices,
+  };
+}
+
 export async function GET(request: NextRequest) {
 
 // Phase 3: Snapshot audit trail (best-effort on Vercel, durable on Optiplex/local)
@@ -182,6 +241,9 @@ try {
 
     const nowIso = new Date().toISOString();
 
+    // Persist status transitions/outcomes best-effort so calibration is based on stable records.
+    const pendingPatches: Array<{ id: string; patch: Partial<TrackedSuggestion> }> = [];
+
     const enriched = suggestions.map(s => {
       const underlying = tickerPrices[s.ticker] ?? null;
 
@@ -212,6 +274,19 @@ try {
         if (cur <= s.stopLoss) status = 'STOPPED_OUT';
       }
 
+      // If status transitioned to terminal, persist closedAt/closedPrice once.
+      if (status !== s.status && ['HIT_TARGET', 'STOPPED_OUT', 'EXPIRED'].includes(status)) {
+        const closedPrice = Number.isFinite(perf.currentPrice ?? NaN) ? (perf.currentPrice as number) : undefined;
+        pendingPatches.push({
+          id: s.id,
+          patch: {
+            status,
+            closedAt: nowIso,
+            closedPrice,
+          },
+        });
+      }
+
       return {
         ...s,
         status,
@@ -227,6 +302,35 @@ try {
           : undefined,
       };
     });
+
+    // Lazy outcome computation for STOCK suggestions once there is enough time since entry.
+    // Options outcomes are measured using realized close (no reliable option history available here).
+    if (token) {
+      const nowMs = Date.now();
+      const needs = enriched.filter((s: any) => {
+        if (s.optionContract) return false;
+        const entryMs = new Date(s.createdAt).getTime();
+        if (!Number.isFinite(entryMs) || entryMs <= 0) return false;
+        const ageDays = (nowMs - entryMs) / (24 * 60 * 60 * 1000);
+        if (ageDays < 1) return false;
+        // compute once unless missing keys
+        return !s.outcomes || !s.outcomes.returnsPct || Object.keys(s.outcomes.returnsPct).length < 2;
+      });
+
+      for (const s of needs as any[]) {
+        try {
+          const outcomes = await computeStockOutcomesBestEffort(token, s.ticker, s.createdAt, asNumber(s.entryPrice, 0));
+          if (outcomes) pendingPatches.push({ id: s.id, patch: { outcomes } });
+        } catch {}
+      }
+    }
+
+    // Apply patches (best-effort). This prevents repeated recomputation and stabilizes calibration.
+    for (const p of pendingPatches) {
+      try {
+        await updateSuggestion(p.id, p.patch);
+      } catch {}
+    }
 
     // Summary stats
     const active = enriched.filter(s => s.status === 'ACTIVE');
@@ -303,6 +407,8 @@ export async function POST(req: NextRequest) {
       ticker: String(body.ticker || '').toUpperCase(),
       type: String(body.type || 'BUY'),
       strategy: String(body.strategy || ''),
+      setup: body.setup ? String(body.setup) : undefined,
+      regime: body.regime ? String(body.regime) : undefined,
       entryPrice: asNumber(body.entryPrice, 0),
       targetPrice: asNumber(body.targetPrice, 0),
       stopLoss: asNumber(body.stopLoss, 0),
