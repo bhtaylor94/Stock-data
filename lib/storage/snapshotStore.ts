@@ -1,14 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
-
-// sql.js is WASM-based SQLite (no native bindings) -> deploy-safe on Vercel.
-// We store the DB in AIHF_DB_PATH (default /tmp/aihf.sqlite). On Vercel this is ephemeral,
-// but it's perfect for local dev and for your future Optiplex deployment.
-type SqlJsStatic = any;
-type SqlDatabase = any;
 
 export type SuggestionSnapshot = {
   id: string;
@@ -16,153 +7,100 @@ export type SuggestionSnapshot = {
   source: 'stock' | 'options';
   ticker: string;
   decision: 'TRADE' | 'NO_TRADE';
-  recommendation?: any;
-  evidence?: any;
-  setup?: any;
-  meta?: any;
+  // Minimal, stable fields (everything else goes into payload so we don't break deploys)
+  setupName: string | null;
+  confidence: number;
+  evidence: any;
+  payload: any;
 };
 
 export interface SnapshotStore {
-  saveSnapshot(s: SuggestionSnapshot): Promise<void>;
-  listSnapshotsByTicker(ticker: string, limit?: number): Promise<SuggestionSnapshot[]>;
+  saveSnapshot(snapshot: SuggestionSnapshot): Promise<void>;
+  getSnapshotsByTicker(ticker: string, limit?: number): Promise<SuggestionSnapshot[]>;
+  getRecentSnapshots(limit?: number): Promise<SuggestionSnapshot[]>;
 }
 
-function safeJsonParse<T>(s: string, fallback: T): T {
-  try { return JSON.parse(s) as T; } catch { return fallback; }
+// Vercel serverless filesystems are ephemeral. /tmp is writable per instance.
+// On Optiplex/local, set AIHF_DB_PATH or AIHF_SNAPSHOT_PATH to persist.
+function resolveSnapshotPath(): string {
+  const explicit = process.env.AIHF_SNAPSHOT_PATH || process.env.AIHF_DB_PATH;
+  if (explicit && typeof explicit === 'string' && explicit.trim()) return explicit.trim();
+  return path.join('/tmp', 'aihf_snapshots.jsonl');
 }
 
-function dbPath(): string {
-  return process.env.AIHF_DB_PATH || '/tmp/aihf.sqlite';
+function ensureDir(filePath: string) {
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-async function loadSqlJs(): Promise<SqlJsStatic> {
-  // Dynamic import so Next doesn't try to bundle WASM for the client.
-  // locateFile is required so sql.js can find sql-wasm.wasm at runtime.
-  const initSqlJs = (await import('sql.js')).default as any;
-  const wasmDir = path.dirname(require.resolve('sql.js/dist/sql-wasm.wasm'));
-  return initSqlJs({ locateFile: (file: string) => path.join(wasmDir, file) });
+function safeJsonParse(line: string): any | null {
+  try { return JSON.parse(line); } catch { return null; }
 }
 
-let _dbPromise: Promise<SqlDatabase> | null = null;
+class JsonlSnapshotStore implements SnapshotStore {
+  private filePath: string;
 
-async function getDb(): Promise<SqlDatabase> {
-  if (_dbPromise) return _dbPromise;
-
-  _dbPromise = (async () => {
-    const SQL = await loadSqlJs();
-    const p = dbPath();
-    let db: SqlDatabase;
-
-    if (fs.existsSync(p)) {
-      const buf = fs.readFileSync(p);
-      db = new SQL.Database(new Uint8Array(buf));
-    } else {
-      db = new SQL.Database();
-    }
-
-    db.run(`
-      CREATE TABLE IF NOT EXISTS snapshots (
-        id TEXT PRIMARY KEY,
-        asOf TEXT NOT NULL,
-        source TEXT NOT NULL,
-        ticker TEXT NOT NULL,
-        decision TEXT NOT NULL,
-        recommendation TEXT,
-        evidence TEXT,
-        setup TEXT,
-        meta TEXT
-      );
-    `);
-
-    // Basic index for fast lookup
-    db.run(`CREATE INDEX IF NOT EXISTS idx_snapshots_ticker_asof ON snapshots(ticker, asOf);`);
-
-    return db;
-  })();
-
-  return _dbPromise;
-}
-
-async function persistDb(db: SqlDatabase): Promise<void> {
-  const p = dbPath();
-  const dir = path.dirname(p);
-  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-  const data = db.export();
-  fs.writeFileSync(p, Buffer.from(data));
-}
-
-function newId(): string {
-  // Time-ordered, collision-resistant enough for our needs
-  return `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
-}
-
-class SqlJsSnapshotStore implements SnapshotStore {
-  async saveSnapshot(s: SuggestionSnapshot): Promise<void> {
-    const db = await getDb();
-    const id = s.id || newId();
-
-    const stmt = db.prepare(`
-      INSERT OR REPLACE INTO snapshots
-      (id, asOf, source, ticker, decision, recommendation, evidence, setup, meta)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-    `);
-
-    stmt.run([
-      id,
-      s.asOf,
-      s.source,
-      s.ticker.toUpperCase(),
-      s.decision,
-      s.recommendation ? JSON.stringify(s.recommendation) : null,
-      s.evidence ? JSON.stringify(s.evidence) : null,
-      s.setup ? JSON.stringify(s.setup) : null,
-      s.meta ? JSON.stringify(s.meta) : null,
-    ]);
-    stmt.free();
-
-    // Persist to disk (best-effort on serverless; durable on Optiplex/local)
-    await persistDb(db);
+  constructor(filePath: string) {
+    this.filePath = filePath;
+    ensureDir(this.filePath);
   }
 
-  async listSnapshotsByTicker(ticker: string, limit: number = 50): Promise<SuggestionSnapshot[]> {
-    const db = await getDb();
-    const stmt = db.prepare(`
-      SELECT id, asOf, source, ticker, decision, recommendation, evidence, setup, meta
-      FROM snapshots
-      WHERE ticker = ?
-      ORDER BY asOf DESC
-      LIMIT ?;
-    `);
-
-    const out: SuggestionSnapshot[] = [];
-    stmt.bind([ticker.toUpperCase(), limit]);
-
-    while (stmt.step()) {
-      const row = stmt.getAsObject() as any;
-      out.push({
-        id: String(row.id),
-        asOf: String(row.asOf),
-        source: row.source === 'options' ? 'options' : 'stock',
-        ticker: String(row.ticker),
-        decision: row.decision === 'NO_TRADE' ? 'NO_TRADE' : 'TRADE',
-        recommendation: row.recommendation ? safeJsonParse(row.recommendation, null) : null,
-        evidence: row.evidence ? safeJsonParse(row.evidence, null) : null,
-        setup: row.setup ? safeJsonParse(row.setup, null) : null,
-        meta: row.meta ? safeJsonParse(row.meta, null) : null,
-      });
+  async saveSnapshot(snapshot: SuggestionSnapshot): Promise<void> {
+    // Best-effort append. If it fails, we swallow (accuracy logic must never fail because storage failed).
+    try {
+      const line = JSON.stringify(snapshot) + '\n';
+      fs.appendFileSync(this.filePath, line, { encoding: 'utf8' });
+    } catch {
+      // no-op
     }
+  }
 
-    stmt.free();
-    return out;
+  async getSnapshotsByTicker(ticker: string, limit: number = 50): Promise<SuggestionSnapshot[]> {
+    const all = await this.readAll();
+    const t = String(ticker || '').toUpperCase();
+    const out = all.filter(s => String(s?.ticker || '').toUpperCase() === t);
+    return out.slice(0, Math.max(0, limit));
+  }
+
+  async getRecentSnapshots(limit: number = 50): Promise<SuggestionSnapshot[]> {
+    const all = await this.readAll();
+    return all.slice(0, Math.max(0, limit));
+  }
+
+  private async readAll(): Promise<SuggestionSnapshot[]> {
+    try {
+      if (!fs.existsSync(this.filePath)) return [];
+      const content = fs.readFileSync(this.filePath, 'utf8');
+      const lines = content.split(/\r?\n/).filter(Boolean);
+      const rows: SuggestionSnapshot[] = [];
+      for (const line of lines) {
+        const obj = safeJsonParse(line);
+        if (obj && obj.id && obj.asOf && obj.ticker) rows.push(obj as SuggestionSnapshot);
+      }
+      // newest first
+      rows.sort((a, b) => (b.asOf || '').localeCompare(a.asOf || ''));
+      return rows;
+    } catch {
+      return [];
+    }
   }
 }
 
 let _store: SnapshotStore | null = null;
 
-export function getSnapshotStore(): SnapshotStore {
+export async function getSnapshotStore(): Promise<SnapshotStore> {
   if (_store) return _store;
-  _store = new SqlJsSnapshotStore();
+  _store = new JsonlSnapshotStore(resolveSnapshotPath());
   return _store;
+}
+
+function newId(): string {
+  return 'snap_' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
+}
+
+function asNumber(v: any, fallback: number = 0): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : fallback;
 }
 
 export function buildSnapshotFromPayload(params: {
@@ -172,20 +110,34 @@ export function buildSnapshotFromPayload(params: {
 }): SuggestionSnapshot {
   const asOf = new Date().toISOString();
   const suggestion = Array.isArray(params.payload?.suggestions) ? params.payload.suggestions[0] : null;
-  const decision: 'TRADE' | 'NO_TRADE' = suggestion && suggestion.type && suggestion.type !== 'NO_TRADE' ? 'TRADE' : 'NO_TRADE';
+  const decision: 'TRADE' | 'NO_TRADE' =
+    suggestion && suggestion.type && suggestion.type !== 'NO_TRADE' ? 'TRADE' : 'NO_TRADE';
+
+  const setupName =
+    typeof suggestion?.setup === 'string'
+      ? suggestion.setup
+      : typeof suggestion?.setupName === 'string'
+      ? suggestion.setupName
+      : typeof params.payload?.bestSetup?.name === 'string'
+      ? params.payload.bestSetup.name
+      : null;
+
+  const confidence =
+    asNumber(suggestion?.confidence, NaN) ||
+    asNumber(params.payload?.meta?.evidence?.verification?.confidence, NaN) ||
+    asNumber(params.payload?.meta?.confidence, 0);
+
+  const evidence = params.payload?.meta?.evidence || null;
 
   return {
     id: newId(),
     asOf,
     source: params.source,
-    ticker: params.ticker,
+    ticker: String(params.ticker || '').toUpperCase(),
     decision,
-    recommendation: suggestion,
-    evidence: params.payload?.meta?.evidence || params.payload?.evidence || null,
-    setup: params.payload?.meta?.setup || params.payload?.setup || null,
-    meta: {
-      calibration: params.payload?.meta?.calibration || null,
-      version: 'phase3-snapshot-v1',
-    },
+    setupName,
+    confidence: asNumber(confidence, 0),
+    evidence,
+    payload: params.payload,
   };
 }
