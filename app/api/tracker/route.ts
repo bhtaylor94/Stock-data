@@ -153,7 +153,7 @@ try {
   const wantSnapshots = url.searchParams.get('snapshots') === '1' || url.searchParams.get('snapshots') === 'true';
   if (wantSnapshots && ticker) {
     const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') || 50)));
-    const store = getSnapshotStore();
+    const store = await getSnapshotStore();
     const rows = await store.listSnapshotsByTicker(ticker, limit);
     return NextResponse.json({ ticker, count: rows.length, snapshots: rows });
   }

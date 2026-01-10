@@ -1271,7 +1271,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
 
   // Phase 3: Snapshot logging (best-effort; durable on Optiplex/local, ephemeral on Vercel)
   try {
-    const store = getSnapshotStore();
+    const store = await getSnapshotStore();
     await store.saveSnapshot(buildSnapshotFromPayload({ source: 'options', ticker, payload }));
   } catch (e) {
     console.warn('snapshot_log_failed', e);

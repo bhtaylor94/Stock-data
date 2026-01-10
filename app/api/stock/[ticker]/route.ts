@@ -1999,7 +1999,7 @@ const payload = {
 
   // Phase 3: Snapshot logging (best-effort; durable on Optiplex/local, ephemeral on Vercel)
   try {
-    const store = getSnapshotStore();
+    const store = await getSnapshotStore();
     await store.saveSnapshot(buildSnapshotFromPayload({ source: 'stock', ticker, payload }));
   } catch (e) {
     console.warn('snapshot_log_failed', e);
