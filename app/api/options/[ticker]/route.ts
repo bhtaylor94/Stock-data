@@ -1267,7 +1267,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     },
     allCalls: calls,
     allPuts: puts,
-  ;
+  };
 
   // Phase 3: Snapshot logging (best-effort; durable on Optiplex/local, ephemeral on Vercel)
   try {

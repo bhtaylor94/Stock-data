@@ -1995,7 +1995,7 @@ const payload = {
     lastUpdated: new Date().toISOString(),
     dataSource,
     responseTimeMs: Date.now() - startTime,
-  ;
+  };
 
   // Phase 3: Snapshot logging (best-effort; durable on Optiplex/local, ephemeral on Vercel)
   try {
