@@ -1,8 +1,5 @@
 import { NextResponse } from 'next/server';
 import { getSchwabAccessToken } from '@/lib/schwab';
-import { evaluateStockSetups, type StockSetupContext, type PatternSummary } from '@/lib/setupRegistry';
-import { getSnapshotStore, buildSnapshotFromPayload } from '@/lib/storage/snapshotStore';
-import { buildEvidencePacket } from '@/lib/evidencePacket';
 
 export const runtime = 'nodejs';
 
@@ -28,13 +25,6 @@ const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
 // ============================================================
 
 type MarketRegime = 'TREND' | 'RANGE' | 'HIGH_VOL';
-
-// Safe numeric coercion used across evidence/verification blocks
-const asNumber = (v: any, fallback = 0): number => {
-  const n = (typeof v === 'number') ? v : Number(v);
-  return Number.isFinite(n) ? n : fallback;
-};
-
 
 function computeRegime(priceHistory: { close: number; high: number; low: number }[], sma50: number, sma200: number) : { regime: MarketRegime; atrPct: number; trendStrength: number } {
   if (!priceHistory || priceHistory.length < 60) return { regime: 'RANGE', atrPct: 0, trendStrength: 0 };
@@ -241,49 +231,14 @@ function calculateRSI(prices: number[], period = 14): number {
   return 100 - (100 / (1 + gains / losses));
 }
 
-function calculateEMASeries(prices: number[], period: number): number[] {
-  const out: number[] = new Array(prices.length).fill(NaN);
-  if (prices.length === 0) return out;
-  if (prices.length < period) {
-    // Not enough data: treat last price as EMA for the tail to keep downstream stable.
-    out[prices.length - 1] = prices[prices.length - 1] || 0;
-    return out;
-  }
-  const k = 2 / (period + 1);
-  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
-  out[period - 1] = ema;
-  for (let i = period; i < prices.length; i++) {
-    ema = prices[i] * k + ema * (1 - k);
-    out[i] = ema;
-  }
-  return out;
-}
-
 function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } {
-  // True MACD: EMA(12) - EMA(26); signal = EMA(9) of MACD series.
-  const ema12 = calculateEMASeries(prices, 12);
-  const ema26 = calculateEMASeries(prices, 26);
-
-  const macdSeries: number[] = prices.map((_, i) => {
-    const a = ema12[i];
-    const b = ema26[i];
-    if (!Number.isFinite(a) || !Number.isFinite(b)) return NaN;
-    return (a as number) - (b as number);
-  });
-
-  // Build a compact series for signal EMA (skip NaNs)
-  const macdFinite: number[] = macdSeries.filter(v => Number.isFinite(v)) as number[];
-  if (macdFinite.length < 10) {
-    const macdFallback = Number.isFinite(macdSeries[macdSeries.length - 1]) ? (macdSeries[macdSeries.length - 1] as number) : 0;
-    return { macd: macdFallback, signal: macdFallback, histogram: 0 };
-  }
-
-  const signalSeries = calculateEMASeries(macdFinite, 9);
-  const macd = macdFinite[macdFinite.length - 1] || 0;
-  const signal = signalSeries[signalSeries.length - 1] || 0;
+  const ema12 = calculateEMA(prices, 12);
+  const ema26 = calculateEMA(prices, 26);
+  const macd = ema12 - ema26;
+  // Signal line is 9-period EMA of MACD (simplified)
+  const signal = macd * 0.9; // Approximation
   return { macd, signal, histogram: macd - signal };
 }
-
 
 function calculateBollingerBands(prices: number[], period = 20): { upper: number; middle: number; lower: number } {
   const sma = calculateSMA(prices, period);
@@ -1412,15 +1367,6 @@ export async function GET(
 
   // Calculate all technicals
   const closes = priceHistory.map(c => c.close);
-
-  // --- Swing context for break/retest & failure playbooks ---
-  // We compute prior swing levels on closes using a lookback window that EXCLUDES the latest close.
-  // This keeps the level stable and prevents look-ahead bias in the setup evaluators.
-  const lastClose = closes.length > 0 ? closes[closes.length - 1] : price;
-  const prevClose = closes.length > 1 ? closes[closes.length - 2] : lastClose;
-  const priorWindow = closes.length > 1 ? closes.slice(Math.max(0, closes.length - 21), closes.length - 1) : [];
-  const priorHigh20 = priorWindow.length > 0 ? Math.max(...priorWindow) : lastClose;
-  const priorLow20 = priorWindow.length > 0 ? Math.min(...priorWindow) : lastClose;
   const sma20 = closes.length >= 20 ? calculateSMA(closes, 20) : price * 0.98;
   const sma50 = closes.length >= 50 ? calculateSMA(closes, 50) : price * 0.95;
   const sma200 = closes.length >= 200 ? calculateSMA(closes, 200) : price * 0.90;
@@ -1573,17 +1519,14 @@ export async function GET(
     hasPatterns: chartPatterns.allDetected.length > 0,
   });
 
-  const signalChecks = [
+  const agreementCount = [
     fundamentalAnalysis.score >= 5,
     technicalAnalysis.score >= 5,
     newsAnalysis.signal === 'BULLISH',
     analystAnalysis.buyPercent >= 50,
     insiderAnalysis.netActivity === 'BUYING',
     chartPatterns.dominantDirection === 'BULLISH' && chartPatterns.actionable,
-  ];
-
-  const agreementCount = signalChecks.filter(Boolean).length;
-  const totalSignals = signalChecks.length;
+  ].filter(Boolean).length;
 
   const trustLevel = (chartPatterns.hasConflict ? 'LOW' : (chartPatterns.actionable && chartPatterns.confirmed.length > 0 ? 'HIGH' : (chartPatterns.allDetected.length > 0 ? 'MEDIUM' : 'NEUTRAL')));
   const quoteAsOfMs = (q as any)?.quoteTimeInLong || (q as any)?.tradeTimeInLong || Date.now();
@@ -1597,91 +1540,15 @@ export async function GET(
   const regimeInfo = computeRegime(priceHistory, sma50, sma200);
   const calib = calibratedConfidence(combinedModelScore, 18, agreementCount, completenessScore, regimeInfo.regime);
 
-  // ------------------------------
-  // Phase 2: Setup Registry (rules-based playbooks)
-  // Build a stable, typed context for setup evaluation.
-  // ------------------------------
-  const patternStatus: 'CONFIRMED' | 'FORMING' | 'CONFLICT' | 'NONE' = chartPatterns
-    ? (chartPatterns.hasConflict
-        ? 'CONFLICT'
-        : (chartPatterns.confirmed.length > 0
-            ? 'CONFIRMED'
-            : ((chartPatterns.forming || []).length > 0 ? 'FORMING' : 'NONE')))
-    : 'NONE';
-
-  const patternSummary: PatternSummary = {
-    dominantName: chartPatterns?.dominantPattern?.name || null,
-    dominantType: chartPatterns?.dominantPattern?.type || null,
-    status: patternStatus,
-    confidence: asNumber(chartPatterns?.dominantPattern?.result?.confidence, 0),
-  };
-
-  const bbWidthPct = (bbands.middle > 0)
-    ? ((bbands.upper - bbands.lower) / bbands.middle) * 100
-    : 0;
-
-  const setupCtx: StockSetupContext = {
-    price,
-    atr,
-    atrPct: regimeInfo.atrPct,
-    rsi14: rsi,
-    macdHist: macd.histogram,
-    sma20,
-    sma50,
-    sma200,
-    bbUpper: bbands.upper,
-    bbMiddle: bbands.middle,
-    bbLower: bbands.lower,
-    bbWidthPct,
-    support,
-    resistance,
-
-    // swing context
-    lastClose,
-    prevClose,
-    priorHigh20,
-    priorLow20,
-    regime: regimeInfo.regime,
-    fundamentalScore: fundamentalAnalysis.score,
-    technicalScore: technicalAnalysis.score,
-    pattern: patternSummary,
-  };
-
-  const setupEval = evaluateStockSetups(setupCtx);
-
   const gateFailures: string[] = [];
   if (freshness.isStale) gateFailures.push('Stale price quote (>60s). Refresh required for accurate suggestions.');
   if (completenessScore < 80) gateFailures.push('Data completeness below 80/100. Not enough confirmed inputs for high-accuracy suggestions.');
   if (agreementCount < 4) gateFailures.push('Signals do not sufficiently agree (needs at least 4 of 6).');
   if (trustLevel === 'LOW') gateFailures.push('Chart pattern signals conflict or are not actionable.');
-  if (setupEval.conflicts) gateFailures.push(setupEval.conflictReason || 'Setup registry conflict (bullish and bearish setups both triggered).');
-  if (!setupEval.best) gateFailures.push('No high-quality setup passed the Setup Registry gates.');
 
   // "No contradiction" rule: if we cannot meet the quality bar, we explicitly return NO_TRADE.
-  // If the Setup Registry produces a best setup, we align the final decision to it to avoid contradictions.
-  const alignedAction = setupEval.best
-    ? (setupEval.best.direction === 'BULLISH'
-        ? (setupEval.best.score >= 8 ? 'STRONG_BUY' : 'BUY')
-        : (setupEval.best.direction === 'BEARISH'
-            ? (setupEval.best.score >= 8 ? 'STRONG_SELL' : 'SELL')
-            : 'HOLD'))
-    : combinedModelRating;
-
   const tradeDecision = gateFailures.length === 0
-    ? {
-        action: alignedAction,
-        confidence: calib.confidence,
-        confidenceBucket: calib.bucket,
-        calibrationVersion: calib.calibrationVersion,
-        rationale: (
-          setupEval.best
-            ? [
-                `Setup: ${setupEval.best.name} (score ${setupEval.best.score}/10)`,
-                ...setupEval.best.reasons,
-              ]
-            : []
-        ) as string[],
-      }
+    ? { action: combinedModelRating, confidence: calib.confidence, confidenceBucket: calib.bucket, calibrationVersion: calib.calibrationVersion, rationale: [] as string[] }
     : { action: 'NO_TRADE', confidence: 0, confidenceBucket: 'N/A', calibrationVersion: calib.calibrationVersion, rationale: gateFailures };
 
   if (tradeDecision.action === 'NO_TRADE') {
@@ -1695,7 +1562,7 @@ export async function GET(
     }
   }
 
-const payload = {
+return NextResponse.json({
     ticker,
     name: profile?.name || `${ticker}`,
     exchange: profile?.exchange || 'NASDAQ',
@@ -1713,54 +1580,6 @@ const payload = {
       atrPct: regimeInfo.atrPct,
       trendStrength: regimeInfo.trendStrength,
       tradeDecision,
-
-      setup: {
-        best: setupEval.best,
-        passedCount: setupEval.passed.length,
-        conflicts: setupEval.conflicts,
-        conflictReason: setupEval.conflictReason,
-      },
-
-      evidence: {
-        // Raw datapoints used for the decision (audit-friendly)
-        indicators: {
-          rsi14: Math.round(rsi * 100) / 100,
-          macd: Math.round(macd.macd * 10000) / 10000,
-          macdSignal: Math.round(macd.signal * 10000) / 10000,
-          macdHist: Math.round(macd.histogram * 10000) / 10000,
-          sma20: Math.round(sma20 * 100) / 100,
-          sma50: Math.round(sma50 * 100) / 100,
-          sma200: Math.round(sma200 * 100) / 100,
-          bbUpper: Math.round(bbands.upper * 100) / 100,
-          bbMiddle: Math.round(bbands.middle * 100) / 100,
-          bbLower: Math.round(bbands.lower * 100) / 100,
-        },
-        levels: {
-          support: Math.round(support * 100) / 100,
-          resistance: Math.round(resistance * 100) / 100,
-          priorHigh20: Math.round(priorHigh20 * 100) / 100,
-          priorLow20: Math.round(priorLow20 * 100) / 100,
-        },
-        patterns: {
-          dominant: chartPatterns?.dominantPattern || null,
-          // Derive a stable, explicit pattern status (the pattern engine does not expose a `status` field)
-          status: chartPatterns
-            ? (chartPatterns.hasConflict
-                ? 'CONFLICT'
-                : (chartPatterns.confirmed.length > 0
-                    ? 'CONFIRMED'
-                    : ((chartPatterns.forming || []).length > 0 ? 'FORMING' : 'NONE')))
-            : 'NONE',
-          // Pattern confidence lives on the dominant pattern's result object
-          confidence: asNumber(chartPatterns?.dominantPattern?.result?.confidence, 0),
-        },
-        verification: {
-          completenessScore,
-          agreementCount,
-          totalSignals,
-          isStale: freshness.isStale,
-        },
-      },
     },
 
     fundamentals: {
@@ -1996,29 +1815,7 @@ const payload = {
     lastUpdated: new Date().toISOString(),
     dataSource,
     responseTimeMs: Date.now() - startTime,
-  };
-
-  // Phase 4 (foundation): Evidence packet (auditable decision support)
-  try {
-    const packet = buildEvidencePacket('stock', payload);
-    (payload as any).evidencePacket = packet;
-    (payload as any).meta = (payload as any).meta || {};
-    (payload as any).meta.evidencePacketVersion = packet.version;
-    (payload as any).meta.evidencePacketHash = packet.hash;
-  } catch (e) {
-    // Never fail the endpoint if evidence formatting breaks
-    console.warn('evidence_packet_failed', e);
-  }
-
-  // Phase 3: Snapshot logging (best-effort; durable on Optiplex/local, ephemeral on Vercel)
-  try {
-    const store = await getSnapshotStore();
-    await store.saveSnapshot(buildSnapshotFromPayload({ source: 'stock', ticker, payload }));
-  } catch (e) {
-    console.warn('snapshot_log_failed', e);
-  }
-
-  return NextResponse.json(payload);
+  });
 }
 
 // Helper functions for verification
