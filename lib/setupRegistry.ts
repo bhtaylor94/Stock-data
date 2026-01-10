@@ -40,6 +40,13 @@ export interface StockSetupContext {
   support: number;
   resistance: number;
 
+  // Recent swing context (used for break/retest and failure playbooks)
+  // Computed from closes using lookback windows excluding the latest close.
+  lastClose: number;
+  prevClose: number;
+  priorHigh20: number;
+  priorLow20: number;
+
   // Scoring / regime
   regime: MarketRegime;
   fundamentalScore: number;
@@ -420,6 +427,185 @@ function setupRangeReversionBear(ctx: StockSetupContext): SetupResult {
   };
 }
 
+// Break & Retest (bullish): breakout above prior swing high then a controlled retest/hold of that level.
+function setupBreakRetestBull(ctx: StockSetupContext): SetupResult {
+  const reasons: string[] = [];
+  const level = ctx.priorHigh20;
+
+  // Guard against missing history
+  const levelOk = level > 0;
+  if (levelOk) reasons.push(`Prior 20-bar swing high ~ ${round2(level)}.`);
+
+  const tol = ctx.atr > 0 ? 0.6 * ctx.atr : Math.max(level * 0.006, 0.25);
+  const breakoutRecently = ctx.prevClose >= level * 1.002 || ctx.lastClose >= level * 1.002;
+  if (breakoutRecently) reasons.push('Breakout detected above prior swing high (>= +0.2%).');
+
+  const retestNear = Math.abs(ctx.lastClose - level) <= tol;
+  if (retestNear) reasons.push(`Retest proximity within tolerance (~${round2(tol)}).`);
+
+  const hold = ctx.lastClose >= level * 0.999;
+  if (hold) reasons.push('Retest hold: last close is at/above breakout level.');
+
+  const momentumOk = ctx.macdHist >= 0 && ctx.rsi14 >= 45;
+  if (momentumOk) reasons.push('Momentum filter: MACD hist >= 0 and RSI >= 45.');
+
+  const trendOk = ctx.price >= ctx.sma50;
+  if (trendOk) reasons.push('Trend support: price at/above SMA50.');
+
+  const passed = levelOk && breakoutRecently && retestNear && hold && momentumOk;
+  let score = 0;
+  score += (levelOk && breakoutRecently) ? 4 : 0;
+  score += retestNear ? 3 : 0;
+  score += hold ? 1 : 0;
+  score += momentumOk ? 1 : 0;
+  score += trendOk ? 1 : 0;
+  score = clamp(score, 0, 10);
+
+  const stop = ctx.atr > 0 ? round2(level - 1.0 * ctx.atr) : round2(level * 0.985);
+  const target1 = ctx.atr > 0 ? round2(level + 2.0 * ctx.atr) : round2(ctx.resistance);
+
+  return {
+    id: 'break_retest_bull',
+    name: 'Break & Retest (Bullish)',
+    direction: 'BULLISH',
+    score,
+    passed,
+    reasons: passed ? reasons : reasons.concat(['Did not meet break & retest bullish gates.']),
+    entry: `Retest/hold above ${round2(level)} then reclaim highs. Last close: ${round2(ctx.lastClose)}`,
+    stop: `Below breakout level / ATR buffer (~ ${stop})`,
+    targets: [`Measured move ~ ${target1}`],
+    invalidation: 'Clean close back below breakout level with weakening momentum (MACD hist < 0).',
+    requiredEvidenceKeys: ['levels.priorHigh20', 'indicators.macdHist', 'indicators.rsi14', 'indicators.sma50'],
+  };
+}
+
+// Break & Retest (bearish): breakdown below prior swing low then retest/reject.
+function setupBreakRetestBear(ctx: StockSetupContext): SetupResult {
+  const reasons: string[] = [];
+  const level = ctx.priorLow20;
+
+  const levelOk = level > 0;
+  if (levelOk) reasons.push(`Prior 20-bar swing low ~ ${round2(level)}.`);
+
+  const tol = ctx.atr > 0 ? 0.6 * ctx.atr : Math.max(level * 0.006, 0.25);
+  const breakdownRecently = ctx.prevClose <= level * 0.998 || ctx.lastClose <= level * 0.998;
+  if (breakdownRecently) reasons.push('Breakdown detected below prior swing low (<= -0.2%).');
+
+  const retestNear = Math.abs(ctx.lastClose - level) <= tol;
+  if (retestNear) reasons.push(`Retest proximity within tolerance (~${round2(tol)}).`);
+
+  const reject = ctx.lastClose <= level * 1.001;
+  if (reject) reasons.push('Retest reject: last close is at/below breakdown level.');
+
+  const momentumOk = ctx.macdHist <= 0 && ctx.rsi14 <= 55;
+  if (momentumOk) reasons.push('Momentum filter: MACD hist <= 0 and RSI <= 55.');
+
+  const trendOk = ctx.price <= ctx.sma50;
+  if (trendOk) reasons.push('Trend resistance: price at/below SMA50.');
+
+  const passed = levelOk && breakdownRecently && retestNear && reject && momentumOk;
+  let score = 0;
+  score += (levelOk && breakdownRecently) ? 4 : 0;
+  score += retestNear ? 3 : 0;
+  score += reject ? 1 : 0;
+  score += momentumOk ? 1 : 0;
+  score += trendOk ? 1 : 0;
+  score = clamp(score, 0, 10);
+
+  const stop = ctx.atr > 0 ? round2(level + 1.0 * ctx.atr) : round2(level * 1.015);
+  const target1 = ctx.atr > 0 ? round2(level - 2.0 * ctx.atr) : round2(ctx.support);
+
+  return {
+    id: 'break_retest_bear',
+    name: 'Break & Retest (Bearish)',
+    direction: 'BEARISH',
+    score,
+    passed,
+    reasons: passed ? reasons : reasons.concat(['Did not meet break & retest bearish gates.']),
+    entry: `Retest/reject below ${round2(level)} then continue lower. Last close: ${round2(ctx.lastClose)}`,
+    stop: `Above breakdown level / ATR buffer (~ ${stop})`,
+    targets: [`Measured move ~ ${target1}`],
+    invalidation: 'Clean close back above breakdown level with improving momentum (MACD hist > 0).',
+    requiredEvidenceKeys: ['levels.priorLow20', 'indicators.macdHist', 'indicators.rsi14', 'indicators.sma50'],
+  };
+}
+
+// Failure playbook: Failed breakout (bull trap) often resolves bearish.
+function setupFailedBreakoutBear(ctx: StockSetupContext): SetupResult {
+  const reasons: string[] = [];
+  const level = ctx.priorHigh20;
+  const levelOk = level > 0;
+  const failed = levelOk && (ctx.prevClose >= level * 1.002) && (ctx.lastClose <= level * 0.998);
+
+  if (levelOk) reasons.push(`Prior swing high ~ ${round2(level)}.`);
+  if (failed) reasons.push('Failed breakout: prior close above level, last close back below (bull trap).');
+
+  const momentumOk = ctx.macdHist <= 0 && ctx.rsi14 <= 60;
+  if (momentumOk) reasons.push('Momentum confirming: MACD hist <= 0 and RSI <= 60.');
+
+  const passed = failed && momentumOk;
+  let score = 0;
+  score += failed ? 7 : 0;
+  score += momentumOk ? 2 : 0;
+  score += (ctx.price <= ctx.sma50) ? 1 : 0;
+  score = clamp(score, 0, 10);
+
+  const stop = ctx.atr > 0 ? round2(level + 0.8 * ctx.atr) : round2(level * 1.01);
+  const target1 = ctx.atr > 0 ? round2(ctx.lastClose - 2.0 * ctx.atr) : round2(ctx.support);
+
+  return {
+    id: 'failed_breakout_bear',
+    name: 'Failed Breakout (Bearish)',
+    direction: 'BEARISH',
+    score,
+    passed,
+    reasons: passed ? reasons : reasons.concat(['Did not meet failed breakout (bearish) gates.']),
+    entry: `After bull trap, look for continuation lower. Last close: ${round2(ctx.lastClose)}`,
+    stop: `Above failed breakout level / ATR buffer (~ ${stop})`,
+    targets: [`Target ~ ${target1}`],
+    invalidation: 'Reclaim and hold back above prior high with positive MACD histogram.',
+    requiredEvidenceKeys: ['levels.priorHigh20', 'indicators.macdHist', 'indicators.rsi14'],
+  };
+}
+
+// Failure playbook: Failed breakdown (bear trap) often resolves bullish.
+function setupFailedBreakdownBull(ctx: StockSetupContext): SetupResult {
+  const reasons: string[] = [];
+  const level = ctx.priorLow20;
+  const levelOk = level > 0;
+  const failed = levelOk && (ctx.prevClose <= level * 0.998) && (ctx.lastClose >= level * 1.002);
+
+  if (levelOk) reasons.push(`Prior swing low ~ ${round2(level)}.`);
+  if (failed) reasons.push('Failed breakdown: prior close below level, last close back above (bear trap).');
+
+  const momentumOk = ctx.macdHist >= 0 && ctx.rsi14 >= 40;
+  if (momentumOk) reasons.push('Momentum confirming: MACD hist >= 0 and RSI >= 40.');
+
+  const passed = failed && momentumOk;
+  let score = 0;
+  score += failed ? 7 : 0;
+  score += momentumOk ? 2 : 0;
+  score += (ctx.price >= ctx.sma50) ? 1 : 0;
+  score = clamp(score, 0, 10);
+
+  const stop = ctx.atr > 0 ? round2(level - 0.8 * ctx.atr) : round2(level * 0.99);
+  const target1 = ctx.atr > 0 ? round2(ctx.lastClose + 2.0 * ctx.atr) : round2(ctx.resistance);
+
+  return {
+    id: 'failed_breakdown_bull',
+    name: 'Failed Breakdown (Bullish)',
+    direction: 'BULLISH',
+    score,
+    passed,
+    reasons: passed ? reasons : reasons.concat(['Did not meet failed breakdown (bullish) gates.']),
+    entry: `After bear trap, look for continuation higher. Last close: ${round2(ctx.lastClose)}`,
+    stop: `Below failed breakdown level / ATR buffer (~ ${stop})`,
+    targets: [`Target ~ ${target1}`],
+    invalidation: 'Lose the reclaimed level with negative MACD histogram.',
+    requiredEvidenceKeys: ['levels.priorLow20', 'indicators.macdHist', 'indicators.rsi14'],
+  };
+}
+
 export function evaluateStockSetups(ctx: StockSetupContext): {
   best: SetupResult | null;
   passed: SetupResult[];
@@ -433,6 +619,10 @@ export function evaluateStockSetups(ctx: StockSetupContext): {
     setupTrendPullbackBear(ctx),
     setupRangeReversionBull(ctx),
     setupRangeReversionBear(ctx),
+    setupBreakRetestBull(ctx),
+    setupBreakRetestBear(ctx),
+    setupFailedBreakoutBear(ctx),
+    setupFailedBreakdownBull(ctx),
     setupBollingerSqueezeBreakout(ctx),
     setupBollingerSqueezeBreakdown(ctx),
     setupPatternConfirmed(ctx),

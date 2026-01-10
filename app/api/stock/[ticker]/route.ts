@@ -1410,6 +1410,15 @@ export async function GET(
 
   // Calculate all technicals
   const closes = priceHistory.map(c => c.close);
+
+  // --- Swing context for break/retest & failure playbooks ---
+  // We compute prior swing levels on closes using a lookback window that EXCLUDES the latest close.
+  // This keeps the level stable and prevents look-ahead bias in the setup evaluators.
+  const lastClose = closes.length > 0 ? closes[closes.length - 1] : price;
+  const prevClose = closes.length > 1 ? closes[closes.length - 2] : lastClose;
+  const priorWindow = closes.length > 1 ? closes.slice(Math.max(0, closes.length - 21), closes.length - 1) : [];
+  const priorHigh20 = priorWindow.length > 0 ? Math.max(...priorWindow) : lastClose;
+  const priorLow20 = priorWindow.length > 0 ? Math.min(...priorWindow) : lastClose;
   const sma20 = closes.length >= 20 ? calculateSMA(closes, 20) : price * 0.98;
   const sma50 = closes.length >= 50 ? calculateSMA(closes, 50) : price * 0.95;
   const sma200 = closes.length >= 200 ? calculateSMA(closes, 200) : price * 0.90;
@@ -1624,6 +1633,12 @@ export async function GET(
     bbWidthPct,
     support,
     resistance,
+
+    // swing context
+    lastClose,
+    prevClose,
+    priorHigh20,
+    priorLow20,
     regime: regimeInfo.regime,
     fundamentalScore: fundamentalAnalysis.score,
     technicalScore: technicalAnalysis.score,
@@ -1721,6 +1736,8 @@ return NextResponse.json({
         levels: {
           support: Math.round(support * 100) / 100,
           resistance: Math.round(resistance * 100) / 100,
+          priorHigh20: Math.round(priorHigh20 * 100) / 100,
+          priorLow20: Math.round(priorLow20 * 100) / 100,
         },
         patterns: {
           dominant: chartPatterns?.dominantPattern || null,
