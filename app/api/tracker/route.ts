@@ -413,13 +413,27 @@ export async function POST(req: NextRequest) {
       targetPrice: asNumber(body.targetPrice, 0),
       stopLoss: asNumber(body.stopLoss, 0),
       confidence: asNumber(body.confidence, 0),
-      positionShares: body.optionContract ? undefined : 100,
-      positionContracts: body.optionContract ? 5 : undefined,
-      contractMultiplier: body.optionContract ? 100 : undefined,
+      // Position sizing assumptions:
+      // - Stocks default to 100 shares
+      // - Options default to 5 contracts, 100 multiplier
+      // These can be overridden explicitly by the client.
+      positionShares: body.optionContract
+        ? undefined
+        : asNumber(body.positionShares, 100),
+      positionContracts: body.optionContract
+        ? asNumber(body.positionContracts, 5)
+        : undefined,
+      contractMultiplier: body.optionContract
+        ? asNumber(body.contractMultiplier, 100)
+        : undefined,
       reasoning: Array.isArray(body.reasoning) ? body.reasoning.map(String) : [],
       status: (body.status as TrackedSuggestionStatus) || 'ACTIVE',
       createdAt: now,
       updatedAt: now,
+      // Evidence payload is optional but strongly recommended.
+      // Keep this reasonably small; it is meant to back up the suggestion
+      // with concrete indicator readings and detected setups.
+      evidence: body.evidence ?? undefined,
       optionContract: body.optionContract
         ? {
             strike: asNumber(body.optionContract.strike, 0),
