@@ -12,6 +12,27 @@ import { OptionsSetupCard } from './components/options/OptionsSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
 
 // ============================================================
+// POPULAR TICKERS - QUICK SELECT
+// ============================================================
+const POPULAR_TICKERS = [
+  { symbol: 'AAPL', name: 'Apple' },
+  { symbol: 'NVDA', name: 'NVIDIA' },
+  { symbol: 'MSFT', name: 'Microsoft' },
+  { symbol: 'GOOGL', name: 'Google' },
+  { symbol: 'AMZN', name: 'Amazon' },
+  { symbol: 'META', name: 'Meta' },
+  { symbol: 'TSLA', name: 'Tesla' },
+  { symbol: 'AMD', name: 'AMD' },
+  { symbol: 'NFLX', name: 'Netflix' },
+  { symbol: 'JPM', name: 'JPMorgan' },
+  { symbol: 'SPY', name: 'S&P 500 ETF' },
+  { symbol: 'QQQ', name: 'Nasdaq ETF' },
+  { symbol: 'IWM', name: 'Russell 2000' },
+  { symbol: 'GLD', name: 'Gold ETF' },
+  { symbol: 'TLT', name: 'Treasury ETF' },
+];
+
+// ============================================================
 // UTILITY COMPONENTS
 // ============================================================
 
@@ -667,7 +688,7 @@ export default function TradingDashboard() {
         
         {/* Search Bar */}
         <div className="mb-6">
-          <div className="flex gap-2">
+          <div className="flex gap-2 mb-3">
             <input
               type="text"
               value={ticker}
@@ -683,6 +704,32 @@ export default function TradingDashboard() {
             >
               Analyze
             </button>
+          </div>
+          
+          {/* Popular Tickers - Quick Select */}
+          <div>
+            <p className="text-xs text-slate-500 mb-2">📌 Popular:</p>
+            <div className="flex flex-wrap gap-2">
+              {POPULAR_TICKERS.map((t) => (
+                <button
+                  key={t.symbol}
+                  onClick={() => {
+                    setTicker(t.symbol);
+                    // Auto-search when clicking popular ticker
+                    setTimeout(() => handleSearch(), 100);
+                  }}
+                  disabled={stockLoading || optionsLoading}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    ticker === t.symbol
+                      ? 'bg-blue-500/30 text-blue-300 border border-blue-500/50'
+                      : 'bg-slate-800/50 text-slate-400 hover:text-white hover:bg-slate-700/50 border border-slate-700/50'
+                  }`}
+                >
+                  <span className="font-mono font-bold">{t.symbol}</span>
+                  <span className="text-slate-500 ml-1 hidden sm:inline">{t.name}</span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
         
