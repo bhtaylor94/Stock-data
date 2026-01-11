@@ -1201,7 +1201,7 @@ function OptionsTab({ data, loading, onTrack }: { data: any; loading: boolean; o
                           ticker: data.ticker,
                           type: optionType,
                           strategy: `Unusual ${optionType}: $${u.contract?.strike || u.strike} ${u.contract?.expiration || ''} (${u.tradeType || 'UOA'})`,
-                          entryPrice: data.currentPrice,
+                          entryPrice: u.contract?.ask || u.contract?.mark || 1.00, // FIX: Use option price, not stock price
                           confidence: u.score || 70,
                           reasoning: u.signals || [],
                           optionContract: {

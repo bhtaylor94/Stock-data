@@ -5,13 +5,15 @@ export function StockDecisionHero({
   price, 
   analysis, 
   meta,
-  onTrack 
+  onTrack,
+  onViewEvidence
 }: { 
   ticker: string;
   price: number;
   analysis: any;
   meta: any;
   onTrack?: () => void;
+  onViewEvidence?: () => void;
 }) {
   const rating = analysis?.combined?.rating || 'HOLD';
   const score = analysis?.combined?.score || 0;
@@ -104,9 +106,14 @@ export function StockDecisionHero({
             📌 Track Position
           </button>
         )}
-        <button className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition">
-          📊 View Evidence
-        </button>
+        {onViewEvidence && (
+          <button 
+            onClick={onViewEvidence}
+            className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition"
+          >
+            📊 View Evidence
+          </button>
+        )}
       </div>
 
       {/* NO_TRADE Warning */}
