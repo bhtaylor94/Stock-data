@@ -412,7 +412,7 @@ function StockTab({
               entryPrice: data.price || data.quote?.c,
               confidence: sug.confidence || 0,
               reasoning: sug.reasoning || [],
-              evidencePacket: data, // Store full evidence
+              evidencePacket: data?.meta?.evidencePacket ?? data, // Prefer compact evidence packet
             };
             
             fetch('/api/tracker', {
@@ -536,7 +536,7 @@ function OptionsTab({
               entryPrice: activity.contract?.ask || activity.contract?.mark || 1.00,
               confidence: activity.score || 70,
               reasoning: activity.signals || [],
-              evidencePacket: data, // Store evidence
+              evidencePacket: data?.meta?.evidencePacket ?? data, // Prefer compact evidence packet
               optionContract: {
                 strike: activity.contract?.strike || activity.strike,
                 expiration: activity.contract?.expiration || activity.expiration || 'N/A',
@@ -576,7 +576,7 @@ function OptionsTab({
                       entryPrice: setup.contract?.ask || 1.00, // FIX: Use contract price
                       confidence: setup.confidence || 0,
                       reasoning: setup.reasoning || [],
-                      evidencePacket: data,
+                      evidencePacket: data?.meta?.evidencePacket ?? data,
                       optionContract: {
                         strike: setup.contract.strike,
                         expiration: setup.contract.expiration,

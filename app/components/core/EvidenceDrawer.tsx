@@ -1,5 +1,14 @@
 import React from 'react';
 
+function isEvidencePacket(v: any): boolean {
+  return Boolean(v && typeof v === 'object' && typeof v.hash === 'string' && Array.isArray(v.checks));
+}
+
+function shortHash(hash: string): string {
+  if (!hash) return '';
+  return hash.length <= 12 ? hash : `${hash.slice(0, 6)}…${hash.slice(-6)}`;
+}
+
 export function EvidenceDrawer({ 
   isOpen, 
   onClose, 
@@ -11,7 +20,24 @@ export function EvidenceDrawer({
 }) {
   if (!isOpen) return null;
 
-  const evidence = data?.evidencePacket || data?.evidence || {};
+  const packet =
+    (isEvidencePacket(data) ? data : null) ||
+    (isEvidencePacket(data?.meta?.evidencePacket) ? data.meta.evidencePacket : null) ||
+    (isEvidencePacket(data?.evidencePacket) ? data.evidencePacket : null) ||
+    null;
+
+  // Back-compat: some callers store the full API response under evidencePacket.
+  const root = isEvidencePacket(data) ? null : (data?.raw || data?.payload || data);
+  const evidence = root?.meta?.evidence || root?.evidence || {};
+
+  const handleCopy = async () => {
+    try {
+      const payloadToCopy = packet || root || data;
+      await navigator.clipboard.writeText(JSON.stringify(payloadToCopy, null, 2));
+    } catch {
+      // Ignore clipboard errors (e.g., permissions)
+    }
+  };
   
   return (
     <>
@@ -26,39 +52,98 @@ export function EvidenceDrawer({
         {/* Header */}
         <div className="sticky top-0 bg-slate-900 border-b border-slate-700 p-4 flex items-center justify-between">
           <h2 className="text-xl font-bold text-white">📊 Evidence Packet</h2>
-          <button
-            onClick={onClose}
-            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition"
-          >
-            ✕ Close
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCopy}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
+              title="Copy evidence JSON"
+            >
+              Copy
+            </button>
+            <button
+              onClick={onClose}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition"
+            >
+              ✕ Close
+            </button>
+          </div>
         </div>
 
         <div className="p-6 space-y-6">
+          {/* Packet Summary (if available) */}
+          {packet && (
+            <section>
+              <h3 className="text-lg font-semibold text-white mb-3">Audit Summary</h3>
+              <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm">
+                    <span className="text-slate-400">Hash:</span>{' '}
+                    <span className="font-mono text-slate-200">{shortHash(packet.hash)}</span>
+                  </div>
+                  <div className="text-sm">
+                    <span className="text-slate-400">Version:</span>{' '}
+                    <span className="text-white">{packet.version}</span>
+                    <span className="text-slate-500"> · </span>
+                    <span className="text-slate-400">Source:</span>{' '}
+                    <span className="text-white">{packet.source}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {packet.checks.map((c: any, idx: number) => (
+                    <div
+                      key={idx}
+                      className={`p-3 rounded-lg border ${c.pass ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm text-white font-medium">{c.name}</p>
+                        <span className={`text-xs px-2 py-0.5 rounded ${c.pass ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                          {c.pass ? 'PASS' : 'FAIL'}
+                        </span>
+                      </div>
+                      {c.details !== undefined && (
+                        <p className="mt-1 text-xs text-slate-400 font-mono break-all">
+                          {typeof c.details === 'string' ? c.details : JSON.stringify(c.details)}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {Array.isArray(packet.notes) && packet.notes.length > 0 && (
+                  <div className="pt-2 border-t border-slate-700/50">
+                    {packet.notes.map((n: string, idx: number) => (
+                      <p key={idx} className="text-xs text-amber-200">• {n}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
           {/* Meta Information */}
-          {data?.meta && (
+          {root?.meta && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Decision Context</h3>
               <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Timestamp:</span>
-                  <span className="text-white">{new Date(data.meta.asOf).toLocaleString()}</span>
+                  <span className="text-white">{new Date(root.meta.asOf).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Regime:</span>
-                  <span className="text-white">{data.meta.regime}</span>
+                  <span className="text-white">{root.meta.regime}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">ATR%:</span>
-                  <span className="text-white">{data.meta.atrPct}</span>
+                  <span className="text-white">{root.meta.atrPct}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Trend Strength:</span>
-                  <span className="text-white">{data.meta.trendStrength}</span>
+                  <span className="text-white">{root.meta.trendStrength}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Response Time:</span>
-                  <span className="text-emerald-400">{data.meta.responseTimeMs}ms</span>
+                  <span className="text-emerald-400">{root.meta.responseTimeMs}ms</span>
                 </div>
               </div>
             </section>
@@ -85,11 +170,11 @@ export function EvidenceDrawer({
           )}
 
           {/* Technical Indicators */}
-          {data?.technicals && (
+          {root?.technicals && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Technical Indicators</h3>
               <div className="grid grid-cols-2 gap-3">
-                {Object.entries(data.technicals)
+                {Object.entries(root.technicals)
                   .filter(([key]) => !['score', 'maxScore'].includes(key))
                   .map(([key, value]) => (
                     <div key={key} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
@@ -104,11 +189,11 @@ export function EvidenceDrawer({
           )}
 
           {/* Fundamentals */}
-          {data?.fundamentals && (
+          {root?.fundamentals && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Fundamental Metrics</h3>
               <div className="grid grid-cols-2 gap-3">
-                {Object.entries(data.fundamentals)
+                {Object.entries(root.fundamentals)
                   .filter(([key]) => !['score', 'maxScore'].includes(key))
                   .map(([key, value]) => (
                     <div key={key} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
@@ -123,16 +208,16 @@ export function EvidenceDrawer({
           )}
 
           {/* Chart Patterns (All) */}
-          {data?.chartPatterns && (
+          {root?.chartPatterns && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Chart Patterns</h3>
               
               {/* Confirmed Patterns */}
-              {data.chartPatterns.confirmed?.length > 0 && (
+              {root.chartPatterns.confirmed?.length > 0 && (
                 <div className="mb-4">
                   <h4 className="text-sm font-medium text-emerald-400 mb-2">Confirmed Patterns</h4>
                   <div className="space-y-2">
-                    {data.chartPatterns.confirmed.map((pattern: any, i: number) => (
+                    {root.chartPatterns.confirmed.map((pattern: any, i: number) => (
                       <div key={i} className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/30">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-white">{pattern.name}</span>
@@ -156,11 +241,11 @@ export function EvidenceDrawer({
               )}
 
               {/* Forming Patterns */}
-              {data.chartPatterns.forming?.length > 0 && (
+              {root.chartPatterns.forming?.length > 0 && (
                 <div>
                   <h4 className="text-sm font-medium text-amber-400 mb-2">Forming Patterns</h4>
                   <div className="space-y-2">
-                    {data.chartPatterns.forming.map((pattern: any, i: number) => (
+                    {root.chartPatterns.forming.map((pattern: any, i: number) => (
                       <div key={i} className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/30">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-white">{pattern.name}</span>
@@ -178,11 +263,11 @@ export function EvidenceDrawer({
           )}
 
           {/* News Headlines */}
-          {data?.news?.headlines?.length > 0 && (
+          {root?.news?.headlines?.length > 0 && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Recent News</h3>
               <div className="space-y-2">
-                {data.news.headlines.slice(0, 10).map((item: any, i: number) => (
+                {root.news.headlines.slice(0, 10).map((item: any, i: number) => (
                   <div key={i} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
                     <p className="text-sm text-white mb-1">{item.headline}</p>
                     <div className="flex items-center gap-2 text-xs text-slate-400">
@@ -209,28 +294,28 @@ export function EvidenceDrawer({
           )}
 
           {/* Analyst Ratings */}
-          {data?.analysts && (
+          {root?.analysts && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Analyst Coverage</h3>
               <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Consensus:</span>
                   <span className={`font-bold ${
-                    data.analysts.consensus === 'BUY' ? 'text-emerald-400' :
-                    data.analysts.consensus === 'SELL' ? 'text-red-400' :
+                    root.analysts.consensus === 'BUY' ? 'text-emerald-400' :
+                    root.analysts.consensus === 'SELL' ? 'text-red-400' :
                     'text-slate-400'
-                  }`}>{data.analysts.consensus}</span>
+                  }`}>{root.analysts.consensus}</span>
                 </div>
-                {data.analysts.targetPrice && (
+                {root.analysts.targetPrice && (
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-400">Price Target:</span>
-                    <span className="text-white">${data.analysts.targetPrice.toFixed(2)}</span>
+                    <span className="text-white">${root.analysts.targetPrice.toFixed(2)}</span>
                   </div>
                 )}
-                {data.analysts.count && (
+                {root.analysts.count && (
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-400">Analysts Covering:</span>
-                    <span className="text-white">{data.analysts.count}</span>
+                    <span className="text-white">{root.analysts.count}</span>
                   </div>
                 )}
               </div>
@@ -238,11 +323,11 @@ export function EvidenceDrawer({
           )}
 
           {/* Insider Transactions */}
-          {data?.insiders?.length > 0 && (
+          {(Array.isArray(root?.insiders) ? root.insiders.length > 0 : (root?.insiders?.recentTransactions?.length > 0)) && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Insider Activity</h3>
               <div className="space-y-2">
-                {data.insiders.slice(0, 5).map((insider: any, i: number) => (
+                {(Array.isArray(root.insiders) ? root.insiders : (root.insiders.recentTransactions || [])).slice(0, 5).map((insider: any, i: number) => (
                   <div key={i} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm font-medium text-white">{insider.name}</span>
