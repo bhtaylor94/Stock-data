@@ -27,10 +27,22 @@ export function StockDecisionHero({
       {/* Ticker + Price Row */}
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-2xl font-bold text-white">{ticker}</h1>
-          <p className="text-sm text-slate-400">
-            ${price?.toFixed(2) || 'N/A'} • {meta?.source || 'Live'}
+          <h1 className="text-3xl font-bold text-white mb-1">{ticker}</h1>
+          <p className="text-3xl font-bold text-emerald-400">
+            ${price?.toFixed(2) || 'N/A'}
           </p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-xs text-slate-400">
+              {meta?.responseTimeMs && `${meta.responseTimeMs}ms`}
+            </p>
+            {/* Data Source Badge */}
+            <span className={`text-xs px-2 py-0.5 rounded flex items-center gap-1 ${
+              meta?.source === 'schwab' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'
+            }`}>
+              <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+              {meta?.source?.toUpperCase() || 'SCHWAB'}
+            </span>
+          </div>
         </div>
         
         {/* Freshness Badge */}
@@ -95,6 +107,30 @@ export function StockDecisionHero({
           />
         </div>
       </div>
+
+      {/* Entry Points Info (if tradeable) */}
+      {action !== 'NO_TRADE' && rating !== 'SELL' && rating !== 'STRONG_SELL' && (
+        <div className="mb-3 p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+          <p className="text-xs text-slate-400 mb-2">Suggested Entry Points</p>
+          <div className="grid grid-cols-3 gap-2 text-xs">
+            <div>
+              <p className="text-slate-500">Entry</p>
+              <p className="text-white font-bold">${price?.toFixed(2)}</p>
+            </div>
+            <div>
+              <p className="text-slate-500">Target</p>
+              <p className="text-emerald-400 font-bold">${(price * 1.10).toFixed(2)}</p>
+            </div>
+            <div>
+              <p className="text-slate-500">Stop</p>
+              <p className="text-red-400 font-bold">${(price * 0.95).toFixed(2)}</p>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            💡 Target: +10% • Stop Loss: -5% • Default: 100 shares
+          </p>
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex gap-2">

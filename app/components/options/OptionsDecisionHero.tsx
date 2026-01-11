@@ -24,15 +24,25 @@ export function OptionsDecisionHero({
       <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-white">{ticker} Options</h1>
-          <p className="text-sm text-slate-400">
-            {meta?.asOf && new Date(meta.asOf).toLocaleTimeString()} • {meta?.responseTimeMs}ms
-          </p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-xs text-slate-400">
+              {meta?.asOf && new Date(meta.asOf).toLocaleTimeString()} • {meta?.responseTimeMs}ms
+            </p>
+            {/* Data Source Badge */}
+            <span className="text-xs px-2 py-0.5 rounded flex items-center gap-1 bg-emerald-500/20 text-emerald-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+              SCHWAB
+            </span>
+          </div>
         </div>
         
-        {/* Live Badge */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-xs text-emerald-400 font-medium">LIVE DATA</span>
+        {/* Freshness Badge */}
+        <div className={`px-3 py-1.5 rounded-lg ${
+          meta?.isStale ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-emerald-500/10 border border-emerald-500/30'
+        }`}>
+          <span className={`text-xs font-medium ${meta?.isStale ? 'text-amber-400' : 'text-emerald-400'}`}>
+            {meta?.isStale ? '⏱️ Stale' : '✓ Fresh'}
+          </span>
         </div>
       </div>
 

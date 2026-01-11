@@ -1,14 +1,5 @@
 import React from 'react';
 
-function isEvidencePacket(v: any): boolean {
-  return Boolean(v && typeof v === 'object' && typeof v.hash === 'string' && Array.isArray(v.checks));
-}
-
-function shortHash(hash: string): string {
-  if (!hash) return '';
-  return hash.length <= 12 ? hash : `${hash.slice(0, 6)}…${hash.slice(-6)}`;
-}
-
 export function EvidenceDrawer({ 
   isOpen, 
   onClose, 
@@ -20,24 +11,7 @@ export function EvidenceDrawer({
 }) {
   if (!isOpen) return null;
 
-  const packet =
-    (isEvidencePacket(data) ? data : null) ||
-    (isEvidencePacket(data?.meta?.evidencePacket) ? data.meta.evidencePacket : null) ||
-    (isEvidencePacket(data?.evidencePacket) ? data.evidencePacket : null) ||
-    null;
-
-  // Back-compat: some callers store the full API response under evidencePacket.
-  const root = isEvidencePacket(data) ? null : (data?.raw || data?.payload || data);
-  const evidence = root?.meta?.evidence || root?.evidence || {};
-
-  const handleCopy = async () => {
-    try {
-      const payloadToCopy = packet || root || data;
-      await navigator.clipboard.writeText(JSON.stringify(payloadToCopy, null, 2));
-    } catch {
-      // Ignore clipboard errors (e.g., permissions)
-    }
-  };
+  const evidence = data?.evidencePacket || data?.evidence || {};
   
   return (
     <>
@@ -52,98 +26,212 @@ export function EvidenceDrawer({
         {/* Header */}
         <div className="sticky top-0 bg-slate-900 border-b border-slate-700 p-4 flex items-center justify-between">
           <h2 className="text-xl font-bold text-white">📊 Evidence Packet</h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleCopy}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition"
-              title="Copy evidence JSON"
-            >
-              Copy
-            </button>
-            <button
-              onClick={onClose}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition"
-            >
-              ✕ Close
-            </button>
-          </div>
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white transition"
+          >
+            ✕ Close
+          </button>
         </div>
 
         <div className="p-6 space-y-6">
-          {/* Packet Summary (if available) */}
-          {packet && (
+          {/* Audit Summary - Professional Format */}
+          {data?.verification && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Audit Summary</h3>
               <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm">
-                    <span className="text-slate-400">Hash:</span>{' '}
-                    <span className="font-mono text-slate-200">{shortHash(packet.hash)}</span>
+                {/* Header Info */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-700">
+                  <div className="text-xs text-slate-400">
+                    <span>Version: 1.0</span>
+                    <span className="mx-2">•</span>
+                    <span>Source: {data.dataSource || 'stock'}</span>
                   </div>
-                  <div className="text-sm">
-                    <span className="text-slate-400">Version:</span>{' '}
-                    <span className="text-white">{packet.version}</span>
-                    <span className="text-slate-500"> · </span>
-                    <span className="text-slate-400">Source:</span>{' '}
-                    <span className="text-white">{packet.source}</span>
+                  <div className="text-xs text-emerald-400">
+                    ✓ {new Date().toLocaleString()}
                   </div>
                 </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {packet.checks.map((c: any, idx: number) => (
-                    <div
-                      key={idx}
-                      className={`p-3 rounded-lg border ${c.pass ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm text-white font-medium">{c.name}</p>
-                        <span className={`text-xs px-2 py-0.5 rounded ${c.pass ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
-                          {c.pass ? 'PASS' : 'FAIL'}
-                        </span>
-                      </div>
-                      {c.details !== undefined && (
-                        <p className="mt-1 text-xs text-slate-400 font-mono break-all">
-                          {typeof c.details === 'string' ? c.details : JSON.stringify(c.details)}
-                        </p>
-                      )}
+                
+                {/* Quality Checks */}
+                <div className="space-y-2">
+                  {/* Data Freshness */}
+                  <div className="flex items-center justify-between p-2 rounded bg-slate-800/50">
+                    <div>
+                      <p className="text-sm font-medium text-white">Data Freshness</p>
+                      <p className="text-xs text-slate-400">
+                        {data.meta?.isStale ? 'Stale data detected' : 'Fresh, real-time data'}
+                      </p>
                     </div>
-                  ))}
+                    <span className={`px-2 py-1 rounded text-xs font-bold ${
+                      !data.meta?.isStale ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                    }`}>
+                      {!data.meta?.isStale ? 'PASS' : 'FAIL'}
+                    </span>
+                  </div>
+                  
+                  {/* Completeness Score */}
+                  <div className="flex items-center justify-between p-2 rounded bg-slate-800/50">
+                    <div>
+                      <p className="text-sm font-medium text-white">Completeness Score ≥ 70%</p>
+                      <p className="text-xs text-slate-400">
+                        Score: {data.verification.completenessScore || 0}/100
+                      </p>
+                    </div>
+                    <span className={`px-2 py-1 rounded text-xs font-bold ${
+                      (data.verification.completenessScore || 0) >= 70 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+                    }`}>
+                      {(data.verification.completenessScore || 0) >= 70 ? 'PASS' : 'FAIL'}
+                    </span>
+                  </div>
+                  
+                  {/* Signal Agreement */}
+                  <div className="flex items-center justify-between p-2 rounded bg-slate-800/50">
+                    <div>
+                      <p className="text-sm font-medium text-white">Signal Agreement Ratio ≥ 0.45</p>
+                      <p className="text-xs text-slate-400">
+                        {data.verification.signalAlignment?.agreementCount || 0} of {data.verification.signalAlignment?.totalSignals || 6} signals agree
+                        ({(((data.verification.signalAlignment?.agreementCount || 0) / (data.verification.signalAlignment?.totalSignals || 6)) * 100).toFixed(0)}%)
+                      </p>
+                    </div>
+                    <span className={`px-2 py-1 rounded text-xs font-bold ${
+                      (data.verification.signalAlignment?.agreementCount || 0) / (data.verification.signalAlignment?.totalSignals || 6) >= 0.45 
+                        ? 'bg-emerald-500/20 text-emerald-400' 
+                        : 'bg-red-500/20 text-red-400'
+                    }`}>
+                      {(data.verification.signalAlignment?.agreementCount || 0) / (data.verification.signalAlignment?.totalSignals || 6) >= 0.45 ? 'PASS' : 'FAIL'}
+                    </span>
+                  </div>
+                  
+                  {/* Chart Patterns Confirmed */}
+                  <div className="flex items-center justify-between p-2 rounded bg-slate-800/50">
+                    <div>
+                      <p className="text-sm font-medium text-white">At Least One Confirmed Chart Pattern</p>
+                      <p className="text-xs text-slate-400">
+                        {data.verification.patternTrust?.hasConfirmedPatterns ? 
+                          `${data.chartPatterns?.confirmed?.length || 0} confirmed patterns detected` :
+                          'No confirmed patterns'
+                        }
+                      </p>
+                    </div>
+                    <span className={`px-2 py-1 rounded text-xs font-bold ${
+                      data.verification.patternTrust?.hasConfirmedPatterns 
+                        ? 'bg-emerald-500/20 text-emerald-400' 
+                        : 'bg-amber-500/20 text-amber-400'
+                    }`}>
+                      {data.verification.patternTrust?.hasConfirmedPatterns ? 'PASS' : 'N/A'}
+                    </span>
+                  </div>
                 </div>
-
-                {Array.isArray(packet.notes) && packet.notes.length > 0 && (
-                  <div className="pt-2 border-t border-slate-700/50">
-                    {packet.notes.map((n: string, idx: number) => (
-                      <p key={idx} className="text-xs text-amber-200">• {n}</p>
+              </div>
+            </section>
+          )}
+          
+          {/* Chart Pattern Validation - SHOW PROOF */}
+          {data?.chartPatterns && (data.chartPatterns.confirmed?.length > 0 || data.chartPatterns.forming?.length > 0) && (
+            <section>
+              <h3 className="text-lg font-semibold text-white mb-3">📈 Chart Pattern Validation</h3>
+              <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/30 space-y-3">
+                {/* Trust Level */}
+                <div className="p-3 rounded-lg bg-slate-800/50">
+                  <p className="text-xs text-slate-400 mb-1">Pattern Detection Trust Level</p>
+                  <p className={`text-sm font-bold ${
+                    data.verification?.patternTrust?.trustLevel?.includes('HIGH') ? 'text-emerald-400' :
+                    data.verification?.patternTrust?.trustLevel?.includes('MEDIUM') ? 'text-amber-400' :
+                    'text-red-400'
+                  }`}>
+                    {data.verification?.patternTrust?.trustLevel || 'Unknown'}
+                  </p>
+                </div>
+                
+                {/* Confirmed Patterns with Validation */}
+                {data.chartPatterns.confirmed?.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-emerald-400 mb-2">✓ Confirmed Patterns (Volume Validated)</h4>
+                    {data.chartPatterns.confirmed.map((pattern: any, i: number) => (
+                      <div key={i} className="p-3 mb-2 rounded-lg bg-emerald-500/5 border border-emerald-500/30">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-bold text-white">{pattern.name}</span>
+                          <span className="text-xs px-2 py-1 rounded bg-emerald-500/20 text-emerald-400 font-bold">
+                            {pattern.result.confidence}% confidence
+                          </span>
+                        </div>
+                        
+                        {/* Validation Details - PROOF */}
+                        <div className="mt-2 p-2 rounded bg-slate-800/50 space-y-1">
+                          <p className="text-xs font-semibold text-blue-300">Detection Details:</p>
+                          {pattern.result.pricePoints && (
+                            <div className="grid grid-cols-2 gap-2 text-xs">
+                              {Object.entries(pattern.result.pricePoints).map(([key, value]: [string, any]) => (
+                                <div key={key}>
+                                  <span className="text-slate-400">{key}:</span>
+                                  <span className="text-white ml-1">${typeof value === 'number' ? value.toFixed(2) : value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {pattern.result.volumeValidation && (
+                            <p className="text-xs text-emerald-400">
+                              ✓ Volume spike confirmed: {pattern.result.volumeValidation}
+                            </p>
+                          )}
+                          {pattern.result.detectionMethod && (
+                            <p className="text-xs text-slate-400">
+                              Method: {pattern.result.detectionMethod}
+                            </p>
+                          )}
+                        </div>
+                        
+                        <p className="text-xs text-slate-300 mt-2">{pattern.statusReason}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {/* Forming Patterns */}
+                {data.chartPatterns.forming?.length > 0 && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-amber-400 mb-2">⏳ Forming Patterns (Not Yet Confirmed)</h4>
+                    {data.chartPatterns.forming.slice(0, 3).map((pattern: any, i: number) => (
+                      <div key={i} className="p-3 mb-2 rounded-lg bg-amber-500/5 border border-amber-500/30">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium text-white">{pattern.name}</span>
+                          <span className="text-xs px-2 py-1 rounded bg-amber-500/20 text-amber-400">
+                            {pattern.result.confidence}% confidence
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1">{pattern.statusReason}</p>
+                      </div>
                     ))}
                   </div>
                 )}
               </div>
             </section>
           )}
+          
           {/* Meta Information */}
-          {root?.meta && (
+          {data?.meta && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Decision Context</h3>
               <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Timestamp:</span>
-                  <span className="text-white">{new Date(root.meta.asOf).toLocaleString()}</span>
+                  <span className="text-white">{new Date(data.meta.asOf).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Regime:</span>
-                  <span className="text-white">{root.meta.regime}</span>
+                  <span className="text-white">{data.meta.regime}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">ATR%:</span>
-                  <span className="text-white">{root.meta.atrPct}</span>
+                  <span className="text-white">{data.meta.atrPct}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Trend Strength:</span>
-                  <span className="text-white">{root.meta.trendStrength}</span>
+                  <span className="text-white">{data.meta.trendStrength}</span>
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Response Time:</span>
-                  <span className="text-emerald-400">{root.meta.responseTimeMs}ms</span>
+                  <span className="text-emerald-400">{data.meta.responseTimeMs}ms</span>
                 </div>
               </div>
             </section>
@@ -170,11 +258,11 @@ export function EvidenceDrawer({
           )}
 
           {/* Technical Indicators */}
-          {root?.technicals && (
+          {data?.technicals && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Technical Indicators</h3>
               <div className="grid grid-cols-2 gap-3">
-                {Object.entries(root.technicals)
+                {Object.entries(data.technicals)
                   .filter(([key]) => !['score', 'maxScore'].includes(key))
                   .map(([key, value]) => (
                     <div key={key} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
@@ -189,11 +277,11 @@ export function EvidenceDrawer({
           )}
 
           {/* Fundamentals */}
-          {root?.fundamentals && (
+          {data?.fundamentals && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Fundamental Metrics</h3>
               <div className="grid grid-cols-2 gap-3">
-                {Object.entries(root.fundamentals)
+                {Object.entries(data.fundamentals)
                   .filter(([key]) => !['score', 'maxScore'].includes(key))
                   .map(([key, value]) => (
                     <div key={key} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
@@ -208,16 +296,16 @@ export function EvidenceDrawer({
           )}
 
           {/* Chart Patterns (All) */}
-          {root?.chartPatterns && (
+          {data?.chartPatterns && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Chart Patterns</h3>
               
               {/* Confirmed Patterns */}
-              {root.chartPatterns.confirmed?.length > 0 && (
+              {data.chartPatterns.confirmed?.length > 0 && (
                 <div className="mb-4">
                   <h4 className="text-sm font-medium text-emerald-400 mb-2">Confirmed Patterns</h4>
                   <div className="space-y-2">
-                    {root.chartPatterns.confirmed.map((pattern: any, i: number) => (
+                    {data.chartPatterns.confirmed.map((pattern: any, i: number) => (
                       <div key={i} className="p-3 rounded-lg bg-emerald-500/5 border border-emerald-500/30">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-white">{pattern.name}</span>
@@ -241,11 +329,11 @@ export function EvidenceDrawer({
               )}
 
               {/* Forming Patterns */}
-              {root.chartPatterns.forming?.length > 0 && (
+              {data.chartPatterns.forming?.length > 0 && (
                 <div>
                   <h4 className="text-sm font-medium text-amber-400 mb-2">Forming Patterns</h4>
                   <div className="space-y-2">
-                    {root.chartPatterns.forming.map((pattern: any, i: number) => (
+                    {data.chartPatterns.forming.map((pattern: any, i: number) => (
                       <div key={i} className="p-3 rounded-lg bg-amber-500/5 border border-amber-500/30">
                         <div className="flex items-center justify-between mb-1">
                           <span className="font-bold text-white">{pattern.name}</span>
@@ -263,11 +351,11 @@ export function EvidenceDrawer({
           )}
 
           {/* News Headlines */}
-          {root?.news?.headlines?.length > 0 && (
+          {data?.news?.headlines?.length > 0 && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Recent News</h3>
               <div className="space-y-2">
-                {root.news.headlines.slice(0, 10).map((item: any, i: number) => (
+                {data.news.headlines.slice(0, 10).map((item: any, i: number) => (
                   <div key={i} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
                     <p className="text-sm text-white mb-1">{item.headline}</p>
                     <div className="flex items-center gap-2 text-xs text-slate-400">
@@ -294,28 +382,28 @@ export function EvidenceDrawer({
           )}
 
           {/* Analyst Ratings */}
-          {root?.analysts && (
+          {data?.analysts && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Analyst Coverage</h3>
               <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-slate-400">Consensus:</span>
                   <span className={`font-bold ${
-                    root.analysts.consensus === 'BUY' ? 'text-emerald-400' :
-                    root.analysts.consensus === 'SELL' ? 'text-red-400' :
+                    data.analysts.consensus === 'BUY' ? 'text-emerald-400' :
+                    data.analysts.consensus === 'SELL' ? 'text-red-400' :
                     'text-slate-400'
-                  }`}>{root.analysts.consensus}</span>
+                  }`}>{data.analysts.consensus}</span>
                 </div>
-                {root.analysts.targetPrice && (
+                {data.analysts.targetPrice && (
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-400">Price Target:</span>
-                    <span className="text-white">${root.analysts.targetPrice.toFixed(2)}</span>
+                    <span className="text-white">${data.analysts.targetPrice.toFixed(2)}</span>
                   </div>
                 )}
-                {root.analysts.count && (
+                {data.analysts.count && (
                   <div className="flex justify-between text-sm">
                     <span className="text-slate-400">Analysts Covering:</span>
-                    <span className="text-white">{root.analysts.count}</span>
+                    <span className="text-white">{data.analysts.count}</span>
                   </div>
                 )}
               </div>
@@ -323,11 +411,11 @@ export function EvidenceDrawer({
           )}
 
           {/* Insider Transactions */}
-          {(Array.isArray(root?.insiders) ? root.insiders.length > 0 : (root?.insiders?.recentTransactions?.length > 0)) && (
+          {data?.insiders?.length > 0 && (
             <section>
               <h3 className="text-lg font-semibold text-white mb-3">Insider Activity</h3>
               <div className="space-y-2">
-                {(Array.isArray(root.insiders) ? root.insiders : (root.insiders.recentTransactions || [])).slice(0, 5).map((insider: any, i: number) => (
+                {data.insiders.slice(0, 5).map((insider: any, i: number) => (
                   <div key={i} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-sm font-medium text-white">{insider.name}</span>

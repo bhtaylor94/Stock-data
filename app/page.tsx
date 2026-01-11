@@ -405,15 +405,25 @@ function StockTab({
         onTrack={() => {
           if (suggestions?.[0] && onTrack) {
             const sug = suggestions[0];
-            const trackData = {
+            const entryPrice = data.price || data.quote?.c || 0;
+            const trackData: any = {
               ticker,
               type: sug.type === 'BUY' ? 'STOCK_BUY' : 'STOCK_SELL',
               strategy: sug.strategy,
-              entryPrice: data.price || data.quote?.c,
+              entryPrice,
               confidence: sug.confidence || 0,
               reasoning: sug.reasoning || [],
-              evidencePacket: data?.meta?.evidencePacket ?? data, // Prefer compact evidence packet
+              evidencePacket: data, // Store full evidence
             };
+            
+            // Add target and stop loss
+            if (sug.type === 'BUY' || sug.type === 'STOCK_BUY') {
+              trackData.targetPrice = Math.round(entryPrice * 1.10 * 100) / 100;
+              trackData.stopLoss = Math.round(entryPrice * 0.95 * 100) / 100;
+            } else {
+              trackData.targetPrice = Math.round(entryPrice * 0.90 * 100) / 100;
+              trackData.stopLoss = Math.round(entryPrice * 1.05 * 100) / 100;
+            }
             
             fetch('/api/tracker', {
               method: 'POST',
@@ -501,10 +511,25 @@ function OptionsTab({
   if (!data) return <p className="text-slate-500 text-center py-12">Enter a ticker symbol to view options</p>;
   if (data.error) {
     return (
-      <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5 animate-fade-in">
-        <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ {data.error}</h3>
-        {data.details && <p className="text-sm text-red-300 mb-3">{data.details}</p>}
-        {data.instructions?.map((i: string, idx: number) => <p key={idx} className="text-xs text-slate-400">• {i}</p>)}
+      <div className="space-y-4 animate-fade-in">
+        <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5">
+          <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ {data.error}</h3>
+          {data.details && <p className="text-sm text-red-300 mb-3">{data.details}</p>}
+          {data.instructions?.map((i: string, idx: number) => (
+            <p key={idx} className="text-xs text-slate-400 mb-1">• {i}</p>
+          ))}
+        </div>
+        
+        {/* Helpful info box */}
+        <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/30">
+          <p className="text-sm text-blue-300 mb-2">💡 Common Issues:</p>
+          <ul className="text-xs text-slate-400 space-y-1">
+            <li>• Options data only available during market hours (9:30 AM - 4:00 PM ET)</li>
+            <li>• Some tickers may not have options available</li>
+            <li>• Try switching to the <strong className="text-white">Stock Analysis</strong> or <strong className="text-white">Portfolio</strong> tab</li>
+            <li>• Try a different ticker with active options: <strong className="text-white">AAPL, TSLA, NVDA, SPY</strong></li>
+          </ul>
+        </div>
       </div>
     );
   }
@@ -526,6 +551,16 @@ function OptionsTab({
           if (!onTrack) return;
           
           const optionType = (activity.contract?.type || activity.type)?.toUpperCase();
+          const entryPrice = activity.contract?.ask || activity.contract?.mark || 1.00;
+          
+          // Set target and stop for options (10% moves on premium)
+          const targetPrice = optionType === 'PUT' 
+            ? Math.round(entryPrice * 0.90 * 100) / 100
+            : Math.round(entryPrice * 1.10 * 100) / 100;
+          const stopLoss = optionType === 'PUT'
+            ? Math.round(entryPrice * 1.10 * 100) / 100
+            : Math.round(entryPrice * 0.90 * 100) / 100;
+          
           fetch('/api/tracker', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -533,10 +568,12 @@ function OptionsTab({
               ticker,
               type: optionType,
               strategy: `Unusual ${optionType}: $${activity.contract?.strike || activity.strike} ${activity.contract?.expiration || ''} (${activity.tradeType || 'UOA'})`,
-              entryPrice: activity.contract?.ask || activity.contract?.mark || 1.00,
+              entryPrice,
+              targetPrice,
+              stopLoss,
               confidence: activity.score || 70,
               reasoning: activity.signals || [],
-              evidencePacket: data?.meta?.evidencePacket ?? data, // Prefer compact evidence packet
+              evidencePacket: data, // Store evidence
               optionContract: {
                 strike: activity.contract?.strike || activity.strike,
                 expiration: activity.contract?.expiration || activity.expiration || 'N/A',
@@ -566,6 +603,14 @@ function OptionsTab({
                 onTrack={() => {
                   if (!onTrack) return;
                   
+                  const entryPrice = setup.contract?.ask || 1.00;
+                  const targetPrice = setup.type === 'PUT'
+                    ? Math.round(entryPrice * 0.90 * 100) / 100
+                    : Math.round(entryPrice * 1.10 * 100) / 100;
+                  const stopLoss = setup.type === 'PUT'
+                    ? Math.round(entryPrice * 1.10 * 100) / 100
+                    : Math.round(entryPrice * 0.90 * 100) / 100;
+                  
                   fetch('/api/tracker', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -573,10 +618,12 @@ function OptionsTab({
                       ticker,
                       type: setup.type,
                       strategy: setup.strategy,
-                      entryPrice: setup.contract?.ask || 1.00, // FIX: Use contract price
+                      entryPrice,
+                      targetPrice,
+                      stopLoss,
                       confidence: setup.confidence || 0,
                       reasoning: setup.reasoning || [],
-                      evidencePacket: data?.meta?.evidencePacket ?? data,
+                      evidencePacket: data,
                       optionContract: {
                         strike: setup.contract.strike,
                         expiration: setup.contract.expiration,
@@ -713,10 +760,36 @@ export default function TradingDashboard() {
               {POPULAR_TICKERS.map((t) => (
                 <button
                   key={t.symbol}
-                  onClick={() => {
+                  onClick={async () => {
                     setTicker(t.symbol);
-                    // Auto-search when clicking popular ticker
-                    setTimeout(() => handleSearch(), 100);
+                    setStockData(null);
+                    setOptionsData(null);
+                    setStockLoading(true);
+                    setOptionsLoading(true);
+                    
+                    // Fetch stock data
+                    fetch(`/api/stock/${t.symbol}`)
+                      .then(res => res.json())
+                      .then(data => {
+                        setStockData(data);
+                        setStockLoading(false);
+                      })
+                      .catch(() => {
+                        setStockData({ error: 'Failed to fetch stock data' });
+                        setStockLoading(false);
+                      });
+                    
+                    // Fetch options data
+                    fetch(`/api/options/${t.symbol}`)
+                      .then(res => res.json())
+                      .then(data => {
+                        setOptionsData(data);
+                        setOptionsLoading(false);
+                      })
+                      .catch(() => {
+                        setOptionsData({ error: 'Failed to fetch options data' });
+                        setOptionsLoading(false);
+                      });
                   }}
                   disabled={stockLoading || optionsLoading}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
