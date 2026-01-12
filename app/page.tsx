@@ -10,6 +10,7 @@ import { OptionsDecisionHero } from './components/options/OptionsDecisionHero';
 import { UnusualActivitySection } from './components/options/UnusualActivitySection';
 import { OptionsSetupCard } from './components/options/OptionsSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
+import { ErrorBoundary } from './components/core/ErrorBoundary';
 
 // ============================================================
 // POPULAR TICKERS - QUICK SELECT
@@ -537,18 +538,19 @@ function OptionsTab({
     }
 
   return (
+    <ErrorBoundary>
     <div className="space-y-4 animate-fade-in">
       {/* Options Decision Hero */}
       <OptionsDecisionHero 
-        ticker={ticker}
-        meta={data.meta}
-        suggestions={data.suggestions}
+        ticker={ticker || ''}
+        meta={data?.meta || { asOf: new Date().toISOString(), isStale: false }}
+        suggestions={data?.suggestions || []}
         onViewEvidence={onViewEvidence}
       />
       
       {/* Unusual Options Activity - ALWAYS VISIBLE */}
       <UnusualActivitySection 
-        activities={data.unusualActivity || []}
+        activities={data?.unusualActivity || []}
         onTrack={(activity) => {
           if (!onTrack) return;
           
@@ -644,6 +646,7 @@ function OptionsTab({
         </div>
       )}
     </div>
+    </ErrorBoundary>
   );
   } catch (error) {
     // CATCH ANY RENDERING ERRORS - INLINE ERROR, NO CRASH
