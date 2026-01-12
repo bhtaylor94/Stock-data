@@ -77,7 +77,15 @@ export async function getSchwabAccessToken(
 
     // Schwab can return a new refresh_token sometimes. We can't persist it here, so warn.
     if (data?.refresh_token && data.refresh_token !== refreshToken) {
-      console.warn('[Schwab] ⚠️ OAuth returned a new refresh token. Save it to keep access long-term.');
+      console.error('╔═══════════════════════════════════════════════════════════════╗');
+      console.error('║ 🔑 SCHWAB RETURNED A NEW REFRESH TOKEN - SAVE THIS NOW!     ║');
+      console.error('╠═══════════════════════════════════════════════════════════════╣');
+      console.error('║ New Token:', data.refresh_token);
+      console.error('║ ⚠️  Update SCHWAB_REFRESH_TOKEN in Vercel env vars           ║');
+      console.error('║ ⚠️  Redeploy after updating to avoid 401 errors              ║');
+      console.error('║ ⚠️  This token is valid for 7 days from now                  ║');
+      console.error('╚═══════════════════════════════════════════════════════════════╝');
+    }
     }
 
     return { token: accessToken, error: null };

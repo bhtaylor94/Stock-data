@@ -740,7 +740,30 @@ function OptionsTab({
 // MAIN DASHBOARD - FULLY INTEGRATED
 // ============================================================
 export default function TradingDashboard() {
-  const QUICK_TICKERS = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'GOOGL', 'META'];
+  // Expanded ticker selection - popular stocks & ETFs across sectors
+  const QUICK_TICKERS = [
+    // Major ETFs
+    'SPY', 'QQQ', 'IWM', 'DIA', 'VTI',
+    // Mega Tech
+    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA',
+    // Semiconductors
+    'AMD', 'INTC', 'AVGO', 'TSM',
+    // Finance
+    'JPM', 'BAC', 'GS', 'BRK.B', 'V', 'MA',
+    // Healthcare
+    'UNH', 'JNJ', 'LLY', 'PFE', 'ABBV',
+    // Consumer
+    'WMT', 'COST', 'HD', 'NKE', 'MCD',
+    // Energy
+    'XLE', 'XOM', 'CVX',
+    // Entertainment/Media
+    'DIS', 'NFLX', 'WBD',
+    // Communication
+    'T', 'VZ', 'TMUS',
+    // Industrial
+    'CAT', 'BA', 'UPS',
+  ];
+  
   const [ticker, setTicker] = useState('');
   const [activeTab, setActiveTab] = useState<'stock' | 'options' | 'tracker'>('stock');
   const [stockData, setStockData] = useState<any>(null);
