@@ -171,7 +171,7 @@ export const DEFINITIONS = {
   // Market Regime
   atr: "Average True Range - Measures volatility. Higher ATR means bigger daily price swings. Useful for setting stop losses.",
   regime: "Current market condition - TREND (directional), RANGE (sideways), or HIGH_VOL (choppy/volatile).",
-  trendstrength: "Measures how strong the current trend is. Higher values indicate stronger, more reliable trends.",
+  trendStrength: "Measures how strong the current trend is. Higher values indicate stronger, more reliable trends.",
   
   // Additional Terms
   beta: "Beta - Measures volatility relative to the overall market. Beta > 1 means more volatile than market, < 1 means less volatile.",
