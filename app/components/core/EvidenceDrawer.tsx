@@ -236,14 +236,28 @@ function renderAllSections(data: any) {
     if (data?.technicals) {
       // Helper to get definition for a technical indicator
       const getTechDef = (key: string): string | undefined => {
-        const keyLower = key.toLowerCase();
-        if (keyLower.includes('rsi')) return DEFINITIONS.rsi;
-        if (keyLower.includes('macd')) return DEFINITIONS.macd;
+        const keyLower = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+        
+        // Exact matches
+        if (keyLower === 'rsi') return DEFINITIONS.rsi;
+        if (keyLower === 'macd') return DEFINITIONS.macd;
+        if (keyLower === 'sma20') return DEFINITIONS.sma20;
+        if (keyLower === 'sma50') return DEFINITIONS.sma50;
+        if (keyLower === 'sma200') return DEFINITIONS.sma200;
+        if (keyLower === 'ema12') return DEFINITIONS.ema12;
+        if (keyLower === 'ema26') return DEFINITIONS.ema26;
+        
+        // Pattern matches
+        if (keyLower.includes('bollinger')) return DEFINITIONS.bollinger;
+        if (keyLower.includes('goldencross')) return DEFINITIONS.goldencross;
+        if (keyLower.includes('deathcross')) return DEFINITIONS.deathcross;
         if (keyLower.includes('ema')) return DEFINITIONS.ema;
         if (keyLower.includes('sma')) return DEFINITIONS.sma;
         if (keyLower.includes('volume')) return DEFINITIONS.volume;
         if (keyLower.includes('support')) return DEFINITIONS.support;
         if (keyLower.includes('resistance')) return DEFINITIONS.resistance;
+        if (keyLower.includes('atr')) return DEFINITIONS.atr;
+        
         return undefined;
       };
       
@@ -277,20 +291,58 @@ function renderAllSections(data: any) {
   // 5. FUNDAMENTALS
   try {
     if (data?.fundamentals) {
+      // Helper to get definition for a fundamental metric
+      const getFundDef = (key: string): string | undefined => {
+        const keyLower = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+        
+        // Exact matches
+        if (keyLower === 'pe' || keyLower === 'peratio') return DEFINITIONS.pe;
+        if (keyLower === 'pb' || keyLower === 'pbratio') return DEFINITIONS.pb;
+        if (keyLower === 'ps' || keyLower === 'psratio') return DEFINITIONS.ps;
+        if (keyLower === 'peg' || keyLower === 'pegratio') return DEFINITIONS.peg;
+        if (keyLower === 'roe') return DEFINITIONS.roe;
+        if (keyLower === 'roa') return DEFINITIONS.roa;
+        if (keyLower === 'eps') return DEFINITIONS.eps;
+        if (keyLower === 'beta') return DEFINITIONS.beta;
+        if (keyLower === 'marketcap') return DEFINITIONS.marketcap;
+        
+        // Pattern matches
+        if (keyLower.includes('grossmargin')) return DEFINITIONS.grossmargin;
+        if (keyLower.includes('profitmargin') || keyLower.includes('netmargin')) return DEFINITIONS.profitmargin;
+        if (keyLower.includes('operatingmargin')) return DEFINITIONS.operatingmargin;
+        if (keyLower.includes('revenuegrowth')) return DEFINITIONS.revenuegrowth;
+        if (keyLower.includes('earningsgrowth')) return DEFINITIONS.earningsgrowth;
+        if (keyLower.includes('debt') && keyLower.includes('equity')) return DEFINITIONS.debttoratio;
+        if (keyLower.includes('currentratio')) return DEFINITIONS.currentratio;
+        if (keyLower.includes('quickratio')) return DEFINITIONS.quickratio;
+        if (keyLower.includes('dividend') && keyLower.includes('yield')) return DEFINITIONS.dividendyield;
+        if (keyLower.includes('payout')) return DEFINITIONS.payoutratio;
+        if (keyLower.includes('float')) return DEFINITIONS.float;
+        if (keyLower.includes('short') && keyLower.includes('interest')) return DEFINITIONS.shortinterest;
+        
+        return undefined;
+      };
+      
       sections.push(
         <section key="fundamentals">
           <h3 className="text-lg font-semibold text-white mb-3">Fundamental Metrics</h3>
           <div className="grid grid-cols-2 gap-3">
             {Object.entries(data.fundamentals)
               .filter(([key]) => !['score', 'maxScore'].includes(key))
-              .map(([key, value]) => (
-                <div key={key} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
-                  <p className="text-xs text-slate-400 mb-1">{key.toUpperCase()}</p>
-                  <p className="text-sm font-bold text-white">
-                    {typeof value === 'number' ? value.toFixed(2) : String(value || 'N/A')}
-                  </p>
-                </div>
-              ))}
+              .map(([key, value]) => {
+                const def = getFundDef(key);
+                return (
+                  <div key={key} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                    <p className="text-xs text-slate-400 mb-1 flex items-center">
+                      {key.toUpperCase()}
+                      {def && <InfoTooltip term={key.toUpperCase()} definition={def} />}
+                    </p>
+                    <p className="text-sm font-bold text-white">
+                      {typeof value === 'number' ? value.toFixed(2) : String(value || 'N/A')}
+                    </p>
+                  </div>
+                );
+              })}
           </div>
         </section>
       );
