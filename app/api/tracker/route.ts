@@ -266,13 +266,9 @@ try {
 
       const perf = computeSuggestionPnl(s, underlying, optionMid);
 
-      // Target/stop hit logic uses *current instrument price*
-      const currentForTriggers = perf.currentPrice ?? underlying ?? null;
-      if (status === 'ACTIVE' && Number.isFinite(currentForTriggers ?? NaN)) {
-        const cur = currentForTriggers as number;
-        if (cur >= s.targetPrice) status = 'HIT_TARGET';
-        if (cur <= s.stopLoss) status = 'STOPPED_OUT';
-      }
+      // IMPORTANT: Do NOT auto-transition ACTIVE positions into terminal statuses.
+      // Users explicitly mark outcomes (Hit / Missed / Cancel / Close) from the UI.
+      // We still compute live P/L, but we avoid unexpected "auto-closed" behavior.
 
       // If status transitioned to terminal, persist closedAt/closedPrice once.
       if (status !== s.status && ['HIT_TARGET', 'MISSED_TARGET', 'STOPPED_OUT', 'CLOSED', 'EXPIRED', 'CANCELED'].includes(status)) {
@@ -413,15 +409,15 @@ export async function POST(req: NextRequest) {
       targetPrice: asNumber(body.targetPrice, 0),
       stopLoss: asNumber(body.stopLoss, 0),
       confidence: asNumber(body.confidence, 0),
-      // Position sizing assumptions:
-      // - Stocks default to 100 shares
-      // - Options default to 5 contracts, 100 multiplier
-      // These can be overridden explicitly by the client.
+      // Position sizing assumptions (accuracy-first defaults):
+      // - Stocks default to 1 share
+      // - Options default to 1 contract, 100 multiplier
+      // The client can override these explicitly.
       positionShares: body.optionContract
         ? undefined
-        : asNumber(body.positionShares, 100),
+        : asNumber(body.positionShares, 1),
       positionContracts: body.optionContract
-        ? asNumber(body.positionContracts, 5)
+        ? asNumber(body.positionContracts, 1)
         : undefined,
       contractMultiplier: body.optionContract
         ? asNumber(body.contractMultiplier, 100)
@@ -491,9 +487,12 @@ export async function PUT(req: NextRequest) {
       }
     }
 
+    const nextStatus: TrackedSuggestionStatus = (body.status as TrackedSuggestionStatus) || 'ACTIVE';
+    const isTerminal = ['HIT_TARGET', 'MISSED_TARGET', 'STOPPED_OUT', 'CLOSED', 'EXPIRED', 'CANCELED'].includes(nextStatus);
+
     const patch: Partial<TrackedSuggestion> = {
-      status: (body.status as TrackedSuggestionStatus) || 'ACTIVE',
-      closedAt: body.status === 'CLOSED' ? new Date().toISOString() : undefined,
+      status: nextStatus,
+      closedAt: isTerminal ? new Date().toISOString() : undefined,
       closedPrice: Number.isFinite(closedPrice ?? NaN) ? (closedPrice as number) : undefined,
     };
 
