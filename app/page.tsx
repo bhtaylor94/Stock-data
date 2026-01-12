@@ -58,6 +58,58 @@ function ErrorToast({ message, onClose }: { message: string; onClose: () => void
 }
 
 // ============================================================
+// ERROR BOUNDARY - Prevents app crashes from rendering errors
+// ============================================================
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('ErrorBoundary caught:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-4 flex items-center justify-center">
+          <div className="max-w-2xl w-full p-6 rounded-2xl border border-red-500/30 bg-red-500/5">
+            <h2 className="text-2xl font-bold text-red-400 mb-4">⚠️ Something went wrong</h2>
+            <p className="text-slate-300 mb-4">
+              The app encountered an unexpected error. This has been logged and won't affect your other tabs.
+            </p>
+            {this.state.error && (
+              <div className="p-4 rounded-lg bg-slate-900/50 border border-slate-700 mb-4">
+                <p className="text-sm text-slate-400 font-mono">{this.state.error.message}</p>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                window.location.reload();
+              }}
+              className="px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-medium transition-colors"
+            >
+              Reload App
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
+// ============================================================
 // TRACK BUTTON WITH EVIDENCE STORAGE
 // ============================================================
 function TrackButton({ 
@@ -577,7 +629,7 @@ function OptionsTab({
     return (
       <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5 animate-fade-in">
         <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ {data.error}</h3>
-        {data.details && <p className="text-sm text-red-300 mb-3">{data.details}</p>}
+        {data.details && <p className="text-sm text-red-300 mb-3 whitespace-pre-wrap">{data.details}</p>}
         {(Array.isArray(data.instructions) ? data.instructions : (data.instructions ? [String(data.instructions)] : [])).map((i: string, idx: number) => (
             <p key={idx} className="text-xs text-slate-400">• {i}</p>
           ))}
@@ -624,6 +676,8 @@ function OptionsTab({
             }),
           }).then(res => res.json()).then(result => {
             onTrack(result.success, result.message || result.error);
+          }).catch(err => {
+            onTrack(false, 'Failed to track position');
           });
         }}
       />
@@ -642,6 +696,12 @@ function OptionsTab({
                 onTrack={() => {
                   if (!onTrack) return;
                   
+                  // CRITICAL FIX: Check if contract exists before accessing properties
+                  if (!setup.contract) {
+                    onTrack(false, 'Invalid setup: missing contract data');
+                    return;
+                  }
+                  
                   fetch('/api/tracker', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -649,7 +709,7 @@ function OptionsTab({
                       ticker,
                       type: setup.type,
                       strategy: setup.strategy,
-                      entryPrice: setup.contract?.ask || 1.00, // FIX: Use contract price
+                      entryPrice: setup.contract?.ask || 1.00,
                       confidence: setup.confidence || 0,
                       reasoning: setup.reasoning || [],
                       evidencePacket: data,
@@ -664,6 +724,8 @@ function OptionsTab({
                     }),
                   }).then(res => res.json()).then(result => {
                     onTrack(result.success, result.message || result.error);
+                  }).catch(err => {
+                    onTrack(false, 'Failed to track position');
                   });
                 }}
               />
@@ -823,29 +885,31 @@ export default function TradingDashboard() {
         
         {/* Tab Content */}
         <div className="min-h-[60vh]">
-          {activeTab === 'stock' && (
-            <StockTab 
-              data={stockData}
-              loading={stockLoading}
-              ticker={ticker}
-              onTrack={handleTrack}
-              onViewEvidence={() => handleViewEvidence(stockData)}
-            />
-          )}
-          
-          {activeTab === 'options' && (
-            <OptionsTab 
-              data={optionsData}
-              loading={optionsLoading}
-              ticker={ticker}
-              onTrack={handleTrack}
-              onViewEvidence={() => handleViewEvidence(optionsData)}
-            />
-          )}
-          
-          {activeTab === 'tracker' && (
-            <TrackerTab onViewEvidence={handleViewEvidence} />
-          )}
+          <ErrorBoundary>
+            {activeTab === 'stock' && (
+              <StockTab 
+                data={stockData}
+                loading={stockLoading}
+                ticker={ticker}
+                onTrack={handleTrack}
+                onViewEvidence={() => handleViewEvidence(stockData)}
+              />
+            )}
+            
+            {activeTab === 'options' && (
+              <OptionsTab 
+                data={optionsData}
+                loading={optionsLoading}
+                ticker={ticker}
+                onTrack={handleTrack}
+                onViewEvidence={() => handleViewEvidence(optionsData)}
+              />
+            )}
+            
+            {activeTab === 'tracker' && (
+              <TrackerTab onViewEvidence={handleViewEvidence} />
+            )}
+          </ErrorBoundary>
         </div>
         
         {/* Footer */}
