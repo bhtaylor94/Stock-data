@@ -981,28 +981,55 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   const { token, error: tokenError, errorCode } = await getSchwabToken();
   
   if (!token) {
+    console.error('[Options API] Schwab auth failed:', tokenError, 'Code:', errorCode);
     return NextResponse.json({
       error: 'Schwab authentication failed',
       details: tokenError,
       errorCode,
       ticker,
       instructions: errorCode === 401 
-        ? ['Schwab refresh token has expired (7-day limit)', 'Generate a new refresh token']
-        : ['Set SCHWAB_APP_KEY, SCHWAB_APP_SECRET, SCHWAB_REFRESH_TOKEN'],
+        ? [
+            '🔴 Schwab refresh token has expired or is invalid',
+            '📋 This happens every 7 days - you need a NEW refresh token',
+            '🔗 Go to: https://developer.schwab.com/dashboard',
+            '✅ Generate new refresh token',
+            '⚙️  Update SCHWAB_REFRESH_TOKEN in Vercel environment variables',
+            '🔄 Redeploy your app'
+          ]
+        : [
+            'Set SCHWAB_APP_KEY in environment variables', 
+            'Set SCHWAB_APP_SECRET in environment variables',
+            'Set SCHWAB_REFRESH_TOKEN in environment variables',
+            'Check Schwab API status at https://developer.schwab.com'
+          ],
       lastUpdated: new Date().toISOString(),
       dataSource: 'none',
+      troubleshooting: {
+        refreshTokenAge: tokenCache?.createdAt ? Math.floor((Date.now() - tokenCache.createdAt) / (1000 * 60 * 60 * 24)) : 'N/A',
+        lastRefreshAttempt: new Date().toISOString(),
+        attemptCount: tokenRefreshAttempts,
+      }
     });
   }
 
   const { data: chainData, error: chainError } = await fetchOptionsChain(token, ticker);
   
   if (!chainData || chainError) {
+    console.error('[Options API] Chain fetch failed:', chainError);
     return NextResponse.json({
       error: 'Failed to fetch options chain',
       details: chainError,
       ticker,
+      instructions: [
+        chainError?.includes('401') ? '🔴 Token was rejected - refresh token may be invalid' : '',
+        chainError?.includes('404') ? `❌ Ticker ${ticker} not found or has no options` : '',
+        chainError?.includes('429') ? '⏳ Rate limited - wait 60 seconds' : '',
+        '🕐 Market hours: 9:30 AM - 4:00 PM ET (options only available during regular hours)',
+        '✅ Try: AAPL, TSLA, NVDA, SPY (known liquid tickers)'
+      ].filter(Boolean),
       lastUpdated: new Date().toISOString(),
       dataSource: 'none',
+      marketHoursOnly: true,
     });
   }
 
