@@ -11,6 +11,7 @@ import { UnusualActivitySection } from './components/options/UnusualActivitySect
 import { OptionsSetupCard } from './components/options/OptionsSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
 import { ErrorBoundary } from './components/core/ErrorBoundary';
+import { DataFreshnessBanner } from './components/core/DataFreshnessBanner';
 
 // ============================================================
 // POPULAR TICKERS - QUICK SELECT
@@ -397,6 +398,9 @@ function StockTab({
 
   return (
     <div className="space-y-4 animate-fade-in">
+      {/* Data Freshness Banner - Always Visible */}
+      <DataFreshnessBanner data={data} type="stock" />
+      
       {/* Decision Hero - Sticky at top */}
       <StockDecisionHero 
         ticker={ticker}
@@ -540,6 +544,9 @@ function OptionsTab({
   return (
     <ErrorBoundary>
     <div className="space-y-4 animate-fade-in">
+      {/* Data Freshness Banner - Always Visible */}
+      <DataFreshnessBanner data={data} type="options" />
+      
       {/* Options Decision Hero */}
       <OptionsDecisionHero 
         ticker={ticker || ''}

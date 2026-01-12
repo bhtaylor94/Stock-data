@@ -1,19 +1,24 @@
 import React from 'react';
+import { DataFreshnessIndicator } from '../core/DataFreshnessIndicator';
 
 export function StockDecisionHero({ 
   ticker, 
   price, 
   analysis, 
   meta,
+  dataSource,
   onTrack,
-  onViewEvidence
+  onViewEvidence,
+  onRefresh
 }: { 
   ticker: string;
   price: number;
   analysis: any;
   meta: any;
+  dataSource?: string;
   onTrack?: () => void;
   onViewEvidence?: () => void;
+  onRefresh?: () => void;
 }) {
   const rating = analysis?.combined?.rating || 'HOLD';
   const score = analysis?.combined?.score || 0;
@@ -24,6 +29,15 @@ export function StockDecisionHero({
   
   return (
     <div className="sticky top-0 z-10 p-5 rounded-2xl bg-gradient-to-br from-slate-800/95 to-slate-900/95 backdrop-blur-sm border border-slate-700/50 shadow-xl">
+      {/* PROMINENT DATA FRESHNESS INDICATOR - CRITICAL FOR TRUST */}
+      <div className="mb-4">
+        <DataFreshnessIndicator 
+          meta={meta}
+          dataSource={dataSource}
+          onRefresh={onRefresh}
+        />
+      </div>
+      
       {/* Ticker + Price Row */}
       <div className="flex items-center justify-between mb-4">
         <div>
@@ -33,24 +47,15 @@ export function StockDecisionHero({
           </p>
           <div className="flex items-center gap-2 mt-1">
             <p className="text-xs text-slate-400">
-              {meta?.responseTimeMs && `${meta.responseTimeMs}ms`}
+              Response: {meta?.responseTimeMs}ms
             </p>
-            {/* Data Source Badge */}
-            <span className={`text-xs px-2 py-0.5 rounded flex items-center gap-1 ${
-              meta?.source === 'schwab' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-blue-500/20 text-blue-400'
-            }`}>
-              <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-              {meta?.source?.toUpperCase() || 'SCHWAB'}
-            </span>
           </div>
         </div>
         
-        {/* Freshness Badge */}
-        {meta?.asOf && (
-          <div className={`text-xs px-2 py-1 rounded ${
-            meta.isStale ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'
-          }`}>
-            {meta.isStale ? '⏱️ Stale' : '✓ Fresh'} • {meta.responseTimeMs}ms
+        {/* Response Time Badge */}
+        {meta?.responseTimeMs && (
+          <div className="text-xs px-2 py-1 rounded bg-slate-700/50 text-slate-300">
+            {meta.responseTimeMs}ms response
           </div>
         )}
       </div>

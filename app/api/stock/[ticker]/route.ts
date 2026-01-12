@@ -1580,6 +1580,8 @@ return NextResponse.json({
       atrPct: regimeInfo.atrPct,
       trendStrength: regimeInfo.trendStrength,
       tradeDecision,
+      source: dataSource, // schwab = real-time, finnhub = delayed
+      lastFetched: new Date().toISOString(),
     },
 
     fundamentals: {
@@ -1815,6 +1817,12 @@ return NextResponse.json({
     lastUpdated: new Date().toISOString(),
     dataSource,
     responseTimeMs: Date.now() - startTime,
+  }, {
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    },
   });
 }
 
