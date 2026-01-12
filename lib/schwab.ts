@@ -86,7 +86,6 @@ export async function getSchwabAccessToken(
       console.error('║ ⚠️  This token is valid for 7 days from now                  ║');
       console.error('╚═══════════════════════════════════════════════════════════════╝');
     }
-    }
 
     return { token: accessToken, error: null };
   } catch (err: any) {
