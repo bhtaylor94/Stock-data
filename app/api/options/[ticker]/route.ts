@@ -25,9 +25,10 @@ function expectedMovePct(atmIV: number, dte: number): number {
 const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
 
 // Schwab credentials (server-only). These are validated inside getSchwabToken.
-const SCHWAB_APP_KEY = process.env.SCHWAB_APP_KEY;
-const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
-const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
+const SCHWAB_APP_KEY = process.env.SCHWAB_APP_KEY?.trim();
+const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET?.trim();
+const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN?.trim();
+const VERCEL_ENV_NAME = process.env.VERCEL_ENV || process.env.NODE_ENV || 'unknown';
 
 // NOTE: Schwab auth is centralized in lib/schwab.ts.
 // We avoid duplicating token logic in route handlers to reduce drift.
@@ -181,7 +182,11 @@ async function fetchOptionsChain(token: string, symbol: string, retryCount = 0):
         // - Temporary Schwab auth/marketdata outage
         return {
           data: null,
-          error: `Market data API rejected the access token (401) even after a forced refresh. Common causes: (1) your Vercel env vars weren't updated for the deployed environment, (2) SCHWAB_APP_KEY/SECRET don't match the refresh token that was generated, (3) Schwab rotated the refresh token and the stored SCHWAB_REFRESH_TOKEN is now stale, or (4) Schwab is temporarily rejecting auth. Details: ${errorText}`,
+          error: `Market data API rejected the access token (401) even after a forced refresh. Env: ${VERCEL_ENV_NAME}. ` +
+                 `Check: (1) env vars set for the same environment, (2) refresh token created for this app key/secret, ` +
+                 `(3) refresh-token rotation, (4) temporary Schwab auth outage. ` +
+                 `Env flags: key=${Boolean(SCHWAB_APP_KEY)}, secret=${Boolean(SCHWAB_APP_SECRET)}, refresh=${Boolean(SCHWAB_REFRESH_TOKEN)}. ` +
+                 `Details: ${errorText}`,
         };
       }
       
