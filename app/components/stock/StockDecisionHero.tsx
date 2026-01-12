@@ -1,5 +1,4 @@
 import React from 'react';
-import { DataFreshnessIndicator } from '../core/DataFreshnessIndicator';
 
 export function StockDecisionHero({ 
   ticker, 
@@ -29,15 +28,6 @@ export function StockDecisionHero({
   
   return (
     <div className="sticky top-0 z-10 p-5 rounded-2xl bg-gradient-to-br from-slate-800/95 to-slate-900/95 backdrop-blur-sm border border-slate-700/50 shadow-xl">
-      {/* PROMINENT DATA FRESHNESS INDICATOR - CRITICAL FOR TRUST */}
-      <div className="mb-4">
-        <DataFreshnessIndicator 
-          meta={meta}
-          dataSource={dataSource}
-          onRefresh={onRefresh}
-        />
-      </div>
-      
       {/* Ticker + Price Row */}
       <div className="flex items-center justify-between mb-4">
         <div>
@@ -45,19 +35,7 @@ export function StockDecisionHero({
           <p className="text-3xl font-bold text-emerald-400">
             ${price?.toFixed(2) || 'N/A'}
           </p>
-          <div className="flex items-center gap-2 mt-1">
-            <p className="text-xs text-slate-400">
-              Response: {meta?.responseTimeMs}ms
-            </p>
-          </div>
         </div>
-        
-        {/* Response Time Badge */}
-        {meta?.responseTimeMs && (
-          <div className="text-xs px-2 py-1 rounded bg-slate-700/50 text-slate-300">
-            {meta.responseTimeMs}ms response
-          </div>
-        )}
       </div>
 
       {/* Recommendation + Confidence */}

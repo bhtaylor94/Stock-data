@@ -11,7 +11,6 @@ import { UnusualActivitySection } from './components/options/UnusualActivitySect
 import { OptionsSetupCard } from './components/options/OptionsSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
 import { ErrorBoundary } from './components/core/ErrorBoundary';
-import { DataFreshnessBanner } from './components/core/DataFreshnessBanner';
 
 // ============================================================
 // POPULAR TICKERS - QUICK SELECT
@@ -398,9 +397,6 @@ function StockTab({
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* Data Freshness Banner - Always Visible */}
-      <DataFreshnessBanner data={data} type="stock" />
-      
       {/* Decision Hero - Sticky at top */}
       <StockDecisionHero 
         ticker={ticker}
@@ -520,21 +516,35 @@ function OptionsTab({
       return (
         <div className="space-y-4 animate-fade-in">
           <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5">
-            <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ {data.error}</h3>
-            {data.details && <p className="text-sm text-red-300 mb-3">{data.details}</p>}
-            {data.instructions?.map((i: string, idx: number) => (
-              <p key={idx} className="text-xs text-slate-400 mb-1">• {i}</p>
-            ))}
+            <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ Unable to Load Options</h3>
+            
+            {/* Show specific error */}
+            <div className="mb-4 p-3 rounded-lg bg-slate-900/50 border border-slate-700">
+              <p className="text-sm text-red-300 font-mono">{data.error}</p>
+              {data.details && (
+                <p className="text-xs text-slate-400 mt-2">{data.details}</p>
+              )}
+            </div>
+            
+            {/* Show instructions if provided */}
+            {data.instructions && data.instructions.length > 0 && (
+              <div className="mb-4">
+                <p className="text-sm text-amber-300 font-medium mb-2">📋 How to Fix:</p>
+                {data.instructions.map((i: string, idx: number) => (
+                  <p key={idx} className="text-xs text-slate-300 mb-1 pl-4">• {i}</p>
+                ))}
+              </div>
+            )}
           </div>
           
-          {/* Helpful info box */}
+          {/* Helpful actions */}
           <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/30">
-            <p className="text-sm text-blue-300 mb-2">💡 Common Issues:</p>
-            <ul className="text-xs text-slate-400 space-y-1">
-              <li>• Options data only available during market hours (9:30 AM - 4:00 PM ET)</li>
-              <li>• Some tickers may not have options available</li>
-              <li>• Try switching to the <strong className="text-white">Stock Analysis</strong> or <strong className="text-white">Portfolio</strong> tab</li>
-              <li>• Try a different ticker with active options: <strong className="text-white">AAPL, TSLA, NVDA, SPY</strong></li>
+            <p className="text-sm text-blue-300 mb-3">💡 What you can do:</p>
+            <ul className="text-xs text-slate-300 space-y-2">
+              <li>• Switch to the <strong className="text-white">Stock Analysis</strong> tab (works anytime)</li>
+              <li>• Switch to the <strong className="text-white">Portfolio</strong> tab to view tracked positions</li>
+              <li>• Try a different ticker: <strong className="text-white">AAPL, TSLA, NVDA, SPY</strong></li>
+              <li>• Wait for market hours (9:30 AM - 4:00 PM ET) and refresh</li>
             </ul>
           </div>
         </div>
@@ -544,9 +554,6 @@ function OptionsTab({
   return (
     <ErrorBoundary>
     <div className="space-y-4 animate-fade-in">
-      {/* Data Freshness Banner - Always Visible */}
-      <DataFreshnessBanner data={data} type="options" />
-      
       {/* Options Decision Hero */}
       <OptionsDecisionHero 
         ticker={ticker || ''}

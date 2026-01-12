@@ -855,6 +855,8 @@ function liquidityOk(c: OptionContract): boolean {
 export async function GET(request: NextRequest, { params }: { params: { ticker: string } }) {
   const ticker = params.ticker.toUpperCase();
   const startTime = Date.now();
+  
+  console.log(`[Options API] Request for ${ticker} at ${new Date().toISOString()}`);
 
   const { token, error: tokenError, errorCode } = await getSchwabToken();
   
@@ -884,11 +886,13 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       dataSource: 'none',
     });
   }
+  
+  console.log(`[Options API] Got Schwab token for ${ticker}`);
 
   const { data: chainData, error: chainError } = await fetchOptionsChain(token, ticker);
   
   if (!chainData || chainError) {
-    console.error('[Options API] Chain fetch failed:', chainError);
+    console.error('[Options API] Chain fetch failed for', ticker, ':', chainError);
     return NextResponse.json({
       error: 'Failed to fetch options chain',
       details: chainError,
@@ -906,6 +910,8 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       marketHoursOnly: true,
     });
   }
+  
+  console.log(`[Options API] Successfully fetched options chain for ${ticker}`);
 
   const currentPrice = chainData.underlyingPrice || 0;
   
