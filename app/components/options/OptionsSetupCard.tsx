@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { TipLabel } from '../core/Tooltip';
 
 export function OptionsSetupCard({ 
   setup,
@@ -40,11 +41,11 @@ export function OptionsSetupCard({
           <p className="font-bold text-white">${contract.strike}</p>
         </div>
         <div>
-          <p className="text-slate-400">DTE</p>
+          <p className="text-slate-400"><TipLabel labelKey="DTE">DTE</TipLabel></p>
           <p className="font-bold text-white">{contract.dte}d</p>
         </div>
         <div>
-          <p className="text-slate-400">Delta</p>
+          <p className="text-slate-400"><TipLabel labelKey="DELTA">Delta</TipLabel></p>
           <p className="font-bold text-white">{contract.delta?.toFixed(2)}</p>
         </div>
         <div>
@@ -68,19 +69,19 @@ export function OptionsSetupCard({
           {/* Greeks */}
           <div className="grid grid-cols-4 gap-2 text-xs">
             <div className="p-2 rounded bg-slate-900/50">
-              <p className="text-slate-400">Gamma</p>
+              <p className="text-slate-400"><TipLabel labelKey="GAMMA">Gamma</TipLabel></p>
               <p className="text-white">{contract.gamma?.toFixed(3) || 'N/A'}</p>
             </div>
             <div className="p-2 rounded bg-slate-900/50">
-              <p className="text-slate-400">Theta</p>
+              <p className="text-slate-400"><TipLabel labelKey="THETA">Theta</TipLabel></p>
               <p className="text-red-400">{contract.theta?.toFixed(2) || 'N/A'}</p>
             </div>
             <div className="p-2 rounded bg-slate-900/50">
-              <p className="text-slate-400">Vega</p>
+              <p className="text-slate-400"><TipLabel labelKey="VEGA">Vega</TipLabel></p>
               <p className="text-white">{contract.vega?.toFixed(2) || 'N/A'}</p>
             </div>
             <div className="p-2 rounded bg-slate-900/50">
-              <p className="text-slate-400">IV</p>
+              <p className="text-slate-400"><TipLabel labelKey="IV">IV</TipLabel></p>
               <p className="text-white">{contract.impliedVolatility?.toFixed(0)}%</p>
             </div>
           </div>

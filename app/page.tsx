@@ -10,8 +10,6 @@ import { OptionsDecisionHero } from './components/options/OptionsDecisionHero';
 import { UnusualActivitySection } from './components/options/UnusualActivitySection';
 import { OptionsSetupCard } from './components/options/OptionsSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
-import { EvidencePreviewStrip } from './components/evidence/EvidencePreviewStrip';
-import { PerformancePanel } from './components/performance/PerformancePanel';
 
 // ============================================================
 // UTILITY COMPONENTS
@@ -151,6 +149,7 @@ function TrackButton({
 function TrackerTab({ onViewEvidence }: { onViewEvidence?: (data: any) => void }) {
   const [trackerData, setTrackerData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [showOvernightInfo, setShowOvernightInfo] = useState(false);
   
   const fetchTrackerData = async () => {
     try {
@@ -219,6 +218,33 @@ function TrackerTab({ onViewEvidence }: { onViewEvidence?: (data: any) => void }
             </p>
           </div>
         </div>
+      </div>
+
+      {/* Overnight Support */}
+      <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
+        <button
+          type="button"
+          onClick={() => setShowOvernightInfo(!showOvernightInfo)}
+          className="w-full flex items-center justify-between"
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold text-white">🌙 Overnight Support</span>
+            <span className="text-xs text-slate-400">(positions persist + P/L updates when markets move)</span>
+          </div>
+          <span className="text-slate-400">{showOvernightInfo ? '▼' : '▶'}</span>
+        </button>
+
+        {showOvernightInfo && (
+          <div className="mt-3 text-sm text-slate-300 space-y-2">
+            <p><span className="text-white font-semibold">Yes</span> — tracked positions persist overnight and across weekends. Your portfolio keeps the position and updates P/L as soon as fresh prices are available.</p>
+            <ul className="list-disc pl-5 space-y-1 text-slate-300">
+              <li><span className="text-white font-semibold">Stocks extended hours:</span> pre‑market 4:00 AM–9:30 AM ET, after‑hours 4:00 PM–8:00 PM ET.</li>
+              <li><span className="text-white font-semibold">Options data:</span> typically only reliable during regular hours (9:30 AM–4:00 PM ET). This is a market data limitation, not the app.</li>
+              <li><span className="text-white font-semibold">Weekends:</span> positions remain visible; prices generally freeze at Friday close and resume updating on Monday pre‑market.</li>
+            </ul>
+            <p className="text-xs text-slate-400">Tip: add a trade via “Track This Setup” or “Track UOA” and check back later — it will still be in your Portfolio tab.</p>
+          </div>
+        )}
       </div>
       
       {/* Active Positions */}
@@ -393,8 +419,7 @@ function StockTab({
               entryPrice: data.price || data.quote?.c,
               confidence: sug.confidence || 0,
               reasoning: sug.reasoning || [],
-              evidence: data?.meta?.evidence,
-              evidencePacket: data?.meta?.evidencePacket || data, // Store full evidence
+              evidencePacket: data, // Store full evidence
             };
             
             fetch('/api/tracker', {
@@ -500,7 +525,6 @@ function OptionsTab({
         suggestions={data.suggestions}
         onViewEvidence={onViewEvidence}
       />
-              <EvidencePreviewStrip packet={data?.meta?.evidencePacket} onOpen={() => onViewEvidence?.()} />
       
       {/* Unusual Options Activity - ALWAYS VISIBLE */}
       <UnusualActivitySection 
@@ -519,8 +543,7 @@ function OptionsTab({
               entryPrice: activity.contract?.ask || activity.contract?.mark || 1.00,
               confidence: activity.score || 70,
               reasoning: activity.signals || [],
-              evidence: data?.meta?.evidence,
-              evidencePacket: data?.meta?.evidencePacket || data, // Store evidence
+              evidencePacket: data, // Store evidence
               optionContract: {
                 strike: activity.contract?.strike || activity.strike,
                 expiration: activity.contract?.expiration || activity.expiration || 'N/A',
@@ -560,8 +583,7 @@ function OptionsTab({
                       entryPrice: setup.contract?.ask || 1.00, // FIX: Use contract price
                       confidence: setup.confidence || 0,
                       reasoning: setup.reasoning || [],
-                      evidence: data?.meta?.evidence,
-              evidencePacket: data?.meta?.evidencePacket || data,
+                      evidencePacket: data,
                       optionContract: {
                         strike: setup.contract.strike,
                         expiration: setup.contract.expiration,
@@ -588,7 +610,7 @@ function OptionsTab({
 // ============================================================
 export default function TradingDashboard() {
   const [ticker, setTicker] = useState('');
-  const [activeTab, setActiveTab] = useState<'stock' | 'options' | 'tracker' | 'performance'>('stock');
+  const [activeTab, setActiveTab] = useState<'stock' | 'options' | 'tracker'>('stock');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
   const [stockLoading, setStockLoading] = useState(false);
@@ -694,7 +716,7 @@ export default function TradingDashboard() {
         
         {/* Tabs */}
         <div className="flex gap-2 mb-6 p-1 bg-slate-800/50 rounded-xl border border-slate-700">
-          {(['stock', 'options', 'tracker', 'performance'] as const).map((tab) => (
+          {(['stock', 'options', 'tracker'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -707,7 +729,6 @@ export default function TradingDashboard() {
               {tab === 'stock' && '📊 Stock Analysis'}
               {tab === 'options' && '📈 Options Intel'}
               {tab === 'tracker' && '💼 Portfolio'}
-              {tab === 'performance' && '📐 Performance'}
             </button>
           ))}
         </div>
@@ -736,12 +757,6 @@ export default function TradingDashboard() {
           
           {activeTab === 'tracker' && (
             <TrackerTab onViewEvidence={handleViewEvidence} />
-          )}
-
-          {activeTab === 'performance' && (
-            <div className="mt-6">
-              <PerformancePanel />
-            </div>
           )}
         </div>
         

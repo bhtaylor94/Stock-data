@@ -9,7 +9,10 @@ function env(name: string): string | null {
   return v && v.trim() ? v.trim() : null;
 }
 
-export async function getSchwabAccessToken(scope: 'stock' | 'options' | 'tracker'): Promise<TokenResult> {
+export async function getSchwabAccessToken(
+  scope: 'stock' | 'options' | 'tracker',
+  opts?: { forceRefresh?: boolean }
+): Promise<TokenResult> {
   const appKey = env('SCHWAB_APP_KEY');
   const appSecret = env('SCHWAB_APP_SECRET');
   const refreshToken = env('SCHWAB_REFRESH_TOKEN');
@@ -23,6 +26,7 @@ export async function getSchwabAccessToken(scope: 'stock' | 'options' | 'tracker
   }
 
   const cacheKey = 'schwab_access_token';
+  if (opts?.forceRefresh) tokenCache.delete(cacheKey);
   const cached = tokenCache.get(cacheKey);
   if (cached) return { token: cached, error: null };
 

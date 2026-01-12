@@ -67,9 +67,7 @@ export function buildEvidencePacket(source: 'stock' | 'options', payload: any): 
     if (evidence?.verification) {
       const v = evidence.verification;
       if (typeof v.completenessScore === 'number') {
-        // Support both 0..1 and 0..100 scales.
-        const cs = v.completenessScore > 1 ? v.completenessScore / 100 : v.completenessScore;
-        checks.push({ name: 'Completeness score >= 0.70', pass: cs >= 0.7, details: { raw: v.completenessScore, normalized: cs } });
+        checks.push({ name: 'Completeness score >= 0.70', pass: v.completenessScore >= 0.7, details: v.completenessScore });
       }
       if (typeof v.agreementCount === 'number' && typeof v.totalSignals === 'number') {
         const ratio = v.totalSignals > 0 ? v.agreementCount / v.totalSignals : 0;

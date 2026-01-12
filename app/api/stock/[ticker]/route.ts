@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { getSchwabAccessToken } from '@/lib/schwab';
-import { buildEvidencePacket } from '@/lib/evidencePacket';
 
 export const runtime = 'nodejs';
 
@@ -955,7 +954,7 @@ function calculateTechnicalScore(inputs: TechnicalInputs): {
 function analyzeNewsSentiment(news: any[], sentimentData: any): {
   score: number;
   signal: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-  headlines: { title: string; sentiment: string; source: string; datetime: string }[];
+  headlines: { title: string; headline: string; sentiment: string; source: string; datetime: string }[];
   buzzwords: string[];
 } {
   if (!news || news.length === 0) {
@@ -981,8 +980,10 @@ function analyzeNewsSentiment(news: any[], sentimentData: any): {
       if (title.includes(word)) { bearCount++; sentiment = 'BEARISH'; buzzwords.push(`-${word}`); }
     });
     
+    const t = item.headline || item.title || '';
     return {
-      title: item.headline || item.title || '',
+      title: t,
+      headline: t,
       sentiment,
       source: item.source || 'Unknown',
       datetime: item.datetime ? new Date(item.datetime * 1000).toLocaleDateString() : '',
@@ -1563,7 +1564,7 @@ export async function GET(
     }
   }
 
-  const responsePayload: any = {
+return NextResponse.json({
     ticker,
     name: profile?.name || `${ticker}`,
     exchange: profile?.exchange || 'NASDAQ',
@@ -1816,37 +1817,7 @@ export async function GET(
     lastUpdated: new Date().toISOString(),
     dataSource,
     responseTimeMs: Date.now() - startTime,
-  };
-
-  // ------------------------------------------------------------
-  // Evidence packet (hash + checks) for auditability + UI display
-  // ------------------------------------------------------------
-  responsePayload.meta = responsePayload.meta || {};
-  responsePayload.meta.freshness = { asOf: freshness.asOf, ageMs: freshness.ageMs, isStale: freshness.isStale };
-  responsePayload.meta.evidence = {
-    verification: {
-      completenessScore,
-      agreementCount,
-      totalSignals: 6,
-      gateFailures,
-    },
-    indicators: responsePayload.technicals || null,
-    levels: {
-      support: responsePayload.technicals?.support ?? null,
-      resistance: responsePayload.technicals?.resistance ?? null,
-    },
-    patterns: responsePayload.chartPatterns || null,
-    fundamentals: responsePayload.fundamentals || null,
-    valuation: {
-      pe: responsePayload.fundamentals?.pe ?? null,
-      pb: responsePayload.fundamentals?.pb ?? null,
-      marketCap: responsePayload.marketCap ?? null,
-    },
-  };
-
-  responsePayload.meta.evidencePacket = buildEvidencePacket('stock', responsePayload);
-
-  return NextResponse.json(responsePayload);
+  });
 }
 
 // Helper functions for verification

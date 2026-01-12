@@ -87,7 +87,7 @@ export function ConsensusSourcesList({
       name: 'News Sentiment',
       signal: sentiment as any,
       status: sentiment === 'BULLISH' ? 'PASS' : sentiment === 'BEARISH' ? 'FAIL' : 'WARN',
-      details: news.headlines.slice(0, 3).map((h: any) => h.headline)
+      details: news.headlines.slice(0, 3).map((h: any) => h.headline || h.title || String(h))
     });
   }
   

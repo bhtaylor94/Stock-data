@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildEvidencePacket } from '@/lib/evidencePacket';
 
 export const runtime = 'nodejs';
 
@@ -1041,7 +1040,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
 
   const firstExp = expirations[0] || '';
 
-  const responsePayload: any = {
+  return NextResponse.json({
     ticker,
     currentPrice: Math.round(currentPrice * 100) / 100,
     lastUpdated: new Date().toISOString(),
@@ -1121,30 +1120,5 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     },
     allCalls: calls,
     allPuts: puts,
-  };
-
-  // ------------------------------------------------------------
-  // Evidence packet (hash + checks) for auditability + UI display
-  // ------------------------------------------------------------
-  responsePayload.meta = responsePayload.meta || {};
-  responsePayload.meta.freshness = { asOf: responsePayload.meta.asOf, ageMs: 0, isStale: false };
-  responsePayload.meta.evidence = {
-    indicators: responsePayload.technicals || null,
-    levels: {
-      support: responsePayload.technicals?.support ?? null,
-      resistance: responsePayload.technicals?.resistance ?? null,
-    },
-    liquidityEvidence: responsePayload.ivAnalysis?.liquidityEvidence || null,
-    unusualOptions: {
-      isUnusual: (responsePayload.unusualActivity || []).length > 0,
-      count: (responsePayload.unusualActivity || []).length,
-    },
-    options: {
-      metrics: responsePayload.metrics || null,
-      selectedExpiration: responsePayload.selectedExpiration || null,
-    },
-  };
-  responsePayload.meta.evidencePacket = buildEvidencePacket('options', responsePayload);
-
-  return NextResponse.json(responsePayload);
+  });
 }
