@@ -1582,6 +1582,9 @@ return NextResponse.json({
       atrPct: regimeInfo.atrPct,
       trendStrength: regimeInfo.trendStrength,
       tradeDecision,
+      warnings: {
+        news: FINNHUB_KEY ? null : 'News requires FINNHUB_API_KEY (missing in environment).',
+      },
     },
 
     fundamentals: {

@@ -436,6 +436,19 @@ function StockTab({
       
       {/* Score Breakdown */}
       <StockScoreBreakdown analysis={analysis} />
+
+      {/* News warning (usually missing FINNHUB_API_KEY) */}
+      {(!news?.headlines || news.headlines.length === 0) && data?.meta?.warnings?.news && (
+        <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-amber-300 mb-1">📰 News unavailable</h3>
+              <p className="text-xs text-slate-300">{data.meta.warnings.news}</p>
+              <p className="text-xs text-slate-400 mt-1">Set <span className="font-mono">FINNHUB_API_KEY</span> in Vercel (Production env) and redeploy.</p>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Consensus Sources - Collapsible */}
       <ConsensusSourcesList 
@@ -609,6 +622,7 @@ function OptionsTab({
 // MAIN DASHBOARD - FULLY INTEGRATED
 // ============================================================
 export default function TradingDashboard() {
+  const QUICK_TICKERS = ['SPY', 'QQQ', 'AAPL', 'MSFT', 'NVDA', 'TSLA', 'AMZN', 'GOOGL', 'META'];
   const [ticker, setTicker] = useState('');
   const [activeTab, setActiveTab] = useState<'stock' | 'options' | 'tracker'>('stock');
   const [stockData, setStockData] = useState<any>(null);
@@ -711,6 +725,23 @@ export default function TradingDashboard() {
             >
               Analyze
             </button>
+          </div>
+
+          {/* Quick Select */}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {QUICK_TICKERS.map((t) => (
+              <button
+                key={t}
+                onClick={() => {
+                  setTicker(t);
+                  // auto-run for convenience
+                  setTimeout(() => handleSearch(), 0);
+                }}
+                className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:bg-slate-700/40 hover:text-white transition"
+              >
+                {t}
+              </button>
+            ))}
           </div>
         </div>
         

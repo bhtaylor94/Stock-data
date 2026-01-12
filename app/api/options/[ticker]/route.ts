@@ -23,9 +23,9 @@ function expectedMovePct(atmIV: number, dte: number): number {
 // ============================================================
 
 const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
-const SCHWAB_APP_KEY = process.env.SCHWAB_APP_KEY;
-const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
-const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
+
+// NOTE: Schwab auth is centralized in lib/schwab.ts.
+// We avoid duplicating token logic in route handlers to reduce drift.
 
 // ============================================================
 // TOKEN CACHE - Schwab access tokens last 30 minutes
@@ -169,9 +169,14 @@ async function fetchOptionsChain(token: string, symbol: string, retryCount = 0):
       }
       
       if (status === 401) {
-        return { 
-          data: null, 
-          error: `Token rejected by market data API (401) even after refresh. This suggests the refresh token itself is invalid. Details: ${errorText}` 
+        // NOTE: A 401 here can be caused by several things:
+        // - Vercel env vars not updated for the *same* environment (Production vs Preview)
+        // - App key/secret mismatch with the refresh token
+        // - Refresh token rotation (Schwab sometimes returns a new refresh_token)
+        // - Temporary Schwab auth/marketdata outage
+        return {
+          data: null,
+          error: `Market data API rejected the access token (401) even after a forced refresh. Common causes: (1) your Vercel env vars weren't updated for the deployed environment, (2) SCHWAB_APP_KEY/SECRET don't match the refresh token that was generated, (3) Schwab rotated the refresh token and the stored SCHWAB_REFRESH_TOKEN is now stale, or (4) Schwab is temporarily rejecting auth. Details: ${errorText}`,
         };
       }
       
@@ -997,10 +1002,24 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   const { data: chainData, error: chainError } = await fetchOptionsChain(token, ticker);
   
   if (!chainData || chainError) {
+    const is401 = typeof chainError === 'string' && chainError.includes('(401)');
     return NextResponse.json({
       error: 'Failed to fetch options chain',
       details: chainError,
       ticker,
+      instructions: is401
+        ? [
+            'In Vercel, confirm SCHWAB_APP_KEY / SCHWAB_APP_SECRET / SCHWAB_REFRESH_TOKEN are set in the SAME environment you are deploying (Production vs Preview).',
+            'Confirm the refresh token was generated for the same Schwab app (app key/secret) you have configured.',
+            'If Schwab returned a NEW refresh token during a prior refresh, update SCHWAB_REFRESH_TOKEN and redeploy.',
+            'After updating env vars, trigger a fresh Production deployment (do not rely on an existing build cache).',
+          ]
+        : undefined,
+      envFlags: {
+        hasAppKey: Boolean(SCHWAB_APP_KEY),
+        hasAppSecret: Boolean(SCHWAB_APP_SECRET),
+        hasRefreshToken: Boolean(SCHWAB_REFRESH_TOKEN),
+      },
       lastUpdated: new Date().toISOString(),
       dataSource: 'none',
     });
