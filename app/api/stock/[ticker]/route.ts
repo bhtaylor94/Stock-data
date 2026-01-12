@@ -132,14 +132,14 @@ async function fetchSchwabQuote(token: string, symbol: string) {
   } catch { return null; }
 }
 
-async function fetchSchwabPriceHistory(token: string, symbol: string): Promise<{ close: number; high: number; low: number; volume: number }[]> {
+async function fetchSchwabPriceHistory(token: string, symbol: string): Promise<{ open: number; close: number; high: number; low: number; volume: number }[]> {
   try {
     const res = await fetch(`https://api.schwabapi.com/marketdata/v1/pricehistory?symbol=${symbol}&periodType=year&period=1&frequencyType=daily&frequency=1`, {
       headers: { 'Authorization': `Bearer ${token}` },
     });
     if (!res.ok) return [];
     const data = await res.json();
-    return (data.candles || []).map((c: any) => ({ close: c.close, high: c.high, low: c.low, volume: c.volume }));
+    return (data.candles || []).map((c: any) => ({ open: c.open, close: c.close, high: c.high, low: c.low, volume: c.volume }));
   } catch { return []; }
 }
 
@@ -202,6 +202,35 @@ async function getInsiderTransactions(symbol: string) {
 // Quote (fallback)
 async function getFinnhubQuote(symbol: string) {
   return fetchFinnhubData(`quote?symbol=${symbol}`);
+}
+
+
+// Historical candles (Finnhub fallback when Schwab pricehistory is unavailable)
+async function getFinnhubCandles(symbol: string) : Promise<{ open: number; close: number; high: number; low: number; volume: number }[]> {
+  if (!FINNHUB_KEY) return [];
+  const toSec = Math.floor(Date.now() / 1000);
+  // ~540 calendar days gives enough daily candles for SMA200 even with holidays/weekends
+  const fromSec = toSec - (540 * 24 * 60 * 60);
+  try {
+    const res = await fetch(`https://finnhub.io/api/v1/stock/candle?symbol=${symbol}&resolution=D&from=${fromSec}&to=${toSec}&token=${FINNHUB_KEY}`);
+    if (!res.ok) return [];
+    const data: any = await res.json();
+    if (!data || data.s !== 'ok' || !Array.isArray(data.c)) return [];
+    const out: { open: number; close: number; high: number; low: number; volume: number }[] = [];
+    const n = data.c.length;
+    for (let i = 0; i < n; i++) {
+      out.push({
+        open: Number(data.o?.[i] ?? data.c[i] ?? 0),
+        close: Number(data.c?.[i] ?? 0),
+        high: Number(data.h?.[i] ?? 0),
+        low: Number(data.l?.[i] ?? 0),
+        volume: Number(data.v?.[i] ?? 0),
+      });
+    }
+    return out.filter(x => Number.isFinite(x.close) && x.close > 0);
+  } catch {
+    return [];
+  }
 }
 
 // ============================================================
@@ -1324,6 +1353,14 @@ export async function GET(
     quote = await fetchSchwabQuote(schwabToken, ticker);
     priceHistory = await fetchSchwabPriceHistory(schwabToken, ticker);
     if (quote) dataSource = 'schwab';
+    // If Schwab quote works but pricehistory is unavailable, fall back to Finnhub candles (if configured)
+    if (priceHistory.length === 0) {
+      const fhCandles = await getFinnhubCandles(ticker);
+      if (fhCandles.length > 0) {
+        priceHistory = fhCandles;
+        dataSource = dataSource === 'schwab' ? 'schwab+finnhub_candles' : 'finnhub_candles';
+      }
+    }
   }
 
   // Fetch all Finnhub data in parallel
@@ -1578,12 +1615,14 @@ return NextResponse.json({
       asOf: freshness.asOf,
       quoteAgeMs: freshness.ageMs,
       isStale: freshness.isStale,
+      priceHistory: { source: dataSource, candles: priceHistory.length },
       regime: regimeInfo.regime,
       atrPct: regimeInfo.atrPct,
       trendStrength: regimeInfo.trendStrength,
       tradeDecision,
       warnings: {
         news: FINNHUB_KEY ? null : 'News requires FINNHUB_API_KEY (missing in environment).',
+        technicals: priceHistory.length > 0 ? null : 'Price history candles unavailable; indicators are degraded. Fix Schwab market data auth or enable FINNHUB_API_KEY for candle fallback.',
       },
     },
 

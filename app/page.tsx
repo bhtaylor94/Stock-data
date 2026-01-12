@@ -437,6 +437,19 @@ function StockTab({
       {/* Score Breakdown */}
       <StockScoreBreakdown analysis={analysis} />
 
+{/* Data quality (candles) */}
+{data?.meta?.warnings?.technicals && (
+  <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
+    <h3 className="text-sm font-semibold text-amber-300 mb-1">📈 Limited technical data</h3>
+    <p className="text-xs text-slate-300">{data.meta.warnings.technicals}</p>
+    {data?.meta?.priceHistory && (
+      <p className="text-[11px] text-slate-400 mt-1">
+        Candles: <span className="font-mono">{data.meta.priceHistory.candles}</span> • Source: <span className="font-mono">{data.meta.priceHistory.source}</span>
+      </p>
+    )}
+  </div>
+)}
+
       {/* News warning (usually missing FINNHUB_API_KEY) */}
       {(!news?.headlines || news.headlines.length === 0) && data?.meta?.warnings?.news && (
         <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
@@ -450,6 +463,45 @@ function StockTab({
         </div>
       )}
       
+{/* News (on Stock page) */}
+{news?.headlines?.length > 0 && (
+  <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
+    <div className="flex items-center justify-between mb-3">
+      <h3 className="text-sm font-semibold text-white">📰 Recent News</h3>
+      <button
+        onClick={onViewEvidence}
+        className="text-xs text-slate-300 hover:text-white underline underline-offset-2"
+      >
+        View in Evidence Packet
+      </button>
+    </div>
+    <div className="space-y-2">
+      {news.headlines.slice(0, 8).map((item: any, i: number) => (
+        <div key={i} className="p-3 rounded-xl bg-slate-900/40 border border-slate-700/40">
+          <div className="text-sm text-white">{item.headline || item.title || 'Headline'}</div>
+          <div className="mt-1 text-xs text-slate-400 flex items-center gap-2">
+            <span>{item.source || ''}</span>
+            <span className="opacity-50">•</span>
+            <span>{(() => {
+              const dt = item.datetime;
+              if (!dt) return '';
+              if (typeof dt === 'number') return new Date(dt * 1000).toLocaleDateString();
+              const d = new Date(dt);
+              return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+            })()}</span>
+            {item.url && (
+              <>
+                <span className="opacity-50">•</span>
+                <a className="underline underline-offset-2 hover:text-white" href={item.url} target="_blank" rel="noreferrer">Open</a>
+              </>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+
       {/* Consensus Sources - Collapsible */}
       <ConsensusSourcesList 
         fundamentals={fundamentals}
