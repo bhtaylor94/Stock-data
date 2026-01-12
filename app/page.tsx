@@ -445,10 +445,10 @@ function StockTab({
       {/* Score Breakdown */}
       <StockScoreBreakdown analysis={analysis} />
       
-      {/* Consensus Sources - Collapsible */}
+      {/* Consensus Sources - Pass merged data with scores */}
       <ConsensusSourcesList 
-        fundamentals={fundamentals}
-        technicals={technicals}
+        fundamentals={{ ...fundamentals, score: analysis?.fundamental?.score }}
+        technicals={{ ...technicals, score: analysis?.technical?.score }}
         news={news}
         analysts={analysts}
         chartPatterns={chartPatterns}
