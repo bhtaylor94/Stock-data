@@ -127,7 +127,7 @@ function computeSuggestionPnl(s: TrackedSuggestion, currentUnderlying: number | 
   if (!isOption) {
     if (!Number.isFinite(currentUnderlying ?? NaN)) return { pnl: 0, pnlPct: 0, currentPrice: null };
     const cur = currentUnderlying as number;
-    const shares = asNumber((s as any).positionShares, 100);
+    const shares = asNumber((s as any).positionShares, 1);
     const pnl = (cur - entry) * shares;
     const pnlPct = ((cur - entry) / entry) * 100;
     return { pnl, pnlPct, currentPrice: cur };
@@ -137,7 +137,7 @@ function computeSuggestionPnl(s: TrackedSuggestion, currentUnderlying: number | 
   const curOpt = currentOption;
   if (!Number.isFinite(curOpt ?? NaN)) return { pnl: 0, pnlPct: 0, currentPrice: null };
 
-  const contracts = asNumber((s as any).positionContracts, 5);
+  const contracts = asNumber((s as any).positionContracts, 1);
   const multiplier = asNumber((s as any).contractMultiplier, 100);
   const pnl = ((curOpt as number) - entry) * contracts * multiplier;
   const pnlPct = (((curOpt as number) - entry) / entry) * 100;
@@ -275,7 +275,7 @@ try {
       }
 
       // If status transitioned to terminal, persist closedAt/closedPrice once.
-      if (status !== s.status && ['HIT_TARGET', 'STOPPED_OUT', 'EXPIRED'].includes(status)) {
+      if (status !== s.status && ['HIT_TARGET', 'MISSED_TARGET', 'STOPPED_OUT', 'CLOSED', 'EXPIRED', 'CANCELED'].includes(status)) {
         const closedPrice = Number.isFinite(perf.currentPrice ?? NaN) ? (perf.currentPrice as number) : undefined;
         pendingPatches.push({
           id: s.id,
@@ -334,7 +334,7 @@ try {
 
     // Summary stats
     const active = enriched.filter(s => s.status === 'ACTIVE');
-    const realized = enriched.filter(s => ['HIT_TARGET', 'STOPPED_OUT', 'CLOSED', 'EXPIRED'].includes(s.status));
+    const realized = enriched.filter(s => ['HIT_TARGET', 'MISSED_TARGET', 'STOPPED_OUT', 'CLOSED', 'EXPIRED', 'CANCELED'].includes(s.status));
 
     const totalPnl = enriched.reduce((sum, s: any) => sum + asNumber(s.pnl, 0), 0);
     const avgPnlPct =

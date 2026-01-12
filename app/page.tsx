@@ -305,13 +305,13 @@ function TrackerTab({ onViewEvidence }: { onViewEvidence?: (data: any) => void }
                     ✓ Hit Target
                   </button>
                   <button
-                    onClick={() => handleUpdateStatus(s.id, 'STOPPED_OUT')}
+                    onClick={() => handleUpdateStatus(s.id, 'MISSED_TARGET')}
                     className="flex-1 px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 text-xs hover:bg-red-500/30 transition-all"
                   >
-                    ✗ Stopped Out
+                    ✗ Missed Target
                   </button>
                   <button
-                    onClick={() => handleUpdateStatus(s.id, 'CLOSED')}
+                    onClick={() => handleUpdateStatus(s.id, 'CANCELED')}
                     className="flex-1 px-3 py-1.5 rounded-lg bg-slate-600/20 text-slate-400 text-xs hover:bg-slate-600/30 transition-all"
                   >
                     Close
@@ -336,7 +336,7 @@ function TrackerTab({ onViewEvidence }: { onViewEvidence?: (data: any) => void }
                     <span className="text-xs text-slate-400">{s.strategy}</span>
                     <span className={`text-xs px-2 py-0.5 rounded ${
                       s.status === 'HIT_TARGET' ? 'bg-emerald-500/20 text-emerald-400' :
-                      s.status === 'STOPPED_OUT' ? 'bg-red-500/20 text-red-400' :
+                      s.status === 'STOPPED_OUT' || s.status === 'MISSED_TARGET' ? 'bg-red-500/20 text-red-400' :
                       'bg-slate-600/20 text-slate-400'
                     }`}>
                       {s.status.replace('_', ' ')}
@@ -394,7 +394,9 @@ function StockTab({
     return (
       <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5 animate-fade-in">
         <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ {data.error}</h3>
-        {data.instructions?.map((i: string, idx: number) => <p key={idx} className="text-xs text-slate-400">• {i}</p>)}
+        {(Array.isArray(data.instructions) ? data.instructions : (data.instructions ? [String(data.instructions)] : [])).map((i: string, idx: number) => (
+            <p key={idx} className="text-xs text-slate-400">• {i}</p>
+          ))}
       </div>
     );
   }
@@ -576,7 +578,9 @@ function OptionsTab({
       <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5 animate-fade-in">
         <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ {data.error}</h3>
         {data.details && <p className="text-sm text-red-300 mb-3">{data.details}</p>}
-        {data.instructions?.map((i: string, idx: number) => <p key={idx} className="text-xs text-slate-400">• {i}</p>)}
+        {(Array.isArray(data.instructions) ? data.instructions : (data.instructions ? [String(data.instructions)] : [])).map((i: string, idx: number) => (
+            <p key={idx} className="text-xs text-slate-400">• {i}</p>
+          ))}
       </div>
     );
   }
@@ -689,8 +693,10 @@ export default function TradingDashboard() {
   // Toast messages
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   
-  const handleSearch = async () => {
-    if (!ticker) return;
+  const handleSearch = async (symbol?: string) => {
+    const sym = (symbol || ticker || '').trim().toUpperCase();
+    if (!sym) return;
+    if (symbol) setTicker(sym);
     
     setStockData(null);
     setOptionsData(null);
@@ -698,7 +704,7 @@ export default function TradingDashboard() {
     setOptionsLoading(true);
     
     // Fetch stock data
-    fetch(`/api/stock/${ticker}`)
+    fetch(`/api/stock/${sym}`)
       .then(res => res.json())
       .then(data => {
         setStockData(data);
@@ -710,7 +716,7 @@ export default function TradingDashboard() {
       });
     
     // Fetch options data
-    fetch(`/api/options/${ticker}`)
+    fetch(`/api/options/${sym}`)
       .then(res => res.json())
       .then(data => {
         setOptionsData(data);
@@ -786,8 +792,7 @@ export default function TradingDashboard() {
                 key={t}
                 onClick={() => {
                   setTicker(t);
-                  // auto-run for convenience
-                  setTimeout(() => handleSearch(), 0);
+                  handleSearch(t);
                 }}
                 className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:bg-slate-700/40 hover:text-white transition"
               >

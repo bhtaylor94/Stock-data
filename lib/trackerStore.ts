@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 
-export type TrackedSuggestionStatus = 'ACTIVE' | 'HIT_TARGET' | 'STOPPED_OUT' | 'CLOSED' | 'EXPIRED';
+export type TrackedSuggestionStatus = 'ACTIVE' | 'HIT_TARGET' | 'MISSED_TARGET' | 'CANCELED' | 'STOPPED_OUT' | 'CLOSED' | 'EXPIRED';
 
 export type TrackedSuggestion = {
   id: string;
