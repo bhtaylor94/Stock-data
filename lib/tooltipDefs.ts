@@ -54,7 +54,8 @@ export const TOOLTIP_DEFS: Record<string, TooltipDef> = {
 
   // Fundamentals (growth)
   REVENUEGROWTH: { title: 'Revenue Growth', body: 'Year-over-year revenue change. Consistent growth can support higher valuations.' },
-  EARNINGS GROWTH: { title: 'Earnings Growth', body: 'Year-over-year earnings change. Growing earnings often drive long-term stock appreciation.' },
+  EARNINGS_GROWTH: { title: 'Earnings Growth', body: 'Year-over-year earnings change. Growing earnings often drive long-term stock appreciation.' },
+  'EARNINGS GROWTH': { title: 'Earnings Growth', body: 'Year-over-year earnings change. Growing earnings often drive long-term stock appreciation.' },
   EPSGROWTH: { title: 'EPS Growth', body: 'Year-over-year EPS change. Higher is generally better, but watch for one-time items.' },
 
   // Fundamentals (financial health)
