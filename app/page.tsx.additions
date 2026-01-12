@@ -1,0 +1,175 @@
+
+// Add these detailed section components after TrackButton and before TrackerTab
+
+// ============================================================
+// DETAILED SECTIONS (News, Analysts, Insiders, Earnings)
+// ============================================================
+function NewsSection({ news }: { news: any }) {
+  const [expanded, setExpanded] = useState(false);
+  
+  if (!news?.headlines?.length) return null;
+  
+  return (
+    <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between mb-3"
+      >
+        <h3 className="text-sm font-semibold text-white">📰 Recent News ({news.headlines.length})</h3>
+        <span className="text-slate-400">{expanded ? '▼' : '▶'}</span>
+      </button>
+      
+      {expanded && (
+        <div className="space-y-2 animate-fade-in">
+          {news.headlines.slice(0, 10).map((item: any, i: number) => (
+            <div key={i} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:border-slate-600/50 transition-all">
+              <p className="text-sm text-white mb-1">{item.headline}</p>
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <span>{item.source}</span>
+                <span>•</span>
+                <span>{new Date(item.datetime).toLocaleDateString()}</span>
+                {item.sentiment && (
+                  <>
+                    <span>•</span>
+                    <span className={
+                      item.sentiment === 'POSITIVE' ? 'text-emerald-400' :
+                      item.sentiment === 'NEGATIVE' ? 'text-red-400' :
+                      'text-slate-400'
+                    }>
+                      {item.sentiment}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AnalystSection({ analysts }: { analysts: any }) {
+  const [expanded, setExpanded] = useState(false);
+  
+  if (!analysts) return null;
+  
+  return (
+    <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between mb-3"
+      >
+        <h3 className="text-sm font-semibold text-white">📊 Analyst Coverage</h3>
+        <span className="text-slate-400">{expanded ? '▼' : '▶'}</span>
+      </button>
+      
+      {!expanded && (
+        <div className="flex items-center gap-4">
+          <span className={`text-sm font-bold ${
+            analysts.consensus === 'BUY' ? 'text-emerald-400' :
+            analysts.consensus === 'SELL' ? 'text-red-400' :
+            'text-slate-400'
+          }`}>{analysts.consensus}</span>
+          {analysts.targetPrice && (
+            <span className="text-sm text-slate-400">Target: <span className="text-white">${analysts.targetPrice.toFixed(2)}</span></span>
+          )}
+        </div>
+      )}
+      
+      {expanded && (
+        <div className="space-y-2 animate-fade-in">
+          <div className="p-3 rounded-lg bg-slate-800/50">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <span className="text-slate-400">Consensus:</span>
+                <span className={`ml-2 font-bold ${
+                  analysts.consensus === 'BUY' ? 'text-emerald-400' :
+                  analysts.consensus === 'SELL' ? 'text-red-400' :
+                  'text-slate-400'
+                }`}>{analysts.consensus}</span>
+              </div>
+              {analysts.targetPrice && (
+                <div>
+                  <span className="text-slate-400">Target:</span>
+                  <span className="ml-2 text-white font-bold">${analysts.targetPrice.toFixed(2)}</span>
+                </div>
+              )}
+              {analysts.count && (
+                <div>
+                  <span className="text-slate-400">Analysts:</span>
+                  <span className="ml-2 text-white">{analysts.count}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InsiderSection({ insiders }: { insiders: any[] }) {
+  const [expanded, setExpanded] = useState(false);
+  
+  if (!insiders?.length) return null;
+  
+  const recentBuys = insiders.filter(i => i.transactionType === 'BUY').length;
+  const recentSells = insiders.filter(i => i.transactionType === 'SELL').length;
+  
+  return (
+    <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between mb-3"
+      >
+        <h3 className="text-sm font-semibold text-white">👔 Insider Activity</h3>
+        <span className="text-slate-400">{expanded ? '▼' : '▶'}</span>
+      </button>
+      
+      {!expanded && (
+        <div className="flex items-center gap-4 text-sm">
+          <span className="text-emerald-400">{recentBuys} Buys</span>
+          <span className="text-red-400">{recentSells} Sells</span>
+        </div>
+      )}
+      
+      {expanded && (
+        <div className="space-y-2 animate-fade-in">
+          {insiders.slice(0, 5).map((insider: any, i: number) => (
+            <div key={i} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium text-white">{insider.name}</span>
+                <span className={`text-xs px-2 py-0.5 rounded ${
+                  insider.transactionType === 'BUY' ? 'bg-emerald-500/20 text-emerald-400' :
+                  'bg-red-500/20 text-red-400'
+                }`}>
+                  {insider.transactionType}
+                </span>
+              </div>
+              <div className="flex gap-4 text-xs text-slate-400">
+                <span>{insider.shares?.toLocaleString()} shares</span>
+                <span>${insider.value?.toLocaleString()}</span>
+                <span>{new Date(insider.date).toLocaleDateString()}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EarningsSection({ earnings }: { earnings: any }) {
+  if (!earnings?.date) return null;
+  
+  return (
+    <div className="p-4 rounded-2xl border border-blue-500/30 bg-blue-500/5">
+      <h3 className="text-sm font-semibold text-white mb-2">📅 Next Earnings</h3>
+      <p className="text-sm text-slate-300">{earnings.date}</p>
+      {earnings.estimate && (
+        <p className="text-xs text-slate-400 mt-1">Estimate: ${earnings.estimate}</p>
+      )}
+    </div>
+  );
+}
