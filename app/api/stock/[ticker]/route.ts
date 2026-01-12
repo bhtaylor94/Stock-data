@@ -1012,6 +1012,7 @@ function analyzeAnalystRatings(recommendations: any[], priceTarget: any): {
   targetPrice: number;
   targetUpside: number;
   recentChanges: { period: string; strongBuy: number; buy: number; hold: number; sell: number; strongSell: number }[];
+  totalAnalysts: number;
 } {
   const latest = recommendations?.[0] || {};
   const strongBuy = latest.strongBuy || 0;
@@ -1021,7 +1022,20 @@ function analyzeAnalystRatings(recommendations: any[], priceTarget: any): {
   const strongSell = latest.strongSell || 0;
   const total = strongBuy + buy + hold + sell + strongSell;
   
-  const buyPercent = total > 0 ? Math.round(((strongBuy + buy) / total) * 100) : 0;
+  // CRITICAL FIX: If no analysts, return NO COVERAGE
+  if (total === 0) {
+    return {
+      consensus: 'NO COVERAGE',
+      buyPercent: 0,
+      distribution: { strongBuy: 0, buy: 0, hold: 0, sell: 0, strongSell: 0 },
+      targetPrice: 0,
+      targetUpside: 0,
+      recentChanges: [],
+      totalAnalysts: 0,
+    };
+  }
+  
+  const buyPercent = Math.round(((strongBuy + buy) / total) * 100);
   
   let consensus = 'HOLD';
   if (buyPercent >= 70) consensus = 'STRONG BUY';
@@ -1044,6 +1058,7 @@ function analyzeAnalystRatings(recommendations: any[], priceTarget: any): {
       sell: r.sell || 0,
       strongSell: r.strongSell || 0,
     })) || [],
+    totalAnalysts: total,
   };
 }
 
@@ -1096,7 +1111,7 @@ function generateSuggestions(
   fundamentalScore: number,
   technicalScore: number,
   newsSentiment: { score: number; signal: string },
-  analystRating: { consensus: string; buyPercent: number; targetUpside: number },
+  analystRating: { consensus: string; buyPercent: number; targetUpside: number; totalAnalysts: number },
   insiderActivity: { netActivity: string },
   earnings: any,
   fundamentalFactors: any[],
@@ -1123,13 +1138,24 @@ function generateSuggestions(
     adjustmentReasons.push('-5% confidence: Bearish news sentiment');
   }
   
-  // Analyst consensus adjustment (-5 to +5)
-  if (analystRating.buyPercent >= 70) {
-    confidenceAdjustment += 5;
-    adjustmentReasons.push(`+5% confidence: Strong analyst support (${analystRating.buyPercent}% bullish)`);
-  } else if (analystRating.buyPercent <= 30) {
-    confidenceAdjustment -= 5;
-    adjustmentReasons.push(`-5% confidence: Weak analyst support (${analystRating.buyPercent}% bullish)`);
+  // Analyst consensus adjustment (-5 to +5) - ONLY IF ANALYSTS EXIST
+  if (analystRating.totalAnalysts > 0) {
+    if (analystRating.buyPercent >= 70) {
+      confidenceAdjustment += 5;
+      adjustmentReasons.push(`+5% confidence: Strong analyst support (${analystRating.buyPercent}% bullish)`);
+    } else if (analystRating.buyPercent <= 30) {
+      confidenceAdjustment -= 5;
+      adjustmentReasons.push(`-5% confidence: Weak analyst support (${analystRating.buyPercent}% bullish)`);
+    }
+    
+    // Price target adjustment - ONLY IF ANALYSTS EXIST
+    if (analystRating.targetUpside > 20) {
+      confidenceAdjustment += 5;
+      adjustmentReasons.push(`+5% confidence: High upside potential (${analystRating.targetUpside.toFixed(1)}%)`);
+    } else if (analystRating.targetUpside < -10) {
+      confidenceAdjustment -= 5;
+      adjustmentReasons.push(`-5% confidence: Negative price target (${analystRating.targetUpside.toFixed(1)}%)`);
+    }
   }
   
   // Insider activity adjustment
@@ -1139,15 +1165,6 @@ function generateSuggestions(
   } else if (insiderActivity.netActivity === 'SELLING') {
     confidenceAdjustment -= 2;
     adjustmentReasons.push('-2% confidence: Insider selling (often for personal reasons)');
-  }
-  
-  // Price target adjustment
-  if (analystRating.targetUpside > 20) {
-    confidenceAdjustment += 5;
-    adjustmentReasons.push(`+5% confidence: High upside potential (${analystRating.targetUpside.toFixed(1)}%)`);
-  } else if (analystRating.targetUpside < -10) {
-    confidenceAdjustment -= 5;
-    adjustmentReasons.push(`-5% confidence: Negative price target (${analystRating.targetUpside.toFixed(1)}%)`);
   }
   
   // MAIN RECOMMENDATION based on combined score
@@ -1512,7 +1529,7 @@ export async function GET(
     hasFundamentals: fundamentalMetrics.pe > 0 || fundamentalMetrics.roe !== 0,
     hasTechnicals: priceHistory.length >= 20,
     hasNews: newsAnalysis.headlines.length > 0,
-    hasAnalysts: analystAnalysis.buyPercent >= 0,
+    hasAnalysts: analystAnalysis.totalAnalysts > 0, // CRITICAL: Only count if analysts exist
     // Insider activity is considered "present" only when we have at least one parsed transaction
     hasInsiders: insiderAnalysis.recentTransactions.length > 0,
     hasEarnings: !!(earnings && (earnings.earningsCalendar?.[0] || (Array.isArray(earnings.earningsCalendar) && earnings.earningsCalendar.length > 0))),
@@ -1523,7 +1540,7 @@ export async function GET(
     fundamentalAnalysis.score >= 5,
     technicalAnalysis.score >= 5,
     newsAnalysis.signal === 'BULLISH',
-    analystAnalysis.buyPercent >= 50,
+    analystAnalysis.totalAnalysts > 0 && analystAnalysis.buyPercent >= 50, // CRITICAL: Only count if analysts exist
     insiderAnalysis.netActivity === 'BUYING',
     chartPatterns.dominantDirection === 'BULLISH' && chartPatterns.actionable,
   ].filter(Boolean).length;
@@ -1662,6 +1679,7 @@ return NextResponse.json({
       targetPrice: Math.round(analystAnalysis.targetPrice * 100) / 100,
       targetUpside: Math.round(analystAnalysis.targetUpside * 100) / 100,
       history: analystAnalysis.recentChanges,
+      totalAnalysts: analystAnalysis.totalAnalysts,
     },
 
     insiders: {

@@ -385,21 +385,25 @@ function renderAllSections(data: any) {
   
   // 7. ANALYST COVERAGE
   try {
-    if (data?.analysts) {
+    if (data?.analysts && data.analysts.totalAnalysts > 0 && data.analysts.consensus !== 'NO COVERAGE') {
       sections.push(
         <section key="analysts">
           <h3 className="text-lg font-semibold text-white mb-3">Analyst Coverage</h3>
           <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 space-y-2">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-400">Total Analysts:</span>
+              <span className="text-white font-bold">{data.analysts.totalAnalysts}</span>
+            </div>
             {data.analysts.consensus && (
               <div className="flex justify-between text-sm">
                 <span className="text-slate-400">Consensus:</span>
                 <span className={`font-bold ${
-                  data.analysts.consensus === 'BUY' ? 'text-emerald-400' :
+                  data.analysts.consensus === 'STRONG BUY' || data.analysts.consensus === 'BUY' ? 'text-emerald-400' :
                   data.analysts.consensus === 'SELL' ? 'text-red-400' : 'text-slate-400'
                 }`}>{data.analysts.consensus}</span>
               </div>
             )}
-            {data.analysts.targetPrice && (
+            {data.analysts.targetPrice > 0 && (
               <div className="flex justify-between text-sm">
                 <span className="text-slate-400">Price Target:</span>
                 <span className="text-white">${data.analysts.targetPrice.toFixed(2)}</span>
@@ -411,6 +415,18 @@ function renderAllSections(data: any) {
                 <span className="text-white">{data.analysts.buyPercent}%</span>
               </div>
             )}
+          </div>
+        </section>
+      );
+    } else if (data?.analysts && (data.analysts.totalAnalysts === 0 || data.analysts.consensus === 'NO COVERAGE')) {
+      // Show that there's no analyst coverage
+      sections.push(
+        <section key="analysts">
+          <h3 className="text-lg font-semibold text-white mb-3">Analyst Coverage</h3>
+          <div className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50">
+            <p className="text-sm text-slate-400 text-center py-2">
+              ℹ️ No analyst coverage available for this ticker
+            </p>
           </div>
         </section>
       );
