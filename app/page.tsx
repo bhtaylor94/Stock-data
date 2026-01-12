@@ -507,32 +507,34 @@ function OptionsTab({
     }
   }, [data, selectedExp]);
 
-  if (loading) return <LoadingSpinner />;
-  if (!data) return <p className="text-slate-500 text-center py-12">Enter a ticker symbol to view options</p>;
-  if (data.error) {
-    return (
-      <div className="space-y-4 animate-fade-in">
-        <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5">
-          <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ {data.error}</h3>
-          {data.details && <p className="text-sm text-red-300 mb-3">{data.details}</p>}
-          {data.instructions?.map((i: string, idx: number) => (
-            <p key={idx} className="text-xs text-slate-400 mb-1">• {i}</p>
-          ))}
+  // ERROR BOUNDARY - Prevent full-page crashes
+  try {
+    if (loading) return <LoadingSpinner />;
+    if (!data) return <p className="text-slate-500 text-center py-12">Enter a ticker symbol to view options</p>;
+    if (data.error) {
+      return (
+        <div className="space-y-4 animate-fade-in">
+          <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5">
+            <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ {data.error}</h3>
+            {data.details && <p className="text-sm text-red-300 mb-3">{data.details}</p>}
+            {data.instructions?.map((i: string, idx: number) => (
+              <p key={idx} className="text-xs text-slate-400 mb-1">• {i}</p>
+            ))}
+          </div>
+          
+          {/* Helpful info box */}
+          <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/30">
+            <p className="text-sm text-blue-300 mb-2">💡 Common Issues:</p>
+            <ul className="text-xs text-slate-400 space-y-1">
+              <li>• Options data only available during market hours (9:30 AM - 4:00 PM ET)</li>
+              <li>• Some tickers may not have options available</li>
+              <li>• Try switching to the <strong className="text-white">Stock Analysis</strong> or <strong className="text-white">Portfolio</strong> tab</li>
+              <li>• Try a different ticker with active options: <strong className="text-white">AAPL, TSLA, NVDA, SPY</strong></li>
+            </ul>
+          </div>
         </div>
-        
-        {/* Helpful info box */}
-        <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/30">
-          <p className="text-sm text-blue-300 mb-2">💡 Common Issues:</p>
-          <ul className="text-xs text-slate-400 space-y-1">
-            <li>• Options data only available during market hours (9:30 AM - 4:00 PM ET)</li>
-            <li>• Some tickers may not have options available</li>
-            <li>• Try switching to the <strong className="text-white">Stock Analysis</strong> or <strong className="text-white">Portfolio</strong> tab</li>
-            <li>• Try a different ticker with active options: <strong className="text-white">AAPL, TSLA, NVDA, SPY</strong></li>
-          </ul>
-        </div>
-      </div>
-    );
-  }
+      );
+    }
 
   return (
     <div className="space-y-4 animate-fade-in">
@@ -643,6 +645,32 @@ function OptionsTab({
       )}
     </div>
   );
+  } catch (error) {
+    // CATCH ANY RENDERING ERRORS - INLINE ERROR, NO CRASH
+    console.error('Options Tab Error:', error);
+    return (
+      <div className="space-y-4 animate-fade-in">
+        <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5">
+          <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ Error Loading Options</h3>
+          <p className="text-sm text-red-300 mb-3">Unable to display options data. This could be due to:</p>
+          <ul className="text-xs text-slate-400 space-y-1 mb-3">
+            <li>• Market is closed (options data only available 9:30 AM - 4:00 PM ET)</li>
+            <li>• This ticker may not have options available</li>
+            <li>• Temporary data format issue</li>
+          </ul>
+        </div>
+        
+        <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-500/30">
+          <p className="text-sm text-blue-300 mb-2">💡 Try:</p>
+          <ul className="text-xs text-slate-400 space-y-1">
+            <li>• Switch to <strong className="text-white">Stock Analysis</strong> tab (works anytime)</li>
+            <li>• Try a different ticker: <strong className="text-white">AAPL, TSLA, NVDA, SPY</strong></li>
+            <li>• Wait for market hours (9:30 AM - 4:00 PM ET)</li>
+          </ul>
+        </div>
+      </div>
+    );
+  }
 }
 
 // ============================================================
