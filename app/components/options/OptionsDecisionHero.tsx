@@ -3,13 +3,11 @@ import React from 'react';
 export function OptionsDecisionHero({ 
   ticker,
   meta,
-  suggestions,
-  onViewEvidence
+  suggestions
 }: { 
   ticker: string;
   meta: any;
   suggestions?: any[];
-  onViewEvidence?: () => void;
 }) {
   const action = meta?.tradeDecision?.action || 'NO_TRADE';
   const confidence = meta?.tradeDecision?.confidence || 0;
@@ -81,14 +79,9 @@ export function OptionsDecisionHero({
           <button className="flex-1 px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-medium transition">
             📌 Track Setup
           </button>
-          {onViewEvidence && (
-            <button 
-              onClick={onViewEvidence}
-              className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition"
-            >
-              📊 View Evidence
-            </button>
-          )}
+          <button className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition">
+            📊 Details
+          </button>
         </div>
       )}
     </div>
