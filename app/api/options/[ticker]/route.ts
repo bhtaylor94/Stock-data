@@ -24,6 +24,11 @@ function expectedMovePct(atmIV: number, dte: number): number {
 
 const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
 
+// Schwab credentials (server-only). These are validated inside getSchwabToken.
+const SCHWAB_APP_KEY = process.env.SCHWAB_APP_KEY;
+const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
+const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
+
 // NOTE: Schwab auth is centralized in lib/schwab.ts.
 // We avoid duplicating token logic in route handlers to reduce drift.
 
