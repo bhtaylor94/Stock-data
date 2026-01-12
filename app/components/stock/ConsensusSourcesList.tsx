@@ -87,25 +87,22 @@ export function ConsensusSourcesList({
       name: 'News Sentiment',
       signal: sentiment as any,
       status: sentiment === 'BULLISH' ? 'PASS' : sentiment === 'BEARISH' ? 'FAIL' : 'WARN',
-      details: news.headlines.slice(0, 3).map((h: any) => h.title || 'No headline')
+      details: news.headlines.slice(0, 3).map((h: any) => h.headline)
     });
   }
   
-  // Analysts - only show if there's actual analyst coverage
-  if (analysts?.consensus && (analysts.distribution?.strongBuy > 0 || analysts.distribution?.buy > 0 || analysts.distribution?.hold > 0)) {
-    const totalAnalysts = (analysts.distribution?.strongBuy || 0) + (analysts.distribution?.buy || 0) + (analysts.distribution?.hold || 0) + (analysts.distribution?.sell || 0) + (analysts.distribution?.strongSell || 0);
-    if (totalAnalysts > 0) {
-      sources.push({
-        name: 'Analysts',
-        signal: analysts.consensus === 'BUY' || analysts.consensus === 'STRONG BUY' ? 'BULLISH' : analysts.consensus === 'SELL' ? 'BEARISH' : 'NEUTRAL',
-        status: analysts.consensus === 'BUY' || analysts.consensus === 'STRONG BUY' ? 'PASS' : analysts.consensus === 'SELL' ? 'FAIL' : 'WARN',
-        details: [
-          `Consensus: ${analysts.consensus}`,
-          `Target: $${analysts.targetPrice?.toFixed(2) || 'N/A'}`,
-          `Coverage: ${totalAnalysts} analysts`
-        ]
-      });
-    }
+  // Analysts
+  if (analysts?.consensus) {
+    sources.push({
+      name: 'Analysts',
+      signal: analysts.consensus === 'BUY' ? 'BULLISH' : analysts.consensus === 'SELL' ? 'BEARISH' : 'NEUTRAL',
+      status: analysts.consensus === 'BUY' ? 'PASS' : analysts.consensus === 'SELL' ? 'FAIL' : 'WARN',
+      details: [
+        `Consensus: ${analysts.consensus}`,
+        `Target: $${analysts.targetPrice?.toFixed(2) || 'N/A'}`,
+        `Coverage: ${analysts.count || 0} analysts`
+      ]
+    });
   }
   
   return (

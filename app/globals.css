@@ -88,12 +88,12 @@ select {
 body {
   color: rgb(var(--foreground-rgb));
   background: 
-    /* Prominent white checkered grid */
-    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    /* Grid pattern overlay */
+    linear-gradient(rgba(30, 41, 59, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 41, 59, 0.03) 1px, transparent 1px),
     /* Subtle gradient */
     linear-gradient(180deg, rgb(2, 6, 23) 0%, rgb(15, 23, 42) 50%, rgb(2, 6, 23) 100%);
-  background-size: 20px 20px, 20px 20px, 100% 100%;
+  background-size: 40px 40px, 40px 40px, 100% 100%;
   min-height: 100vh;
 }
 
