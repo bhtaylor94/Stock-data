@@ -20,6 +20,14 @@ const SCHWAB_APP_KEY = process.env.SCHWAB_APP_KEY;
 const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
 const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
 
+// CRITICAL FIX: Headers required for Akamai/Schwab API
+// Without User-Agent, Akamai's CDN blocks requests with 403
+const SCHWAB_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9',
+};
+
 // ============================================================
 // Accuracy-first helpers (freshness gates, regime detection, confidence calibration)
 // ============================================================
@@ -124,7 +132,10 @@ async function getSchwabToken(): Promise<string | null> {
 async function fetchSchwabQuote(token: string, symbol: string) {
   try {
     const res = await fetch(`https://api.schwabapi.com/marketdata/v1/quotes?symbols=${symbol}&indicative=false`, {
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        ...SCHWAB_HEADERS, // CRITICAL: Add headers for Akamai/Schwab
+      },
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -135,7 +146,10 @@ async function fetchSchwabQuote(token: string, symbol: string) {
 async function fetchSchwabPriceHistory(token: string, symbol: string): Promise<{ open: number; close: number; high: number; low: number; volume: number }[]> {
   try {
     const res = await fetch(`https://api.schwabapi.com/marketdata/v1/pricehistory?symbol=${symbol}&periodType=year&period=1&frequencyType=daily&frequency=1`, {
-      headers: { 'Authorization': `Bearer ${token}` },
+      headers: { 
+        'Authorization': `Bearer ${token}`,
+        ...SCHWAB_HEADERS, // CRITICAL: Add headers for Akamai/Schwab
+      },
     });
     if (!res.ok) return [];
     const data = await res.json();
