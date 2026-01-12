@@ -500,7 +500,7 @@ function OptionsTab({
         suggestions={data.suggestions}
         onViewEvidence={onViewEvidence}
       />
-              <EvidencePreviewStrip packet={optionsData?.meta?.evidencePacket} onOpen={() => showEvidence(optionsData)} />
+              <EvidencePreviewStrip packet={data?.meta?.evidencePacket} onOpen={() => showEvidence(data)} />
       
       {/* Unusual Options Activity - ALWAYS VISIBLE */}
       <UnusualActivitySection 
