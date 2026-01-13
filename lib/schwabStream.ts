@@ -1,22 +1,39 @@
 // lib/schwabStream.ts
-// WebSocket client for real-time Schwab market data streaming
-// STANDALONE VERSION - No dependencies on other files
+// Schwab WebSocket Streaming Client
+// Handles real-time market data streaming from Schwab API
+
+import { getSchwabAccessToken } from './schwab';
 
 // ============================================================
 // TYPES
 // ============================================================
+
+export type StreamingService = 
+  | 'LEVELONE_EQUITIES'
+  | 'LEVELONE_OPTIONS'
+  | 'ACCT_ACTIVITY'
+  | 'CHART_EQUITY';
+
+export interface StreamMessage {
+  service: StreamingService | 'ADMIN';
+  requestid: string;
+  command: 'LOGIN' | 'SUBS' | 'UNSUBS' | 'ADD' | 'LOGOUT';
+  parameters?: any;
+}
 
 export interface EquityQuote {
   symbol: string;
   bid: number;
   ask: number;
   last: number;
+  bidSize: number;
+  askSize: number;
   volume: number;
+  lastSize: number;
   high: number;
   low: number;
   close: number;
-  change: number;
-  changePercent: number;
+  open: number;
   timestamp: number;
 }
 
@@ -32,396 +49,523 @@ export interface OptionQuote {
   theta: number;
   vega: number;
   rho: number;
-  volatility: number;
+  impliedVolatility: number;
+  theoreticalValue: number;
+  intrinsicValue: number;
+  timeValue: number;
+  daysToExpiration: number;
   timestamp: number;
 }
 
-type MessageCallback = (data: EquityQuote | OptionQuote) => void;
-
-interface Subscription {
-  service: string;
-  command: string;
-  parameters?: {
-    keys?: string;
-    fields?: string;
-  };
-}
+export type QuoteUpdateCallback = (quote: EquityQuote | OptionQuote) => void;
+export type AccountUpdateCallback = (update: any) => void;
+export type ConnectionCallback = (connected: boolean) => void;
 
 // ============================================================
-// TOKEN FETCHING (Standalone - no imports needed)
+// SCHWAB STREAMING CLIENT (SINGLETON)
 // ============================================================
 
-async function getAccessToken(): Promise<string | null> {
-  const appKey = process.env.SCHWAB_APP_KEY?.trim();
-  const appSecret = process.env.SCHWAB_APP_SECRET?.trim();
-  const refreshToken = process.env.SCHWAB_REFRESH_TOKEN?.trim();
-
-  if (!appKey || !appSecret || !refreshToken) {
-    console.error('[SchwabStream] Missing credentials');
-    return null;
-  }
-
-  try {
-    const basic = Buffer.from(`${appKey}:${appSecret}`).toString('base64');
-    const body = new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-    });
-
-    const response = await fetch('https://api.schwabapi.com/v1/oauth/token', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${basic}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: body.toString(),
-    });
-
-    if (!response.ok) {
-      console.error('[SchwabStream] Token fetch failed:', response.status);
-      return null;
-    }
-
-    const data = await response.json();
-    return data.access_token || null;
-  } catch (error) {
-    console.error('[SchwabStream] Token error:', error);
-    return null;
-  }
-}
-
-// ============================================================
-// WEBSOCKET CLIENT
-// ============================================================
-
-class SchwabStreamClient {
+class SchwabStreamingClient {
   private ws: WebSocket | null = null;
-  private isConnected = false;
+  private token: string | null = null;
+  private isAuthenticated = false;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 2000;
   private heartbeatInterval: NodeJS.Timeout | null = null;
-  private subscriptions = new Map<string, Set<MessageCallback>>();
-  private activeSubscriptions = new Set<string>();
+  private requestId = 0;
+
+  // Subscriptions
+  private equitySubscriptions = new Set<string>();
+  private optionSubscriptions = new Set<string>();
+  private accountSubscriptions = new Set<string>();
+
+  // Callbacks
+  private quoteCallbacks = new Map<string, Set<QuoteUpdateCallback>>();
+  private accountCallbacks = new Set<AccountUpdateCallback>();
+  private connectionCallbacks = new Set<ConnectionCallback>();
+
+  constructor() {
+    if (typeof window === 'undefined') {
+      console.warn('[SchwabStream] WebSocket not available in server environment');
+    }
+  }
+
+  // ============================================================
+  // CONNECTION MANAGEMENT
+  // ============================================================
 
   async connect(): Promise<boolean> {
-    if (this.isConnected) return true;
-
-    console.log('[SchwabStream] Connecting...');
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      console.log('[SchwabStream] Already connected');
+      return true;
+    }
 
     try {
-      const token = await getAccessToken();
-      if (!token) {
-        console.error('[SchwabStream] No access token available');
+      // Get fresh access token
+      const tokenResult = await getSchwabAccessToken('stream', { forceRefresh: false });
+      if (!tokenResult.token) {
+        console.error('[SchwabStream] Failed to get access token:', tokenResult.error);
         return false;
       }
 
-      const wsUrl = `wss://api.schwabapi.com/trader/v1/stream?token=${token}`;
-      
-      if (typeof window !== 'undefined') {
-        this.ws = new WebSocket(wsUrl);
-      } else {
-        console.warn('[SchwabStream] WebSocket not available in server environment');
-        return false;
-      }
+      this.token = tokenResult.token;
 
-      return new Promise((resolve) => {
-        if (!this.ws) {
-          resolve(false);
-          return;
-        }
+      // Create WebSocket connection
+      console.log('[SchwabStream] Connecting to Schwab WebSocket...');
+      this.ws = new WebSocket('wss://api.schwabapi.com/trader/v1/stream');
 
-        this.ws.onopen = () => {
-          console.log('[SchwabStream] Connected');
-          this.isConnected = true;
-          this.reconnectAttempts = 0;
-          this.startHeartbeat();
-          this.resubscribeAll();
-          resolve(true);
-        };
+      // Setup event handlers
+      this.ws.onopen = () => this.handleOpen();
+      this.ws.onmessage = (event) => this.handleMessage(event);
+      this.ws.onerror = (error) => this.handleError(error);
+      this.ws.onclose = (event) => this.handleClose(event);
 
-        this.ws.onmessage = (event) => {
-          this.handleMessage(event.data);
-        };
-
-        this.ws.onerror = (error) => {
-          console.error('[SchwabStream] WebSocket error:', error);
-          resolve(false);
-        };
-
-        this.ws.onclose = () => {
-          console.log('[SchwabStream] Connection closed');
-          this.isConnected = false;
-          this.stopHeartbeat();
-          this.attemptReconnect();
-        };
-      });
+      return true;
     } catch (error) {
       console.error('[SchwabStream] Connection error:', error);
       return false;
     }
   }
 
-  disconnect(): void {
-    console.log('[SchwabStream] Disconnecting');
-    this.isConnected = false;
-    this.stopHeartbeat();
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-  }
-
-  subscribeEquity(symbols: string[], callback: MessageCallback): void {
-    const service = 'LEVELONE_EQUITIES';
-    const key = `${service}:${symbols.join(',')}`;
-
-    if (!this.subscriptions.has(key)) {
-      this.subscriptions.set(key, new Set());
-    }
-    this.subscriptions.get(key)!.add(callback);
-
-    if (this.isConnected) {
-      this.sendSubscription({
-        service,
-        command: 'SUBS',
-        parameters: {
-          keys: symbols.join(','),
-          fields: '0,1,2,3,4,5,8,9',
-        },
-      });
-      this.activeSubscriptions.add(key);
-    }
-  }
-
-  unsubscribeEquity(symbols: string[], callback: MessageCallback): void {
-    const service = 'LEVELONE_EQUITIES';
-    const key = `${service}:${symbols.join(',')}`;
-
-    const callbacks = this.subscriptions.get(key);
-    if (callbacks) {
-      callbacks.delete(callback);
-      if (callbacks.size === 0) {
-        this.subscriptions.delete(key);
-        this.activeSubscriptions.delete(key);
-
-        if (this.isConnected) {
-          this.sendSubscription({
-            service,
-            command: 'UNSUBS',
-            parameters: {
-              keys: symbols.join(','),
-            },
-          });
-        }
-      }
-    }
-  }
-
-  subscribeOption(symbols: string[], callback: MessageCallback): void {
-    const service = 'LEVELONE_OPTIONS';
-    const key = `${service}:${symbols.join(',')}`;
-
-    if (!this.subscriptions.has(key)) {
-      this.subscriptions.set(key, new Set());
-    }
-    this.subscriptions.get(key)!.add(callback);
-
-    if (this.isConnected) {
-      this.sendSubscription({
-        service,
-        command: 'SUBS',
-        parameters: {
-          keys: symbols.join(','),
-          fields: '0,1,2,3,4,8,10,11,12,13,14,15,16',
-        },
-      });
-      this.activeSubscriptions.add(key);
-    }
-  }
-
-  unsubscribeOption(symbols: string[], callback: MessageCallback): void {
-    const service = 'LEVELONE_OPTIONS';
-    const key = `${service}:${symbols.join(',')}`;
-
-    const callbacks = this.subscriptions.get(key);
-    if (callbacks) {
-      callbacks.delete(callback);
-      if (callbacks.size === 0) {
-        this.subscriptions.delete(key);
-        this.activeSubscriptions.delete(key);
-
-        if (this.isConnected) {
-          this.sendSubscription({
-            service,
-            command: 'UNSUBS',
-            parameters: {
-              keys: symbols.join(','),
-            },
-          });
-        }
-      }
-    }
-  }
-
-  isConnectedToStream(): boolean {
-    return this.isConnected;
-  }
-
-  getActiveSubscriptions(): string[] {
-    return Array.from(this.activeSubscriptions);
-  }
-
-  private sendSubscription(sub: Subscription): void {
-    if (!this.ws || !this.isConnected) return;
-
-    const message = {
-      requests: [sub],
-    };
-
-    try {
-      this.ws.send(JSON.stringify(message));
-      console.log('[SchwabStream] Sent subscription:', sub.service, sub.command);
-    } catch (error) {
-      console.error('[SchwabStream] Failed to send subscription:', error);
-    }
-  }
-
-  private handleMessage(data: string): void {
-    try {
-      const message = JSON.parse(data);
-
-      if (message.response) {
-        console.log('[SchwabStream] Response:', message.response);
-      } else if (message.data) {
-        this.processDataUpdate(message.data);
-      } else if (message.notify) {
-        console.log('[SchwabStream] Notification:', message.notify);
-      }
-    } catch (error) {
-      console.error('[SchwabStream] Failed to parse message:', error);
-    }
-  }
-
-  private processDataUpdate(data: any[]): void {
-    for (const item of data) {
-      const service = item.service;
-      const content = item.content;
-
-      if (!content) continue;
-
-      for (const update of content) {
-        if (service === 'LEVELONE_EQUITIES') {
-          this.processEquityUpdate(update);
-        } else if (service === 'LEVELONE_OPTIONS') {
-          this.processOptionUpdate(update);
-        }
-      }
-    }
-  }
-
-  private processEquityUpdate(update: any): void {
-    const quote: EquityQuote = {
-      symbol: update.key || update['1'] || '',
-      bid: update['2'] || 0,
-      ask: update['3'] || 0,
-      last: update['4'] || 0,
-      volume: update['8'] || 0,
-      high: update['6'] || 0,
-      low: update['7'] || 0,
-      close: update['9'] || 0,
-      change: update['10'] || 0,
-      changePercent: update['11'] || 0,
-      timestamp: Date.now(),
-    };
-
-    this.subscriptions.forEach((callbacks, key) => {
-      if (key.includes('LEVELONE_EQUITIES') && key.includes(quote.symbol)) {
-        callbacks.forEach((callback) => callback(quote));
-      }
-    });
-  }
-
-  private processOptionUpdate(update: any): void {
-    const quote: OptionQuote = {
-      symbol: update.key || update['0'] || '',
-      bid: update['2'] || 0,
-      ask: update['3'] || 0,
-      last: update['4'] || 0,
-      volume: update['8'] || 0,
-      openInterest: update['10'] || 0,
-      delta: update['11'] || 0,
-      gamma: update['12'] || 0,
-      theta: update['13'] || 0,
-      vega: update['14'] || 0,
-      rho: update['15'] || 0,
-      volatility: update['16'] || 0,
-      timestamp: Date.now(),
-    };
-
-    this.subscriptions.forEach((callbacks, key) => {
-      if (key.includes('LEVELONE_OPTIONS') && key.includes(quote.symbol)) {
-        callbacks.forEach((callback) => callback(quote));
-      }
-    });
-  }
-
-  private startHeartbeat(): void {
-    this.stopHeartbeat();
-    this.heartbeatInterval = setInterval(() => {
-      if (this.ws && this.isConnected) {
-        try {
-          this.ws.send(JSON.stringify({ heartbeat: Date.now() }));
-        } catch (error) {
-          console.error('[SchwabStream] Heartbeat failed:', error);
-        }
-      }
-    }, 30000);
-  }
-
-  private stopHeartbeat(): void {
+  disconnect() {
+    console.log('[SchwabStream] Disconnecting...');
+    
+    // Clear heartbeat
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
     }
-  }
 
-  private attemptReconnect(): void {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('[SchwabStream] Max reconnection attempts reached');
-      return;
+    // Send logout
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.send({
+        service: 'ADMIN',
+        requestid: this.getRequestId(),
+        command: 'LOGOUT',
+      });
     }
 
-    this.reconnectAttempts++;
-    const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
+    // Close WebSocket
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
 
-    console.log(`[SchwabStream] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
-
-    setTimeout(() => {
-      this.connect();
-    }, delay);
+    this.isAuthenticated = false;
+    this.notifyConnectionChange(false);
   }
 
-  private resubscribeAll(): void {
-    console.log('[SchwabStream] Resubscribing to active subscriptions');
-    const subscriptionsToResend = Array.from(this.activeSubscriptions);
-    this.activeSubscriptions.clear();
+  private handleOpen() {
+    console.log('[SchwabStream] WebSocket opened, logging in...');
+    this.reconnectAttempts = 0;
 
-    for (const key of subscriptionsToResend) {
-      const [service, symbols] = key.split(':');
-      const symbolList = symbols.split(',');
-      const callbacks = this.subscriptions.get(key);
+    // Send login request
+    this.send({
+      service: 'ADMIN',
+      requestid: this.getRequestId(),
+      command: 'LOGIN',
+      parameters: {
+        token: this.token,
+        version: '1.0',
+      },
+    });
+  }
 
-      if (callbacks && callbacks.size > 0) {
-        const callback = callbacks.values().next().value;
-        if (service.includes('EQUITIES')) {
-          this.subscribeEquity(symbolList, callback);
-        } else if (service.includes('OPTIONS')) {
-          this.subscribeOption(symbolList, callback);
+  private handleMessage(event: MessageEvent) {
+    try {
+      const data = JSON.parse(event.data);
+      
+      // Handle login response
+      if (data.response) {
+        for (const response of data.response) {
+          if (response.service === 'ADMIN' && response.command === 'LOGIN') {
+            if (response.content?.code === 0) {
+              console.log('[SchwabStream] Login successful');
+              this.isAuthenticated = true;
+              this.notifyConnectionChange(true);
+              this.startHeartbeat();
+              this.resubscribeAll();
+            } else {
+              console.error('[SchwabStream] Login failed:', response.content);
+              this.disconnect();
+            }
+          }
         }
+      }
+
+      // Handle data updates
+      if (data.data) {
+        for (const update of data.data) {
+          this.processUpdate(update);
+        }
+      }
+
+    } catch (error) {
+      console.error('[SchwabStream] Message parse error:', error);
+    }
+  }
+
+  private handleError(error: Event) {
+    console.error('[SchwabStream] WebSocket error:', error);
+  }
+
+  private handleClose(event: CloseEvent) {
+    console.log('[SchwabStream] WebSocket closed:', event.code, event.reason);
+    this.isAuthenticated = false;
+    this.notifyConnectionChange(false);
+
+    // Attempt reconnect
+    if (this.reconnectAttempts < this.maxReconnectAttempts) {
+      this.reconnectAttempts++;
+      console.log(`[SchwabStream] Reconnecting... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+      setTimeout(() => this.connect(), this.reconnectDelay * this.reconnectAttempts);
+    } else {
+      console.error('[SchwabStream] Max reconnect attempts reached');
+    }
+  }
+
+  private startHeartbeat() {
+    // Send heartbeat every 30 seconds to keep connection alive
+    this.heartbeatInterval = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.send({
+          service: 'ADMIN',
+          requestid: this.getRequestId(),
+          command: 'LOGOUT', // This is actually used as a ping
+        });
+      }
+    }, 30000);
+  }
+
+  // ============================================================
+  // SUBSCRIPTION MANAGEMENT
+  // ============================================================
+
+  subscribeEquity(symbols: string[], callback: QuoteUpdateCallback) {
+    if (!Array.isArray(symbols) || symbols.length === 0) return;
+
+    // Add symbols to subscriptions
+    symbols.forEach(symbol => {
+      this.equitySubscriptions.add(symbol.toUpperCase());
+      
+      // Add callback
+      if (!this.quoteCallbacks.has(symbol)) {
+        this.quoteCallbacks.set(symbol, new Set());
+      }
+      this.quoteCallbacks.get(symbol)!.add(callback);
+    });
+
+    // Send subscription if connected
+    if (this.isAuthenticated) {
+      this.send({
+        service: 'LEVELONE_EQUITIES',
+        requestid: this.getRequestId(),
+        command: 'SUBS',
+        parameters: {
+          keys: symbols.join(',').toUpperCase(),
+          fields: '0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15',
+        },
+      });
+    }
+  }
+
+  unsubscribeEquity(symbols: string[], callback?: QuoteUpdateCallback) {
+    if (!Array.isArray(symbols) || symbols.length === 0) return;
+
+    symbols.forEach(symbol => {
+      const upperSymbol = symbol.toUpperCase();
+      
+      // Remove callback
+      if (callback && this.quoteCallbacks.has(upperSymbol)) {
+        this.quoteCallbacks.get(upperSymbol)!.delete(callback);
+        
+        // Remove symbol if no more callbacks
+        if (this.quoteCallbacks.get(upperSymbol)!.size === 0) {
+          this.quoteCallbacks.delete(upperSymbol);
+          this.equitySubscriptions.delete(upperSymbol);
+        }
+      } else {
+        // Remove all callbacks for symbol
+        this.quoteCallbacks.delete(upperSymbol);
+        this.equitySubscriptions.delete(upperSymbol);
+      }
+    });
+
+    // Send unsubscribe if connected
+    if (this.isAuthenticated && symbols.length > 0) {
+      this.send({
+        service: 'LEVELONE_EQUITIES',
+        requestid: this.getRequestId(),
+        command: 'UNSUBS',
+        parameters: {
+          keys: symbols.join(',').toUpperCase(),
+        },
+      });
+    }
+  }
+
+  subscribeOption(symbols: string[], callback: QuoteUpdateCallback) {
+    if (!Array.isArray(symbols) || symbols.length === 0) return;
+
+    // Add symbols to subscriptions
+    symbols.forEach(symbol => {
+      this.optionSubscriptions.add(symbol.toUpperCase());
+      
+      // Add callback
+      if (!this.quoteCallbacks.has(symbol)) {
+        this.quoteCallbacks.set(symbol, new Set());
+      }
+      this.quoteCallbacks.get(symbol)!.add(callback);
+    });
+
+    // Send subscription if connected
+    if (this.isAuthenticated) {
+      this.send({
+        service: 'LEVELONE_OPTIONS',
+        requestid: this.getRequestId(),
+        command: 'SUBS',
+        parameters: {
+          keys: symbols.join(',').toUpperCase(),
+          fields: '0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25',
+        },
+      });
+    }
+  }
+
+  unsubscribeOption(symbols: string[], callback?: QuoteUpdateCallback) {
+    if (!Array.isArray(symbols) || symbols.length === 0) return;
+
+    symbols.forEach(symbol => {
+      const upperSymbol = symbol.toUpperCase();
+      
+      if (callback && this.quoteCallbacks.has(upperSymbol)) {
+        this.quoteCallbacks.get(upperSymbol)!.delete(callback);
+        
+        if (this.quoteCallbacks.get(upperSymbol)!.size === 0) {
+          this.quoteCallbacks.delete(upperSymbol);
+          this.optionSubscriptions.delete(upperSymbol);
+        }
+      } else {
+        this.quoteCallbacks.delete(upperSymbol);
+        this.optionSubscriptions.delete(upperSymbol);
+      }
+    });
+
+    if (this.isAuthenticated && symbols.length > 0) {
+      this.send({
+        service: 'LEVELONE_OPTIONS',
+        requestid: this.getRequestId(),
+        command: 'UNSUBS',
+        parameters: {
+          keys: symbols.join(',').toUpperCase(),
+        },
+      });
+    }
+  }
+
+  subscribeAccount(accountHash: string, callback: AccountUpdateCallback) {
+    this.accountSubscriptions.add(accountHash);
+    this.accountCallbacks.add(callback);
+
+    if (this.isAuthenticated) {
+      this.send({
+        service: 'ACCT_ACTIVITY',
+        requestid: this.getRequestId(),
+        command: 'SUBS',
+        parameters: {
+          keys: accountHash,
+          fields: '0,1,2,3',
+        },
+      });
+    }
+  }
+
+  unsubscribeAccount(accountHash: string, callback?: AccountUpdateCallback) {
+    this.accountSubscriptions.delete(accountHash);
+    
+    if (callback) {
+      this.accountCallbacks.delete(callback);
+    }
+
+    if (this.isAuthenticated) {
+      this.send({
+        service: 'ACCT_ACTIVITY',
+        requestid: this.getRequestId(),
+        command: 'UNSUBS',
+        parameters: {
+          keys: accountHash,
+        },
+      });
+    }
+  }
+
+  private resubscribeAll() {
+    // Resubscribe to all active subscriptions after reconnect
+    if (this.equitySubscriptions.size > 0) {
+      this.send({
+        service: 'LEVELONE_EQUITIES',
+        requestid: this.getRequestId(),
+        command: 'SUBS',
+        parameters: {
+          keys: Array.from(this.equitySubscriptions).join(','),
+          fields: '0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15',
+        },
+      });
+    }
+
+    if (this.optionSubscriptions.size > 0) {
+      this.send({
+        service: 'LEVELONE_OPTIONS',
+        requestid: this.getRequestId(),
+        command: 'SUBS',
+        parameters: {
+          keys: Array.from(this.optionSubscriptions).join(','),
+          fields: '0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25',
+        },
+      });
+    }
+
+    if (this.accountSubscriptions.size > 0) {
+      Array.from(this.accountSubscriptions).forEach(accountHash => {
+        this.send({
+          service: 'ACCT_ACTIVITY',
+          requestid: this.getRequestId(),
+          command: 'SUBS',
+          parameters: {
+            keys: accountHash,
+            fields: '0,1,2,3',
+          },
+        });
+      });
+    }
+  }
+
+  // ============================================================
+  // DATA PROCESSING
+  // ============================================================
+
+  private processUpdate(update: any) {
+    const { service, content } = update;
+
+    if (service === 'LEVELONE_EQUITIES') {
+      this.processEquityUpdate(content);
+    } else if (service === 'LEVELONE_OPTIONS') {
+      this.processOptionUpdate(content);
+    } else if (service === 'ACCT_ACTIVITY') {
+      this.processAccountUpdate(content);
+    }
+  }
+
+  private processEquityUpdate(content: any[]) {
+    for (const item of content) {
+      const quote: EquityQuote = {
+        symbol: item.key || item['0'],
+        bid: item['1'] || 0,
+        ask: item['2'] || 0,
+        last: item['3'] || 0,
+        bidSize: item['4'] || 0,
+        askSize: item['5'] || 0,
+        volume: item['6'] || 0,
+        lastSize: item['7'] || 0,
+        high: item['8'] || 0,
+        low: item['9'] || 0,
+        close: item['10'] || 0,
+        open: item['15'] || 0,
+        timestamp: Date.now(),
+      };
+
+      // Notify callbacks
+      const callbacks = this.quoteCallbacks.get(quote.symbol);
+      if (callbacks) {
+        callbacks.forEach(cb => cb(quote));
       }
     }
   }
+
+  private processOptionUpdate(content: any[]) {
+    for (const item of content) {
+      const quote: OptionQuote = {
+        symbol: item.key || item['0'],
+        bid: item['1'] || 0,
+        ask: item['2'] || 0,
+        last: item['3'] || 0,
+        volume: item['8'] || 0,
+        openInterest: item['9'] || 0,
+        delta: item['14'] || 0,
+        gamma: item['15'] || 0,
+        theta: item['16'] || 0,
+        vega: item['17'] || 0,
+        rho: item['18'] || 0,
+        impliedVolatility: item['19'] || 0,
+        theoreticalValue: item['20'] || 0,
+        intrinsicValue: item['21'] || 0,
+        timeValue: item['22'] || 0,
+        daysToExpiration: item['24'] || 0,
+        timestamp: Date.now(),
+      };
+
+      // Notify callbacks
+      const callbacks = this.quoteCallbacks.get(quote.symbol);
+      if (callbacks) {
+        callbacks.forEach(cb => cb(quote));
+      }
+    }
+  }
+
+  private processAccountUpdate(content: any[]) {
+    for (const item of content) {
+      // Notify account callbacks
+      this.accountCallbacks.forEach(cb => cb(item));
+    }
+  }
+
+  // ============================================================
+  // CONNECTION CALLBACKS
+  // ============================================================
+
+  onConnectionChange(callback: ConnectionCallback) {
+    this.connectionCallbacks.add(callback);
+    
+    // Immediately notify of current state
+    callback(this.isAuthenticated);
+    
+    // Return unsubscribe function
+    return () => this.connectionCallbacks.delete(callback);
+  }
+
+  private notifyConnectionChange(connected: boolean) {
+    this.connectionCallbacks.forEach(cb => cb(connected));
+  }
+
+  // ============================================================
+  // UTILITIES
+  // ============================================================
+
+  private send(message: StreamMessage) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    } else {
+      console.warn('[SchwabStream] Cannot send message - WebSocket not open');
+    }
+  }
+
+  private getRequestId(): string {
+    return (++this.requestId).toString();
+  }
+
+  isConnected(): boolean {
+    return this.isAuthenticated && this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  getSubscriptions() {
+    return {
+      equities: Array.from(this.equitySubscriptions),
+      options: Array.from(this.optionSubscriptions),
+      accounts: Array.from(this.accountSubscriptions),
+    };
+  }
 }
 
-export const schwabStream = new SchwabStreamClient();
+// Export singleton instance
+export const schwabStream = new SchwabStreamingClient();
