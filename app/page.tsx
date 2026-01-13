@@ -10,6 +10,7 @@ import { OptionsDecisionHero } from './components/options/OptionsDecisionHero';
 import { UnusualActivitySection } from './components/options/UnusualActivitySection';
 import { OptionsSetupCard } from './components/options/OptionsSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
+import { RealPortfolio } from './components/portfolio/RealPortfolio';
 import { COMPANY_NAMES } from '@/lib/companyNames';
 
 // ============================================================
@@ -203,6 +204,7 @@ function TrackerTab({ onViewEvidence }: { onViewEvidence?: (data: any) => void }
   const [trackerData, setTrackerData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showOvernightInfo, setShowOvernightInfo] = useState(false);
+  const [showRealPortfolio, setShowRealPortfolio] = useState(false);
   
   const fetchTrackerData = async () => {
     try {
@@ -239,6 +241,30 @@ function TrackerTab({ onViewEvidence }: { onViewEvidence?: (data: any) => void }
   if (loading) return <LoadingSpinner />;
   if (!trackerData) return <p className="text-slate-500 text-center py-12">Error loading tracker</p>;
   
+  // Show real portfolio if toggled
+  if (showRealPortfolio) {
+    return (
+      <div className="space-y-6 animate-fade-in">
+        {/* Toggle Switch */}
+        <div className="flex items-center justify-between p-4 rounded-xl border border-slate-700/50 bg-slate-800/30">
+          <div>
+            <h3 className="text-lg font-semibold text-white">Portfolio View</h3>
+            <p className="text-sm text-slate-400">Switch between paper trading and live Schwab account</p>
+          </div>
+          <button
+            onClick={() => setShowRealPortfolio(false)}
+            className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition flex items-center gap-2"
+          >
+            <span>📊</span>
+            Switch to Paper Trading
+          </button>
+        </div>
+        
+        <RealPortfolio />
+      </div>
+    );
+  }
+  
   const suggestions = trackerData.suggestions || [];
   const stats = trackerData.stats || {};
   const active = suggestions.filter((s: any) => s.status === 'ACTIVE');
@@ -246,6 +272,21 @@ function TrackerTab({ onViewEvidence }: { onViewEvidence?: (data: any) => void }
   
   return (
     <div className="space-y-6 animate-fade-in">
+      {/* Toggle Switch */}
+      <div className="flex items-center justify-between p-4 rounded-xl border border-blue-500/30 bg-blue-500/10">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Portfolio View</h3>
+          <p className="text-sm text-slate-400">Currently showing paper trading portfolio</p>
+        </div>
+        <button
+          onClick={() => setShowRealPortfolio(true)}
+          className="px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 transition flex items-center gap-2"
+        >
+          <span>💰</span>
+          View Live Schwab Account
+        </button>
+      </div>
+      
       {/* Portfolio Summary */}
       <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-slate-700/50">
         <h2 className="text-lg font-semibold text-white mb-4">📊 Portfolio Summary</h2>
