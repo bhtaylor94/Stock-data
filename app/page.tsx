@@ -11,6 +11,7 @@ import { UnusualActivitySection } from './components/options/UnusualActivitySect
 import { OptionsSetupCard } from './components/options/OptionsSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
 import { RealPortfolio } from './components/portfolio/RealPortfolio';
+import { OrderModal } from './components/trading/OrderModal';
 import { COMPANY_NAMES } from '@/lib/companyNames';
 
 // ============================================================
@@ -528,6 +529,11 @@ function StockTab({
           }
         }}
         onViewEvidence={onViewEvidence}
+        onTrade={() => handleTrade(
+          ticker, 
+          data.price || data.quote?.c || 0,
+          data.meta?.tradeDecision?.action || 'BUY'
+        )}
       />
       
       {/* Score Breakdown */}
@@ -878,6 +884,12 @@ export default function TradingDashboard() {
   const [evidenceDrawerOpen, setEvidenceDrawerOpen] = useState(false);
   const [evidenceData, setEvidenceData] = useState<any>(null);
   
+  // Order Modal state
+  const [orderModalOpen, setOrderModalOpen] = useState(false);
+  const [orderSymbol, setOrderSymbol] = useState('');
+  const [orderPrice, setOrderPrice] = useState(0);
+  const [orderAction, setOrderAction] = useState<'BUY' | 'SELL' | 'HOLD'>('BUY');
+  
   // Toast messages
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   
@@ -947,8 +959,25 @@ export default function TradingDashboard() {
     setEvidenceDrawerOpen(true);
   };
   
+  const handleTrade = (symbol: string, price: number, action: 'BUY' | 'SELL' | 'HOLD') => {
+    setOrderSymbol(symbol);
+    setOrderPrice(price);
+    setOrderAction(action);
+    setOrderModalOpen(true);
+  };
+  
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-4">
+      {/* Order Modal */}
+      <OrderModal
+        isOpen={orderModalOpen}
+        onClose={() => setOrderModalOpen(false)}
+        symbol={orderSymbol}
+        currentPrice={orderPrice}
+        recommendation={orderAction}
+        assetType="EQUITY"
+      />
+      
       {/* Evidence Drawer */}
       <EvidenceDrawer 
         isOpen={evidenceDrawerOpen}
