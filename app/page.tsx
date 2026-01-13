@@ -462,7 +462,7 @@ function StockTab({
       <StockDecisionHero 
         ticker={ticker}
         price={data.price || data.quote?.c || 0}
-        analysis={analysis}
+        analysis={{ ...analysis, changePercent: data.changePercent }}
         meta={data.meta}
         onTrack={() => {
           if (suggestions?.[0] && onTrack) {

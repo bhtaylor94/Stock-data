@@ -24,6 +24,9 @@ export function StockDecisionHero({
   const action = meta?.tradeDecision?.action || 'HOLD';
   const companyName = COMPANY_NAMES[ticker] || ticker;
   
+  // Get price change from parent (passed through from API response)
+  const priceChange = (analysis as any)?.changePercent;
+  
   return (
     <div className="sticky top-0 z-10 p-5 rounded-2xl bg-gradient-to-br from-slate-800/95 to-slate-900/95 backdrop-blur-sm border border-slate-700/50 shadow-xl">
       {/* Ticker + Price Row */}
@@ -33,11 +36,21 @@ export function StockDecisionHero({
           <h1 className="text-4xl font-bold text-white leading-tight">{ticker}</h1>
           {/* Company Name - Smaller, underneath ticker */}
           <p className="text-sm text-slate-400 mt-1 mb-3">{companyName}</p>
-          {/* Price - Extra Large */}
-          <p className="text-6xl font-bold text-emerald-400 mb-1 leading-tight">
-            ${price?.toFixed(2) || 'N/A'}
-          </p>
-          <p className="text-xs text-slate-500">
+          {/* Price - Balanced size with percentage change */}
+          <div className="flex items-baseline gap-3">
+            <p className="text-4xl font-bold text-emerald-400 leading-tight">
+              ${price?.toFixed(2) || 'N/A'}
+            </p>
+            {/* Percentage Change - Green if up, Red if down */}
+            {priceChange !== undefined && priceChange !== null && (
+              <span className={`text-xl font-semibold ${
+                priceChange >= 0 ? 'text-emerald-400' : 'text-red-400'
+              }`}>
+                {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)}%
+              </span>
+            )}
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
             {meta?.source || 'Live'} • {meta?.asOf && new Date(meta.asOf).toLocaleTimeString()}
           </p>
         </div>

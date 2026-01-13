@@ -6,13 +6,15 @@ export function OptionsDecisionHero({
   currentPrice,
   meta,
   suggestions,
-  onViewEvidence
+  onViewEvidence,
+  priceChange
 }: { 
   ticker: string;
   currentPrice?: number;
   meta: any;
   suggestions?: any[];
   onViewEvidence?: () => void;
+  priceChange?: number;
 }) {
   const action = meta?.tradeDecision?.action || 'NO_TRADE';
   const confidence = meta?.tradeDecision?.confidence || 0;
@@ -31,13 +33,23 @@ export function OptionsDecisionHero({
           <h1 className="text-4xl font-bold text-white leading-tight">{ticker}</h1>
           {/* Company Name - Smaller, underneath ticker */}
           <p className="text-sm text-slate-400 mt-1 mb-3">{companyName}</p>
-          {/* Price - Extra Large */}
+          {/* Price - Balanced size with percentage change */}
           {currentPrice && (
-            <p className="text-6xl font-bold text-emerald-400 mb-1 leading-tight">
-              ${currentPrice.toFixed(2)}
-            </p>
+            <div className="flex items-baseline gap-3">
+              <p className="text-4xl font-bold text-emerald-400 leading-tight">
+                ${currentPrice.toFixed(2)}
+              </p>
+              {/* Percentage Change - Green if up, Red if down */}
+              {priceChange !== undefined && priceChange !== null && (
+                <span className={`text-xl font-semibold ${
+                  priceChange >= 0 ? 'text-emerald-400' : 'text-red-400'
+                }`}>
+                  {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)}%
+                </span>
+              )}
+            </div>
           )}
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 mt-1">
             Options • {meta?.asOf && new Date(meta.asOf).toLocaleTimeString()} • {meta?.responseTimeMs}ms
           </p>
         </div>
