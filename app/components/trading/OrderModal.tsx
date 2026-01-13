@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 interface OrderModalProps {
   isOpen: boolean;
@@ -7,6 +7,7 @@ interface OrderModalProps {
   currentPrice: number;
   recommendation?: 'BUY' | 'SELL' | 'HOLD';
   assetType?: 'EQUITY' | 'OPTION';
+  initialQuantity?: number;
   optionDetails?: {
     strike: number;
     expiration: string;
@@ -21,13 +22,26 @@ export function OrderModal({
   currentPrice,
   recommendation = 'BUY',
   assetType = 'EQUITY',
+  initialQuantity = 1,
   optionDetails
 }: OrderModalProps) {
   const [orderType, setOrderType] = useState<'MARKET' | 'LIMIT'>('MARKET');
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState(initialQuantity);
   const [limitPrice, setLimitPrice] = useState(currentPrice);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [orderId, setOrderId] = useState<string | null>(null);
+
+  // Reset quantity when modal opens with new data
+  useEffect(() => {
+    if (isOpen) {
+      setQuantity(initialQuantity);
+      setLimitPrice(currentPrice);
+      setError(null);
+      setSuccess(false);
+    }
+  }, [isOpen, initialQuantity, currentPrice]);
   const [success, setSuccess] = useState(false);
   const [orderId, setOrderId] = useState<string | null>(null);
 

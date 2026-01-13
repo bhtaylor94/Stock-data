@@ -36,7 +36,12 @@ interface AccountData {
   };
 }
 
-export function RealPortfolio() {
+interface RealPortfolioProps {
+  onAnalyze?: (symbol: string) => void;
+  onTrade?: (symbol: string, price: number, action: 'BUY' | 'SELL', quantity: number) => void;
+}
+
+export function RealPortfolio({ onAnalyze, onTrade }: RealPortfolioProps = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<AccountData | null>(null);
@@ -201,6 +206,7 @@ export function RealPortfolio() {
                   <th className="pb-3 font-medium text-right">Market Value</th>
                   <th className="pb-3 font-medium text-right">Total P&L</th>
                   <th className="pb-3 font-medium text-right">Day P&L</th>
+                  <th className="pb-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -232,6 +238,28 @@ export function RealPortfolio() {
                     </td>
                     <td className={`py-3 text-right font-mono ${pos.dayPLPercent >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {pos.dayPLPercent >= 0 ? '+' : ''}{pos.dayPLPercent.toFixed(2)}%
+                    </td>
+                    <td className="py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {onAnalyze && (
+                          <button
+                            onClick={() => onAnalyze(pos.symbol)}
+                            className="px-3 py-1.5 text-xs rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 border border-blue-500/30 transition"
+                            title="Analyze this position"
+                          >
+                            📊 Analyze
+                          </button>
+                        )}
+                        {onTrade && (
+                          <button
+                            onClick={() => onTrade(pos.symbol, pos.currentPrice, 'SELL', pos.quantity)}
+                            className="px-3 py-1.5 text-xs rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 transition"
+                            title="Sell this position"
+                          >
+                            💸 Sell
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

@@ -261,7 +261,22 @@ function TrackerTab({ onViewEvidence }: { onViewEvidence?: (data: any) => void }
           </button>
         </div>
         
-        <RealPortfolio />
+        <RealPortfolio 
+          onAnalyze={(symbol) => {
+            // Switch to Stock Analysis tab and load symbol
+            setTicker(symbol);
+            setActiveTab('stock');
+            handleSearch(symbol);
+          }}
+          onTrade={(symbol, price, action, quantity) => {
+            // Open order modal with position details
+            setOrderSymbol(symbol);
+            setOrderPrice(price);
+            setOrderAction(action);
+            setOrderQuantity(quantity);
+            setOrderModalOpen(true);
+          }}
+        />
       </div>
     );
   }
@@ -483,7 +498,7 @@ function StockTab({
   ticker: string;
   onTrack?: (success: boolean, message: string) => void;
   onViewEvidence?: () => void;
-  onTrade?: (symbol: string, price: number, action: 'BUY' | 'SELL' | 'HOLD') => void;
+  onTrade?: (symbol: string, price: number, action: 'BUY' | 'SELL' | 'HOLD', quantity: number) => void;
 }) {
   if (loading) return <LoadingSpinner />;
   if (!data) return <p className="text-slate-500 text-center py-12">Enter a ticker symbol to analyze</p>;
@@ -534,7 +549,8 @@ function StockTab({
         onTrade={onTrade ? () => onTrade(
           ticker, 
           data.price || data.quote?.c || 0,
-          data.meta?.tradeDecision?.action || 'BUY'
+          data.meta?.tradeDecision?.action || 'BUY',
+          1
         ) : undefined}
       />
       
@@ -891,6 +907,7 @@ export default function TradingDashboard() {
   const [orderSymbol, setOrderSymbol] = useState('');
   const [orderPrice, setOrderPrice] = useState(0);
   const [orderAction, setOrderAction] = useState<'BUY' | 'SELL' | 'HOLD'>('BUY');
+  const [orderQuantity, setOrderQuantity] = useState(1);
   
   // Toast messages
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -961,10 +978,11 @@ export default function TradingDashboard() {
     setEvidenceDrawerOpen(true);
   };
   
-  const handleTrade = (symbol: string, price: number, action: 'BUY' | 'SELL' | 'HOLD') => {
+  const handleTrade = (symbol: string, price: number, action: 'BUY' | 'SELL' | 'HOLD', quantity: number = 1) => {
     setOrderSymbol(symbol);
     setOrderPrice(price);
     setOrderAction(action);
+    setOrderQuantity(quantity);
     setOrderModalOpen(true);
   };
   
@@ -977,6 +995,7 @@ export default function TradingDashboard() {
         symbol={orderSymbol}
         currentPrice={orderPrice}
         recommendation={orderAction}
+        initialQuantity={orderQuantity}
         assetType="EQUITY"
       />
       
