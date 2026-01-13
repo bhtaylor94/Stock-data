@@ -853,29 +853,48 @@ export default function TradingDashboard() {
     // Smooth scroll to top after ticker selection
     window.scrollTo({ top: 0, behavior: 'smooth' });
     
-    // Fetch stock data
-    fetch(`/api/stock/${sym}`)
-      .then(res => res.json())
-      .then(data => {
+    // CRITICAL: Add timestamp for cache busting to get fresh data
+    const cacheBuster = `?_t=${Date.now()}`;
+    
+    // Fetch stock data with retry on 401
+    const fetchStockWithRetry = async (retries = 1) => {
+      try {
+        const res = await fetch(`/api/stock/${sym}${cacheBuster}`);
+        if (res.status === 401 && retries > 0) {
+          // 401 = token expired, wait 500ms and retry once
+          await new Promise(resolve => setTimeout(resolve, 500));
+          return fetchStockWithRetry(retries - 1);
+        }
+        const data = await res.json();
         setStockData(data);
         setStockLoading(false);
-      })
-      .catch(() => {
+      } catch (err) {
         setStockData({ error: 'Failed to fetch stock data' });
         setStockLoading(false);
-      });
+      }
+    };
     
-    // Fetch options data
-    fetch(`/api/options/${sym}`)
-      .then(res => res.json())
-      .then(data => {
+    // Fetch options data with retry on 401
+    const fetchOptionsWithRetry = async (retries = 1) => {
+      try {
+        const res = await fetch(`/api/options/${sym}${cacheBuster}`);
+        if (res.status === 401 && retries > 0) {
+          // 401 = token expired, wait 500ms and retry once
+          await new Promise(resolve => setTimeout(resolve, 500));
+          return fetchOptionsWithRetry(retries - 1);
+        }
+        const data = await res.json();
         setOptionsData(data);
         setOptionsLoading(false);
-      })
-      .catch(() => {
+      } catch (err) {
         setOptionsData({ error: 'Failed to fetch options data' });
         setOptionsLoading(false);
-      });
+      }
+    };
+    
+    // Execute both fetches
+    fetchStockWithRetry();
+    fetchOptionsWithRetry();
   };
   
   const handleTrack = (success: boolean, message: string) => {

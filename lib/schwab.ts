@@ -96,7 +96,7 @@ export async function getSchwabAccessToken(
 export async function schwabFetchJson<T>(
   token: string,
   url: string,
-  opts?: { method?: string; headers?: Record<string, string>; body?: any }
+  opts?: { method?: string; headers?: Record<string, string>; body?: any; scope?: 'stock' | 'options' | 'tracker' }
 ): Promise<{ ok: true; data: T } | { ok: false; status: number; error: string; text?: string }> {
   try {
     const res = await fetch(url, {
@@ -112,6 +112,32 @@ export async function schwabFetchJson<T>(
     const text = await res.text();
     let data: any = null;
     try { data = text ? JSON.parse(text) : null; } catch { /* ignore */ }
+
+    // CRITICAL: Auto-retry on 401 with fresh token
+    if (res.status === 401 && opts?.scope) {
+      console.warn(`[Schwab] 401 on ${url}, retrying with fresh token...`);
+      const freshTokenResult = await getSchwabAccessToken(opts.scope, { forceRefresh: true });
+      if (freshTokenResult.token) {
+        // Retry the request with fresh token
+        const retryRes = await fetch(url, {
+          method: opts?.method || 'GET',
+          headers: {
+            Authorization: `Bearer ${freshTokenResult.token}`,
+            ...SCHWAB_HEADERS,
+            ...(opts?.headers || {}),
+          },
+          body: opts?.body,
+        });
+        const retryText = await retryRes.text();
+        let retryData: any = null;
+        try { retryData = retryText ? JSON.parse(retryText) : null; } catch { /* ignore */ }
+        
+        if (!retryRes.ok) {
+          return { ok: false, status: retryRes.status, error: `Schwab API error ${retryRes.status} (after retry)`, text: retryText };
+        }
+        return { ok: true, data: retryData as T };
+      }
+    }
 
     if (!res.ok) {
       return { ok: false, status: res.status, error: `Schwab API error ${res.status}`, text };
