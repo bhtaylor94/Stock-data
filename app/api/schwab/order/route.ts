@@ -163,7 +163,7 @@ export async function POST(req: NextRequest) {
       errorData = { message: errorText };
     }
 
-    console.error('[Schwab Order] FAILED:', errorResponse.status, errorData);
+    console.error('[Schwab Order] FAILED:', orderResponse.status, errorData);
 
     return NextResponse.json(
       {
