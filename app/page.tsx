@@ -11,6 +11,7 @@ import { UnusualActivitySection } from './components/options/UnusualActivitySect
 import { OptionsSetupCard } from './components/options/OptionsSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
 import { RealPortfolio } from './components/portfolio/RealPortfolio';
+import { PortfolioContextAlert } from './components/portfolio/PortfolioContextAlert';
 import { OrderModal } from './components/trading/OrderModal';
 import { COMPANY_NAMES } from '@/lib/companyNames';
 
@@ -553,6 +554,11 @@ function StockTab({
           1
         ) : undefined}
       />
+      
+      {/* Portfolio Context Alert */}
+      {data.portfolioContext && (
+        <PortfolioContextAlert portfolioContext={data.portfolioContext} />
+      )}
       
       {/* Score Breakdown */}
       <StockScoreBreakdown analysis={analysis} />

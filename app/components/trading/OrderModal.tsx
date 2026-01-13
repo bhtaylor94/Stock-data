@@ -42,8 +42,6 @@ export function OrderModal({
       setSuccess(false);
     }
   }, [isOpen, initialQuantity, currentPrice]);
-  const [success, setSuccess] = useState(false);
-  const [orderId, setOrderId] = useState<string | null>(null);
 
   if (!isOpen) return null;
 

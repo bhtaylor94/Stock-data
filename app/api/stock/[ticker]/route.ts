@@ -1361,6 +1361,21 @@ export async function GET(
   let quote: any = null;
   let priceHistory: any[] = [];
 
+  // Fetch portfolio context (if available)
+  let portfolioContext: any = null;
+  try {
+    const contextResponse = await fetch(`${request.url.split('/api/')[0]}/api/portfolio/context?symbol=${ticker}`, {
+      headers: { 'Cookie': request.headers.get('Cookie') || '' }
+    });
+    if (contextResponse.ok) {
+      const contextData = await contextResponse.json();
+      portfolioContext = contextData;
+    }
+  } catch (err) {
+    console.log('[Stock API] Portfolio context unavailable:', err);
+    // Not critical - continue without context
+  }
+
   // Try Schwab first
   const schwabToken = await getSchwabToken();
   if (schwabToken) {
@@ -1604,6 +1619,152 @@ export async function GET(
     ? { action: combinedModelRating, confidence: calib.confidence, confidenceBucket: calib.bucket, calibrationVersion: calib.calibrationVersion, rationale: [] as string[] }
     : { action: 'NO_TRADE', confidence: 0, confidenceBucket: 'N/A', calibrationVersion: calib.calibrationVersion, rationale: gateFailures };
 
+  // ============================================================
+  // PORTFOLIO CONTEXT ANALYSIS (Position-Aware Recommendations)
+  // ============================================================
+  let portfolioAnalysis: any = null;
+  let enhancedScore = combinedModelScore;
+  let enhancedMaxScore = 18;
+  let enhancedRating = combinedModelRating;
+  
+  if (portfolioContext?.success && portfolioContext.context) {
+    const ctx = portfolioContext.context;
+    const position = portfolioContext.symbolPosition;
+    const portfolioValue = ctx.summary.portfolioValue || 1;
+    const buyingPower = ctx.balances.buyingPower || 0;
+    
+    // Portfolio Context Scoring (0-6 points)
+    let portfolioScore = 0;
+    const portfolioFactors: string[] = [];
+    const portfolioWarnings: string[] = [];
+    const portfolioSuggestions: string[] = [];
+    
+    // 1. Position Sizing Analysis (0-2 points)
+    if (position) {
+      const positionPercent = (position.marketValue / portfolioValue) * 100;
+      const positionPL = position.unrealizedPLPercent;
+      
+      portfolioWarnings.push(`🔍 You own ${position.quantity} shares (${positionPercent.toFixed(1)}% of portfolio)`);
+      portfolioWarnings.push(`📊 Position P&L: ${positionPL >= 0 ? '+' : ''}${positionPL.toFixed(2)}% (${positionPL >= 0 ? '+' : ''}$${position.unrealizedPL.toFixed(2)})`);
+      
+      if (positionPercent > 20) {
+        portfolioScore += 0; // Overweight - no points
+        portfolioFactors.push('❌ Position >20% of portfolio (overweight risk)');
+        portfolioWarnings.push('⚠️ CONCENTRATION RISK: Position exceeds recommended 20% maximum');
+        
+        if (tradeDecision.action === 'BUY' || tradeDecision.action === 'STRONG_BUY') {
+          portfolioSuggestions.push('🛑 DO NOT ADD to this position - already overweight');
+          portfolioSuggestions.push(`💡 Consider selling ${Math.floor(position.quantity * 0.3)} shares to reduce concentration`);
+          enhancedRating = 'HOLD'; // Override to HOLD
+        }
+        
+        if (positionPL > 15) {
+          portfolioSuggestions.push('💰 Strong gain detected - consider taking partial profits');
+        }
+      } else if (positionPercent > 15) {
+        portfolioScore += 1; // Near limit
+        portfolioFactors.push('⚠️ Position 15-20% of portfolio (near concentration limit)');
+        portfolioWarnings.push('📍 Position approaching 20% concentration limit');
+        
+        if (tradeDecision.action === 'BUY' || tradeDecision.action === 'STRONG_BUY') {
+          portfolioSuggestions.push('⚠️ CAUTION: Adding more will exceed concentration limits');
+          enhancedRating = 'HOLD'; // Downgrade from BUY to HOLD
+        }
+      } else {
+        portfolioScore += 2; // Reasonable size
+        portfolioFactors.push(`✅ Position size ${positionPercent.toFixed(1)}% is well-balanced`);
+      }
+      
+      // Loss management
+      if (positionPL < -10) {
+        portfolioWarnings.push('📉 Position down >10% - review stop-loss strategy');
+        portfolioSuggestions.push(`🛡️ Consider stop-loss at $${(position.currentPrice * 0.92).toFixed(2)} (-8% from current)`);
+      }
+    } else {
+      // No position
+      portfolioScore += 2; // Full points - can add position
+      portfolioFactors.push('✅ No existing position - safe to enter');
+    }
+    
+    // 2. Diversification Analysis (0-2 points)
+    const totalPositions = ctx.summary.totalPositions;
+    if (totalPositions < 5) {
+      portfolioScore += 0;
+      portfolioFactors.push(`❌ Under-diversified portfolio (${totalPositions} positions)`);
+      portfolioWarnings.push('⚠️ Portfolio needs more diversification (recommended: 8-15 positions)');
+    } else if (totalPositions >= 5 && totalPositions <= 20) {
+      portfolioScore += 2;
+      portfolioFactors.push(`✅ Well-diversified portfolio (${totalPositions} positions)`);
+    } else {
+      portfolioScore += 1;
+      portfolioFactors.push(`⚠️ Over-diversified portfolio (${totalPositions} positions)`);
+    }
+    
+    // 3. Buying Power Validation (0-2 points)
+    const estimatedCost = price * 100; // Assume 100 shares
+    const buyingPowerPercent = (estimatedCost / buyingPower) * 100;
+    
+    if (buyingPower < estimatedCost) {
+      portfolioScore += 0;
+      portfolioFactors.push('❌ Insufficient buying power for standard position');
+      portfolioWarnings.push(`💸 Buying Power: $${buyingPower.toLocaleString()} (insufficient for 100 shares at $${price.toFixed(2)})`);
+      
+      const maxShares = Math.floor(buyingPower / price);
+      if (maxShares > 0) {
+        portfolioSuggestions.push(`📊 Maximum affordable: ${maxShares} shares ($${(maxShares * price).toFixed(2)})`);
+      } else {
+        portfolioSuggestions.push('🚫 Cannot afford any shares at current price');
+        if (tradeDecision.action === 'BUY' || tradeDecision.action === 'STRONG_BUY') {
+          enhancedRating = 'NO_TRADE'; // Can't afford it
+        }
+      }
+    } else if (buyingPowerPercent > 50) {
+      portfolioScore += 1;
+      portfolioFactors.push('⚠️ Trade would use >50% of buying power');
+      portfolioWarnings.push(`💰 This trade uses ${buyingPowerPercent.toFixed(0)}% of buying power`);
+    } else {
+      portfolioScore += 2;
+      portfolioFactors.push(`✅ Sufficient buying power ($${buyingPower.toLocaleString()})`);
+    }
+    
+    // 4. Day Trading Warning
+    if (ctx.isDayTrader) {
+      portfolioWarnings.push(`⚠️ Pattern Day Trader: ${ctx.roundTrips}/3 day trades used this week`);
+      if (ctx.roundTrips >= 2) {
+        portfolioWarnings.push('🚨 CAUTION: 1 day trade remaining - account will be flagged if exceeded');
+      }
+    }
+    
+    // Calculate enhanced score
+    enhancedScore = combinedModelScore + portfolioScore;
+    enhancedMaxScore = 24; // 18 + 6 portfolio points
+    
+    portfolioAnalysis = {
+      hasPosition: !!position,
+      position: position ? {
+        quantity: position.quantity,
+        avgCost: position.averagePrice,
+        currentPrice: position.currentPrice,
+        marketValue: position.marketValue,
+        unrealizedPL: position.unrealizedPL,
+        unrealizedPLPercent: position.unrealizedPLPercent,
+        portfolioPercent: (position.marketValue / portfolioValue) * 100,
+      } : null,
+      portfolioScore,
+      portfolioMaxScore: 6,
+      factors: portfolioFactors,
+      warnings: portfolioWarnings,
+      suggestions: portfolioSuggestions,
+      buyingPower,
+      canAfford: buyingPower >= price,
+      maxAffordableShares: Math.floor(buyingPower / price),
+      totalPositions,
+      isDayTrader: ctx.isDayTrader,
+      roundTripsRemaining: 3 - (ctx.roundTrips || 0),
+    };
+  }
+
+
   if (tradeDecision.action === 'NO_TRADE') {
     suggestions.splice(0, suggestions.length, ...buildNoTrade(gateFailures, freshness.asOf));
   } else {
@@ -1694,10 +1855,12 @@ return NextResponse.json({
         factors: technicalAnalysis.factors,
       },
       combined: {
-        score: combinedModelScore,
-        maxScore: 18,
+        score: enhancedScore,
+        maxScore: enhancedMaxScore,
+        baseScore: combinedModelScore,
+        baseMaxScore: 18,
         modelRating: combinedModelRating,
-        rating: tradeDecision.action === 'NO_TRADE' ? 'NO_TRADE' : combinedModelRating,
+        rating: enhancedRating,
         calibratedConfidence: tradeDecision.action === 'NO_TRADE' ? 0 : tradeDecision.confidence,
         confidenceBucket: tradeDecision.action === 'NO_TRADE' ? 'N/A' : tradeDecision.confidenceBucket,
         calibrationVersion: tradeDecision.calibrationVersion,
@@ -1869,6 +2032,8 @@ return NextResponse.json({
         analystCoverage: (analystAnalysis.distribution?.strongBuy || 0) + (analystAnalysis.distribution?.buy || 0) + (analystAnalysis.distribution?.hold || 0) > 0,
       },
     },
+
+    portfolioContext: portfolioAnalysis,
 
     lastUpdated: new Date().toISOString(),
     dataSource,
