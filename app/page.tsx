@@ -850,6 +850,9 @@ export default function TradingDashboard() {
     setStockLoading(true);
     setOptionsLoading(true);
     
+    // Smooth scroll to top after ticker selection
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    
     // Fetch stock data
     fetch(`/api/stock/${sym}`)
       .then(res => res.json())
@@ -942,6 +945,7 @@ export default function TradingDashboard() {
                   onClick={() => {
                     setTicker(t);
                     handleSearch(t);
+                    setShowMoreTickers(false); // Auto-collapse after selection
                   }}
                   className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:bg-slate-700/40 hover:text-white transition font-medium"
                 >
@@ -980,6 +984,7 @@ export default function TradingDashboard() {
                           onClick={() => {
                             setTicker(t);
                             handleSearch(t);
+                            setShowMoreTickers(false); // Auto-collapse after selection
                           }}
                           className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:bg-slate-700/40 hover:text-white transition"
                         >
