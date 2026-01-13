@@ -4,8 +4,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useRealtimePrices } from '@/app/hooks/useRealtimePrice';
-import { StreamingBadge } from '@/app/components/core/StreamingIndicator';
+import { useRealtimePrices } from '../../hooks/useRealtimePrice';
+import { StreamingBadge } from '../core/StreamingIndicator';
 
 interface Position {
   symbol: string;
