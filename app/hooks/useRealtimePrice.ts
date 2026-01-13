@@ -2,7 +2,7 @@
 // React hook for subscribing to real-time stock price updates
 
 import { useState, useEffect, useRef } from 'react';
-import { schwabStream, EquityQuote } from '../../lib/schwabStream';
+import { schwabStream, EquityQuote } from '@/lib/schwabStream';
 
 export interface RealtimePrice {
   symbol: string;

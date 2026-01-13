@@ -2,7 +2,7 @@
 // React hook for subscribing to real-time options Greeks updates
 
 import { useState, useEffect } from 'react';
-import { schwabStream, OptionQuote } from '../../lib/schwabStream';
+import { schwabStream, OptionQuote } from '@/lib/schwabStream';
 
 export interface RealtimeGreeks {
   symbol: string;

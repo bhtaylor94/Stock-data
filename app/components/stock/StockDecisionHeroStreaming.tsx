@@ -4,9 +4,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { COMPANY_NAMES } from '../../../lib/companyNames';
-import { useRealtimePrice } from '../../hooks/useRealtimePrice';
-import { StreamingBadge } from '../core/StreamingIndicator';
+import { COMPANY_NAMES } from '@/lib/companyNames';
+import { useRealtimePrice } from '@/app/hooks/useRealtimePrice';
+import { StreamingBadge } from '@/app/components/core/StreamingIndicator';
 
 export function StockDecisionHeroStreaming({ 
   ticker, 

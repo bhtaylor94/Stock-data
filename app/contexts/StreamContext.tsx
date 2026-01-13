@@ -4,7 +4,7 @@
 'use client';
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { schwabStream } from '../../lib/schwabStream';
+import { schwabStream } from '@/lib/schwabStream';
 
 interface StreamContextValue {
   isConnected: boolean;
