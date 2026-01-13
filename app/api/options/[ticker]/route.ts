@@ -896,7 +896,8 @@ function liquidityOk(c: OptionContract): boolean {
       type: 'CALL',
       strategy: trend === 'BULLISH' ? 'Long Call (Trend Aligned)' : 'Long Call (Speculative)',
       contract: c,
-      score: s,
+      score: s.total, // Send total score as number, not object
+      maxScore: 12,
       reasoning: [
         `Delta: ${c.delta.toFixed(2)} (${Math.round(Math.abs(c.delta) * 100)}% prob ITM)`,
         `IV: ${(c.iv * 100).toFixed(0)}%`,
@@ -919,7 +920,8 @@ function liquidityOk(c: OptionContract): boolean {
       type: 'PUT',
       strategy: trend === 'BEARISH' ? 'Long Put (Trend Aligned)' : 'Protective Put (Hedge)',
       contract: p,
-      score: s,
+      score: s.total, // Send total score as number, not object
+      maxScore: 12,
       reasoning: [
         `Delta: ${p.delta.toFixed(2)} (${Math.round(Math.abs(p.delta) * 100)}% prob ITM)`,
         `IV: ${(p.iv * 100).toFixed(0)}%`,

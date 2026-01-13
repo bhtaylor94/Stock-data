@@ -11,7 +11,10 @@ export function OptionsSetupCard({
   const [expanded, setExpanded] = useState(false);
   
   const contract = setup.contract || {};
-  const score = setup.score || 0;
+  // CRITICAL FIX: Handle when score is an object with .total property
+  const scoreValue = typeof setup.score === 'object' && setup.score?.total !== undefined 
+    ? setup.score.total 
+    : (typeof setup.score === 'number' ? setup.score : 0);
   const maxScore = setup.maxScore || 12;
   
   return (
@@ -24,11 +27,11 @@ export function OptionsSetupCard({
         <div className="flex items-center gap-2">
           <span className="font-bold text-white">{setup.strategy || 'Option Strategy'}</span>
           <span className={`text-xs px-2 py-0.5 rounded ${
-            score >= 9 ? 'bg-emerald-500/20 text-emerald-400' :
-            score >= 6 ? 'bg-blue-500/20 text-blue-400' :
+            scoreValue >= 9 ? 'bg-emerald-500/20 text-emerald-400' :
+            scoreValue >= 6 ? 'bg-blue-500/20 text-blue-400' :
             'bg-amber-500/20 text-amber-400'
           }`}>
-            {score}/{maxScore}
+            {scoreValue}/{maxScore}
           </span>
         </div>
         <span className="text-slate-400">{expanded ? '▼' : '▶'}</span>
