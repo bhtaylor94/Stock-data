@@ -1,92 +1,149 @@
-// lib/schwab.ts
-// Central Schwab OAuth + fetch helpers (server-side). Designed for Vercel/Next.js.
+import { TTLCache } from '@/lib/cache';
 
-type Scope = 'marketdata' | 'trading' | 'streaming';
+type TokenResult = { token: string | null; error: string | null; status?: number };
 
-type TokenResult = {
-  token?: string;
-  error?: string;
-  expiresAt?: number;
+const tokenCache = new TTLCache<string>();
+
+// CRITICAL FIX: Headers required for Akamai/Schwab API
+// Without User-Agent, Akamai's CDN blocks requests with 403
+const SCHWAB_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9',
 };
 
-let cached: { token: string; expiresAt: number } | null = null;
-
-function nowMs(): number {
-  return Date.now();
-}
-
-function env(name: string): string {
+function env(name: string): string | null {
   const v = process.env[name];
-  if (!v) throw new Error(['Missing env var: ', name].join(''));
-  return v;
+  return v && v.trim() ? v.trim() : null;
 }
 
-function basicAuthHeader(clientId: string, clientSecret: string): string {
-  const raw = [clientId, ':', clientSecret].join('');
-  const b64 = Buffer.from(raw).toString('base64');
-  return ['Basic ', b64].join('');
-}
+export async function getSchwabAccessToken(
+  scope: 'stock' | 'options' | 'tracker',
+  opts?: { forceRefresh?: boolean }
+): Promise<TokenResult> {
+  const appKey = env('SCHWAB_APP_KEY');
+  const appSecret = env('SCHWAB_APP_SECRET');
+  const refreshToken = env('SCHWAB_REFRESH_TOKEN');
 
-// NOTE: Schwab access tokens are short-lived. We cache in-memory for the current runtime.
-export async function getSchwabAccessToken(_scope: Scope = 'marketdata'): Promise<TokenResult> {
+  if (!appKey || !appSecret || !refreshToken) {
+    return {
+      token: null,
+      error: `Missing Schwab credentials. Set SCHWAB_APP_KEY, SCHWAB_APP_SECRET, SCHWAB_REFRESH_TOKEN.`,
+      status: 500,
+    };
+  }
+
+  const cacheKey = 'schwab_access_token';
+  if (opts?.forceRefresh) tokenCache.delete(cacheKey);
+  const cached = tokenCache.get(cacheKey);
+  if (cached) return { token: cached, error: null };
+
+  const basic = Buffer.from(`${appKey}:${appSecret}`).toString('base64');
+
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+  });
+
+  const url = 'https://api.schwabapi.com/v1/oauth/token';
+
   try {
-    // Return cached token if still valid (30s safety buffer)
-    if (cached && cached.expiresAt - nowMs() > 30_000) {
-      return { token: cached.token, expiresAt: cached.expiresAt };
-    }
-
-    const clientId = env('SCHWAB_APP_KEY');
-    const clientSecret = env('SCHWAB_APP_SECRET');
-    const refreshToken = env('SCHWAB_REFRESH_TOKEN');
-
-    const body = new URLSearchParams();
-    body.set('grant_type', 'refresh_token');
-    body.set('refresh_token', refreshToken);
-
-    const resp = await fetch('https://api.schwabapi.com/v1/oauth/token', {
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
-        Authorization: basicAuthHeader(clientId, clientSecret),
-        'Content-Type': 'application/x-www-form-urlencoded'
+        Authorization: `Basic ${basic}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...SCHWAB_HEADERS, // CRITICAL: Add headers for Akamai/Schwab
       },
-      body: body.toString()
+      body,
     });
 
-    if (!resp.ok) {
-      const text = await resp.text().catch(() => '');
-      return { error: ['Token refresh failed: ', String(resp.status), ' ', text].join('') };
+    const text = await res.text();
+    let data: any = null;
+    try { data = JSON.parse(text); } catch { /* noop */ }
+
+    if (!res.ok) {
+      const detail = data?.error_description || data?.error || text || 'Unknown error';
+      return { token: null, error: `[Schwab ${scope}] OAuth failed (${res.status}): ${detail}`, status: res.status };
     }
 
-    const data = (await resp.json()) as { access_token: string; expires_in: number };
-    const token = data.access_token;
-    const expiresAt = nowMs() + (Number(data.expires_in) * 1000);
+    const accessToken = data?.access_token as string | undefined;
+    const expiresIn = Number(data?.expires_in ?? 1800);
+    if (!accessToken) return { token: null, error: `[Schwab ${scope}] OAuth response missing access_token`, status: 500 };
 
-    cached = { token, expiresAt };
-    return { token, expiresAt };
-  } catch (e: any) {
-    return { error: e?.message ? String(e.message) : 'Unknown token error' };
+    // Cache with 2-minute safety buffer
+    const ttlMs = Math.max(0, (expiresIn - 120) * 1000);
+    tokenCache.set(cacheKey, accessToken, ttlMs);
+
+    // Schwab can return a new refresh_token sometimes. We can't persist it here, so warn.
+    if (data?.refresh_token && data.refresh_token !== refreshToken) {
+      console.error('╔═══════════════════════════════════════════════════════════════╗');
+      console.error('║ 🔑 SCHWAB RETURNED A NEW REFRESH TOKEN - SAVE THIS NOW!     ║');
+      console.error('╠═══════════════════════════════════════════════════════════════╣');
+      console.error('║ New Token:', data.refresh_token);
+      console.error('║ ⚠️  Update SCHWAB_REFRESH_TOKEN in Vercel env vars           ║');
+      console.error('║ ⚠️  Redeploy after updating to avoid 401 errors              ║');
+      console.error('║ ⚠️  This token is valid for 7 days from now                  ║');
+      console.error('╚═══════════════════════════════════════════════════════════════╝');
+    }
+
+    return { token: accessToken, error: null };
+  } catch (err: any) {
+    return { token: null, error: `[Schwab ${scope}] Network error: ${String(err)}`, status: 500 };
   }
 }
 
 export async function schwabFetchJson<T>(
   token: string,
   url: string,
-  init?: RequestInit
-): Promise<{ ok: true; data: T } | { ok: false; status: number; error: string }> {
-  const resp = await fetch(url, {
-    ...(init || {}),
-    headers: {
-      ...(init?.headers || {}),
-      Authorization: ['Bearer ', token].join(''),
-      Accept: 'application/json'
+  opts?: { method?: string; headers?: Record<string, string>; body?: any; scope?: 'stock' | 'options' | 'tracker' }
+): Promise<{ ok: true; data: T } | { ok: false; status: number; error: string; text?: string }> {
+  try {
+    const res = await fetch(url, {
+      method: opts?.method || 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...SCHWAB_HEADERS, // CRITICAL: Add headers for Akamai/Schwab
+        ...(opts?.headers || {}),
+      },
+      body: opts?.body,
+    });
+
+    const text = await res.text();
+    let data: any = null;
+    try { data = text ? JSON.parse(text) : null; } catch { /* ignore */ }
+
+    // CRITICAL: Auto-retry on 401 with fresh token
+    if (res.status === 401 && opts?.scope) {
+      console.warn(`[Schwab] 401 on ${url}, retrying with fresh token...`);
+      const freshTokenResult = await getSchwabAccessToken(opts.scope, { forceRefresh: true });
+      if (freshTokenResult.token) {
+        // Retry the request with fresh token
+        const retryRes = await fetch(url, {
+          method: opts?.method || 'GET',
+          headers: {
+            Authorization: `Bearer ${freshTokenResult.token}`,
+            ...SCHWAB_HEADERS,
+            ...(opts?.headers || {}),
+          },
+          body: opts?.body,
+        });
+        const retryText = await retryRes.text();
+        let retryData: any = null;
+        try { retryData = retryText ? JSON.parse(retryText) : null; } catch { /* ignore */ }
+        
+        if (!retryRes.ok) {
+          return { ok: false, status: retryRes.status, error: `Schwab API error ${retryRes.status} (after retry)`, text: retryText };
+        }
+        return { ok: true, data: retryData as T };
+      }
     }
-  });
 
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '');
-    return { ok: false, status: resp.status, error: text || 'Request failed' };
+    if (!res.ok) {
+      return { ok: false, status: res.status, error: `Schwab API error ${res.status}`, text };
+    }
+    return { ok: true, data: data as T };
+  } catch (err: any) {
+    return { ok: false, status: 500, error: `Schwab network error: ${String(err)}` };
   }
-
-  const data = (await resp.json()) as T;
-  return { ok: true, data };
 }

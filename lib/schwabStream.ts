@@ -103,7 +103,7 @@ class SchwabStreamingClient {
 
     try {
       // Get fresh access token
-      const tokenResult = await getSchwabAccessToken('streaming');
+      const tokenResult = await getSchwabAccessToken('stream', { forceRefresh: false });
       if (!tokenResult.token) {
         console.error('[SchwabStream] Failed to get access token:', tokenResult.error);
         return false;

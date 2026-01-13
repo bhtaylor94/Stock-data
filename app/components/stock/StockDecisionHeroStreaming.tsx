@@ -4,7 +4,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { COMPANY_NAMES } from '../../../lib/companyNames';
+import { COMPANY_NAMES } from '@/lib/companyNames';
 import { useRealtimePrice } from '../../hooks/useRealtimePrice';
 import { StreamingBadge } from '../core/StreamingIndicator';
 
