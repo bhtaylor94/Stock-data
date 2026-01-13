@@ -740,14 +740,26 @@ function OptionsTab({
 // MAIN DASHBOARD - FULLY INTEGRATED
 // ============================================================
 export default function TradingDashboard() {
-  // Expanded ticker selection - popular stocks & ETFs across sectors
-  const QUICK_TICKERS = [
+  // Top 10 most liquid stocks/ETFs - always visible
+  const TOP_LIQUID_TICKERS = [
+    'SPY',    // S&P 500 ETF - highest volume
+    'QQQ',    // Nasdaq 100 ETF
+    'AAPL',   // Apple
+    'TSLA',   // Tesla - extremely high volume
+    'NVDA',   // Nvidia
+    'AMZN',   // Amazon
+    'MSFT',   // Microsoft
+    'META',   // Meta
+    'AMD',    // AMD - very liquid
+    'GOOGL',  // Google
+  ];
+  
+  // Additional tickers - hidden by default
+  const MORE_TICKERS = [
     // Major ETFs
-    'SPY', 'QQQ', 'IWM', 'DIA', 'VTI',
-    // Mega Tech
-    'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'NVDA', 'TSLA',
-    // Semiconductors
-    'AMD', 'INTC', 'AVGO', 'TSM',
+    'IWM', 'DIA', 'VTI', 'XLE',
+    // Tech & Semiconductors
+    'INTC', 'AVGO', 'TSM',
     // Finance
     'JPM', 'BAC', 'GS', 'BRK.B', 'V', 'MA',
     // Healthcare
@@ -755,7 +767,7 @@ export default function TradingDashboard() {
     // Consumer
     'WMT', 'COST', 'HD', 'NKE', 'MCD',
     // Energy
-    'XLE', 'XOM', 'CVX',
+    'XOM', 'CVX',
     // Entertainment/Media
     'DIS', 'NFLX', 'WBD',
     // Communication
@@ -765,6 +777,7 @@ export default function TradingDashboard() {
   ];
   
   const [ticker, setTicker] = useState('');
+  const [showMoreTickers, setShowMoreTickers] = useState(false);
   const [activeTab, setActiveTab] = useState<'stock' | 'options' | 'tracker'>('stock');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
@@ -870,20 +883,52 @@ export default function TradingDashboard() {
             </button>
           </div>
 
-          {/* Quick Select */}
-          <div className="mt-3 flex flex-wrap gap-2">
-            {QUICK_TICKERS.map((t) => (
+          {/* Quick Select - Top 10 Most Liquid */}
+          <div className="mt-3">
+            {/* Top 10 Liquid Tickers - Always Visible */}
+            <div className="flex flex-wrap gap-2">
+              {TOP_LIQUID_TICKERS.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => {
+                    setTicker(t);
+                    handleSearch(t);
+                  }}
+                  className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:bg-slate-700/40 hover:text-white transition font-medium"
+                >
+                  {t}
+                </button>
+              ))}
+              
+              {/* Show More Button */}
               <button
-                key={t}
-                onClick={() => {
-                  setTicker(t);
-                  handleSearch(t);
-                }}
-                className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:bg-slate-700/40 hover:text-white transition"
+                onClick={() => setShowMoreTickers(!showMoreTickers)}
+                className="px-3 py-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 text-xs text-blue-400 hover:bg-blue-500/20 transition font-medium flex items-center gap-1"
               >
-                {t}
+                {showMoreTickers ? '− Show Less' : '+ More Tickers'}
               </button>
-            ))}
+            </div>
+            
+            {/* Additional Tickers - Collapsible */}
+            {showMoreTickers && (
+              <div className="mt-2 p-3 rounded-lg border border-slate-700/50 bg-slate-800/20 animate-fade-in">
+                <p className="text-xs text-slate-400 mb-2 font-medium">Additional Tickers:</p>
+                <div className="flex flex-wrap gap-2">
+                  {MORE_TICKERS.map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => {
+                        setTicker(t);
+                        handleSearch(t);
+                      }}
+                      className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:bg-slate-700/40 hover:text-white transition"
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
         
