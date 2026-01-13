@@ -202,7 +202,15 @@ function TrackButton({
 // ============================================================
 // TRACKER TAB WITH EVIDENCE
 // ============================================================
-function TrackerTab({ onViewEvidence }: { onViewEvidence?: (data: any) => void }) {
+function TrackerTab({ 
+  onViewEvidence,
+  onSymbolSelect,
+  onTrade
+}: { 
+  onViewEvidence?: (data: any) => void;
+  onSymbolSelect?: (symbol: string) => void;
+  onTrade?: (symbol: string, price: number, action: 'BUY' | 'SELL' | 'HOLD', quantity: number) => void;
+}) {
   const [trackerData, setTrackerData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [showOvernightInfo, setShowOvernightInfo] = useState(false);
@@ -265,17 +273,15 @@ function TrackerTab({ onViewEvidence }: { onViewEvidence?: (data: any) => void }
         <RealPortfolio 
           onAnalyze={(symbol) => {
             // Switch to Stock Analysis tab and load symbol
-            setTicker(symbol);
-            setActiveTab('stock');
-            handleSearch(symbol);
+            if (onSymbolSelect) {
+              onSymbolSelect(symbol);
+            }
           }}
           onTrade={(symbol, price, action, quantity) => {
             // Open order modal with position details
-            setOrderSymbol(symbol);
-            setOrderPrice(price);
-            setOrderAction(action);
-            setOrderQuantity(quantity);
-            setOrderModalOpen(true);
+            if (onTrade) {
+              onTrade(symbol, price, action, quantity);
+            }
           }}
         />
       </div>
@@ -1159,7 +1165,15 @@ export default function TradingDashboard() {
             )}
             
             {activeTab === 'tracker' && (
-              <TrackerTab onViewEvidence={handleViewEvidence} />
+              <TrackerTab 
+                onViewEvidence={handleViewEvidence}
+                onSymbolSelect={(symbol) => {
+                  setTicker(symbol);
+                  setActiveTab('stock');
+                  handleSearch(symbol);
+                }}
+                onTrade={handleTrade}
+              />
             )}
           </ErrorBoundary>
         </div>
