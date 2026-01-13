@@ -12,6 +12,228 @@ import { OptionsSetupCard } from './components/options/OptionsSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
 
 // ============================================================
+// COMPANY NAME MAPPING
+// ============================================================
+export const COMPANY_NAMES: Record<string, string> = {
+  // ETFs
+  'SPY': 'SPDR S&P 500 ETF Trust',
+  'QQQ': 'Invesco QQQ Trust',
+  'IWM': 'iShares Russell 2000 ETF',
+  'DIA': 'SPDR Dow Jones Industrial Average ETF',
+  'VTI': 'Vanguard Total Stock Market ETF',
+  'XLE': 'Energy Select Sector SPDR Fund',
+  'VOO': 'Vanguard S&P 500 ETF',
+  'VEA': 'Vanguard FTSE Developed Markets ETF',
+  'VWO': 'Vanguard FTSE Emerging Markets ETF',
+  'AGG': 'iShares Core U.S. Aggregate Bond ETF',
+  'BND': 'Vanguard Total Bond Market ETF',
+  'XLF': 'Financial Select Sector SPDR Fund',
+  'XLK': 'Technology Select Sector SPDR Fund',
+  'XLV': 'Health Care Select Sector SPDR Fund',
+  'XLI': 'Industrial Select Sector SPDR Fund',
+  
+  // Technology
+  'AAPL': 'Apple Inc.',
+  'MSFT': 'Microsoft Corporation',
+  'GOOGL': 'Alphabet Inc.',
+  'AMZN': 'Amazon.com Inc.',
+  'META': 'Meta Platforms Inc.',
+  'NVDA': 'NVIDIA Corporation',
+  'TSLA': 'Tesla Inc.',
+  'ORCL': 'Oracle Corporation',
+  'CRM': 'Salesforce Inc.',
+  'ADBE': 'Adobe Inc.',
+  'ACN': 'Accenture plc',
+  'NOW': 'ServiceNow Inc.',
+  'INTU': 'Intuit Inc.',
+  
+  // Semiconductors
+  'AMD': 'Advanced Micro Devices Inc.',
+  'INTC': 'Intel Corporation',
+  'AVGO': 'Broadcom Inc.',
+  'TSM': 'Taiwan Semiconductor Manufacturing',
+  'QCOM': 'QUALCOMM Incorporated',
+  'TXN': 'Texas Instruments Incorporated',
+  'AMAT': 'Applied Materials Inc.',
+  'LRCX': 'Lam Research Corporation',
+  'KLAC': 'KLA Corporation',
+  'ADI': 'Analog Devices Inc.',
+  'MRVL': 'Marvell Technology Inc.',
+  'NXPI': 'NXP Semiconductors N.V.',
+  'MCHP': 'Microchip Technology Incorporated',
+  'ON': 'ON Semiconductor Corporation',
+  
+  // Finance
+  'JPM': 'JPMorgan Chase & Co.',
+  'BAC': 'Bank of America Corporation',
+  'WFC': 'Wells Fargo & Company',
+  'MS': 'Morgan Stanley',
+  'GS': 'The Goldman Sachs Group Inc.',
+  'C': 'Citigroup Inc.',
+  'BX': 'Blackstone Inc.',
+  'SCHW': 'The Charles Schwab Corporation',
+  'AXP': 'American Express Company',
+  'USB': 'U.S. Bancorp',
+  'PNC': 'The PNC Financial Services Group',
+  'TFC': 'Truist Financial Corporation',
+  'BLK': 'BlackRock Inc.',
+  'COF': 'Capital One Financial Corporation',
+  'CME': 'CME Group Inc.',
+  'BRK.B': 'Berkshire Hathaway Inc.',
+  'V': 'Visa Inc.',
+  'MA': 'Mastercard Incorporated',
+  
+  // Healthcare
+  'UNH': 'UnitedHealth Group Incorporated',
+  'JNJ': 'Johnson & Johnson',
+  'LLY': 'Eli Lilly and Company',
+  'ABBV': 'AbbVie Inc.',
+  'MRK': 'Merck & Co. Inc.',
+  'TMO': 'Thermo Fisher Scientific Inc.',
+  'ABT': 'Abbott Laboratories',
+  'DHR': 'Danaher Corporation',
+  'PFE': 'Pfizer Inc.',
+  'BMY': 'Bristol-Myers Squibb Company',
+  'AMGN': 'Amgen Inc.',
+  'GILD': 'Gilead Sciences Inc.',
+  'CVS': 'CVS Health Corporation',
+  'CI': 'The Cigna Group',
+  'HCA': 'HCA Healthcare Inc.',
+  
+  // Consumer Discretionary
+  'HD': 'The Home Depot Inc.',
+  'MCD': "McDonald's Corporation",
+  'NKE': 'NIKE Inc.',
+  'SBUX': 'Starbucks Corporation',
+  'LOW': "Lowe's Companies Inc.",
+  'TJX': 'The TJX Companies Inc.',
+  'BKNG': 'Booking Holdings Inc.',
+  'MAR': 'Marriott International Inc.',
+  'CMG': 'Chipotle Mexican Grill Inc.',
+  'ABNB': 'Airbnb Inc.',
+  'GM': 'General Motors Company',
+  'F': 'Ford Motor Company',
+  'ORLY': "O'Reilly Automotive Inc.",
+  
+  // Consumer Staples
+  'WMT': 'Walmart Inc.',
+  'COST': 'Costco Wholesale Corporation',
+  'PG': 'The Procter & Gamble Company',
+  'KO': 'The Coca-Cola Company',
+  'PEP': 'PepsiCo Inc.',
+  'PM': 'Philip Morris International Inc.',
+  'MO': 'Altria Group Inc.',
+  'CL': 'Colgate-Palmolive Company',
+  'MDLZ': 'Mondelēz International Inc.',
+  'KMB': 'Kimberly-Clark Corporation',
+  'GIS': 'General Mills Inc.',
+  'STZ': 'Constellation Brands Inc.',
+  'HSY': 'The Hershey Company',
+  'K': 'Kellanova',
+  'CPB': 'Campbell Soup Company',
+  
+  // Energy
+  'XOM': 'Exxon Mobil Corporation',
+  'CVX': 'Chevron Corporation',
+  'COP': 'ConocoPhillips',
+  'SLB': 'SLB',
+  'EOG': 'EOG Resources Inc.',
+  'MPC': 'Marathon Petroleum Corporation',
+  'PSX': 'Phillips 66',
+  'VLO': 'Valero Energy Corporation',
+  'OXY': 'Occidental Petroleum Corporation',
+  'HAL': 'Halliburton Company',
+  'KMI': 'Kinder Morgan Inc.',
+  'WMB': 'The Williams Companies Inc.',
+  'DVN': 'Devon Energy Corporation',
+  'HES': 'Hess Corporation',
+  'BKR': 'Baker Hughes Company',
+  
+  // Industrials
+  'CAT': 'Caterpillar Inc.',
+  'BA': 'The Boeing Company',
+  'GE': 'General Electric Company',
+  'UPS': 'United Parcel Service Inc.',
+  'HON': 'Honeywell International Inc.',
+  'UNP': 'Union Pacific Corporation',
+  'RTX': 'RTX Corporation',
+  'LMT': 'Lockheed Martin Corporation',
+  'DE': 'Deere & Company',
+  'MMM': '3M Company',
+  'EMR': 'Emerson Electric Co.',
+  'ETN': 'Eaton Corporation plc',
+  'ITW': 'Illinois Tool Works Inc.',
+  'CSX': 'CSX Corporation',
+  'NSC': 'Norfolk Southern Corporation',
+  
+  // Communication Services
+  'NFLX': 'Netflix Inc.',
+  'DIS': 'The Walt Disney Company',
+  'CMCSA': 'Comcast Corporation',
+  'T': 'AT&T Inc.',
+  'VZ': 'Verizon Communications Inc.',
+  'TMUS': 'T-Mobile US Inc.',
+  'CHTR': 'Charter Communications Inc.',
+  'EA': 'Electronic Arts Inc.',
+  'TTWO': 'Take-Two Interactive Software Inc.',
+  'WBD': 'Warner Bros. Discovery Inc.',
+  'PARA': 'Paramount Global',
+  'FOXA': 'Fox Corporation',
+  'MTCH': 'Match Group Inc.',
+  
+  // Real Estate
+  'PLD': 'Prologis Inc.',
+  'AMT': 'American Tower Corporation',
+  'EQIX': 'Equinix Inc.',
+  'PSA': 'Public Storage',
+  'WELL': 'Welltower Inc.',
+  'SPG': 'Simon Property Group Inc.',
+  'DLR': 'Digital Realty Trust Inc.',
+  'O': 'Realty Income Corporation',
+  'CCI': 'Crown Castle Inc.',
+  'VICI': 'VICI Properties Inc.',
+  'AVB': 'AvalonBay Communities Inc.',
+  'EQR': 'Equity Residential',
+  'SBAC': 'SBA Communications Corporation',
+  'WY': 'Weyerhaeuser Company',
+  'ARE': 'Alexandria Real Estate Equities Inc.',
+  
+  // Utilities
+  'NEE': 'NextEra Energy Inc.',
+  'DUK': 'Duke Energy Corporation',
+  'SO': 'The Southern Company',
+  'D': 'Dominion Energy Inc.',
+  'AEP': 'American Electric Power Company Inc.',
+  'EXC': 'Exelon Corporation',
+  'SRE': 'Sempra',
+  'XEL': 'Xcel Energy Inc.',
+  'ED': 'Consolidated Edison Inc.',
+  'PEG': 'Public Service Enterprise Group Inc.',
+  'EIX': 'Edison International',
+  'WEC': 'WEC Energy Group Inc.',
+  'ES': 'Eversource Energy',
+  'AWK': 'American Water Works Company Inc.',
+  'DTE': 'DTE Energy Company',
+  
+  // Materials
+  'LIN': 'Linde plc',
+  'APD': 'Air Products and Chemicals Inc.',
+  'SHW': 'The Sherwin-Williams Company',
+  'ECL': 'Ecolab Inc.',
+  'DD': 'DuPont de Nemours Inc.',
+  'NEM': 'Newmont Corporation',
+  'FCX': 'Freeport-McMoRan Inc.',
+  'NUE': 'Nucor Corporation',
+  'DOW': 'Dow Inc.',
+  'PPG': 'PPG Industries Inc.',
+  'VMC': 'Vulcan Materials Company',
+  'MLM': 'Martin Marietta Materials Inc.',
+  'ALB': 'Albemarle Corporation',
+  'CF': 'CF Industries Holdings Inc.',
+  'MOS': 'The Mosaic Company',
+};
+
+// ============================================================
 // UTILITY COMPONENTS
 // ============================================================
 
@@ -642,6 +864,7 @@ function OptionsTab({
       {/* Options Decision Hero */}
       <OptionsDecisionHero 
         ticker={ticker}
+        currentPrice={data.currentPrice}
         meta={data.meta}
         suggestions={data.suggestions}
         onViewEvidence={onViewEvidence}
@@ -754,27 +977,74 @@ export default function TradingDashboard() {
     'GOOGL',  // Google
   ];
   
-  // Additional tickers - hidden by default
-  const MORE_TICKERS = [
-    // Major ETFs
-    'IWM', 'DIA', 'VTI', 'XLE',
-    // Tech & Semiconductors
-    'INTC', 'AVGO', 'TSM',
-    // Finance
-    'JPM', 'BAC', 'GS', 'BRK.B', 'V', 'MA',
-    // Healthcare
-    'UNH', 'JNJ', 'LLY', 'PFE', 'ABBV',
-    // Consumer
-    'WMT', 'COST', 'HD', 'NKE', 'MCD',
-    // Energy
-    'XOM', 'CVX',
-    // Entertainment/Media
-    'DIS', 'NFLX', 'WBD',
-    // Communication
-    'T', 'VZ', 'TMUS',
-    // Industrial
-    'CAT', 'BA', 'UPS',
-  ];
+  // Additional tickers organized by industry - hidden by default
+  const INDUSTRY_TICKERS = {
+    'Technology': [
+      'AAPL', 'MSFT', 'GOOGL', 'META', 'NVDA', 
+      'AVGO', 'ORCL', 'CRM', 'ADBE', 'ACN',
+      'NOW', 'INTU', 'AMAT', 'LRCX', 'KLAC'
+    ],
+    'Semiconductors': [
+      'NVDA', 'TSM', 'AVGO', 'AMD', 'INTC',
+      'QCOM', 'TXN', 'AMAT', 'LRCX', 'KLAC',
+      'ADI', 'MRVL', 'NXPI', 'MCHP', 'ON'
+    ],
+    'Finance': [
+      'JPM', 'BAC', 'WFC', 'MS', 'GS',
+      'C', 'BX', 'SCHW', 'AXP', 'USB',
+      'PNC', 'TFC', 'BLK', 'COF', 'CME'
+    ],
+    'Healthcare': [
+      'UNH', 'JNJ', 'LLY', 'ABBV', 'MRK',
+      'TMO', 'ABT', 'DHR', 'PFE', 'BMY',
+      'AMGN', 'GILD', 'CVS', 'CI', 'HCA'
+    ],
+    'Consumer Discretionary': [
+      'AMZN', 'TSLA', 'HD', 'MCD', 'NKE',
+      'SBUX', 'LOW', 'TJX', 'BKNG', 'MAR',
+      'CMG', 'ABNB', 'GM', 'F', 'ORLY'
+    ],
+    'Consumer Staples': [
+      'WMT', 'COST', 'PG', 'KO', 'PEP',
+      'PM', 'MO', 'CL', 'MDLZ', 'KMB',
+      'GIS', 'STZ', 'HSY', 'K', 'CPB'
+    ],
+    'Energy': [
+      'XOM', 'CVX', 'COP', 'SLB', 'EOG',
+      'MPC', 'PSX', 'VLO', 'OXY', 'HAL',
+      'KMI', 'WMB', 'DVN', 'HES', 'BKR'
+    ],
+    'Industrials': [
+      'CAT', 'BA', 'GE', 'UPS', 'HON',
+      'UNP', 'RTX', 'LMT', 'DE', 'MMM',
+      'EMR', 'ETN', 'ITW', 'CSX', 'NSC'
+    ],
+    'Communication Services': [
+      'META', 'GOOGL', 'NFLX', 'DIS', 'CMCSA',
+      'T', 'VZ', 'TMUS', 'CHTR', 'EA',
+      'TTWO', 'WBD', 'PARA', 'FOXA', 'MTCH'
+    ],
+    'Real Estate': [
+      'PLD', 'AMT', 'EQIX', 'PSA', 'WELL',
+      'SPG', 'DLR', 'O', 'CCI', 'VICI',
+      'AVB', 'EQR', 'SBAC', 'WY', 'ARE'
+    ],
+    'Utilities': [
+      'NEE', 'DUK', 'SO', 'D', 'AEP',
+      'EXC', 'SRE', 'XEL', 'ED', 'PEG',
+      'EIX', 'WEC', 'ES', 'AWK', 'DTE'
+    ],
+    'Materials': [
+      'LIN', 'APD', 'SHW', 'ECL', 'DD',
+      'NEM', 'FCX', 'NUE', 'DOW', 'PPG',
+      'VMC', 'MLM', 'ALB', 'CF', 'MOS'
+    ],
+    'ETFs & Index Funds': [
+      'SPY', 'QQQ', 'IWM', 'DIA', 'VTI',
+      'VOO', 'VEA', 'VWO', 'AGG', 'BND',
+      'XLF', 'XLE', 'XLK', 'XLV', 'XLI'
+    ]
+  };
   
   const [ticker, setTicker] = useState('');
   const [showMoreTickers, setShowMoreTickers] = useState(false);
@@ -909,24 +1179,37 @@ export default function TradingDashboard() {
               </button>
             </div>
             
-            {/* Additional Tickers - Collapsible */}
+            {/* Additional Tickers - Organized by Industry */}
             {showMoreTickers && (
-              <div className="mt-2 p-3 rounded-lg border border-slate-700/50 bg-slate-800/20 animate-fade-in">
-                <p className="text-xs text-slate-400 mb-2 font-medium">Additional Tickers:</p>
-                <div className="flex flex-wrap gap-2">
-                  {MORE_TICKERS.map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => {
-                        setTicker(t);
-                        handleSearch(t);
-                      }}
-                      className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:bg-slate-700/40 hover:text-white transition"
-                    >
-                      {t}
-                    </button>
-                  ))}
-                </div>
+              <div className="mt-3 space-y-3 animate-fade-in">
+                {Object.entries(INDUSTRY_TICKERS).map(([industry, tickers]) => (
+                  <div 
+                    key={industry}
+                    className="p-3 rounded-lg border border-slate-700/50 bg-slate-800/20"
+                  >
+                    {/* Industry Header */}
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-semibold text-blue-400">{industry}</span>
+                      <span className="text-xs text-slate-500">({tickers.length} stocks)</span>
+                    </div>
+                    
+                    {/* Ticker Buttons */}
+                    <div className="flex flex-wrap gap-2">
+                      {tickers.map((t) => (
+                        <button
+                          key={`${industry}-${t}`}
+                          onClick={() => {
+                            setTicker(t);
+                            handleSearch(t);
+                          }}
+                          className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:bg-slate-700/40 hover:text-white transition"
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>

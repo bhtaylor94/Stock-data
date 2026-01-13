@@ -1,4 +1,5 @@
 import React from 'react';
+import { COMPANY_NAMES } from '@/app/page';
 
 export function StockDecisionHero({ 
   ticker, 
@@ -21,15 +22,23 @@ export function StockDecisionHero({
   const confidence = meta?.tradeDecision?.confidence || 0;
   const confidenceTier = meta?.tradeDecision?.confidenceBucket || 'N/A';
   const action = meta?.tradeDecision?.action || 'HOLD';
+  const companyName = COMPANY_NAMES[ticker] || ticker;
   
   return (
     <div className="sticky top-0 z-10 p-5 rounded-2xl bg-gradient-to-br from-slate-800/95 to-slate-900/95 backdrop-blur-sm border border-slate-700/50 shadow-xl">
       {/* Ticker + Price Row */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white">{ticker}</h1>
-          <p className="text-sm text-slate-400">
-            ${price?.toFixed(2) || 'N/A'} • {meta?.source || 'Live'}
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex-1">
+          {/* Ticker - Large and Bold */}
+          <h1 className="text-4xl font-bold text-white leading-tight">{ticker}</h1>
+          {/* Company Name - Smaller, underneath ticker */}
+          <p className="text-sm text-slate-400 mt-1 mb-3">{companyName}</p>
+          {/* Price - Extra Large */}
+          <p className="text-6xl font-bold text-emerald-400 mb-1 leading-tight">
+            ${price?.toFixed(2) || 'N/A'}
+          </p>
+          <p className="text-xs text-slate-500">
+            {meta?.source || 'Live'} • {meta?.asOf && new Date(meta.asOf).toLocaleTimeString()}
           </p>
         </div>
         
