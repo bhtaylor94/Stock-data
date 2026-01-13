@@ -91,7 +91,8 @@ function analyzeContract(contract: any, underlyingPrice: number): UnusualActivit
 
   // Detection thresholds
   const VOLUME_THRESHOLD = 100; // Minimum 100 contracts
-  const VOLUME_OI_THRESHOLD = 0.5; // Volume is 50% of OI
+  const VOLUME_OI_THRESHOLD = 0.5; const VOLUME_OI_RATIO_THRESHOLD = 3; // Volume/OI ratio threshold
+// Volume is 50% of OI
   const VOLUME_VS_AVG_THRESHOLD = 3; // Volume is 3x average
   const PREMIUM_THRESHOLD = 50000; // $50k minimum premium
   const SWEEP_THRESHOLD = 1000; // 1000+ contracts = sweep
