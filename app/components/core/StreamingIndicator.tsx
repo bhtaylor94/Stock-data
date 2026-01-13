@@ -4,7 +4,7 @@
 'use client';
 
 import React from 'react';
-import { useStreamingStatus } from '@/app/contexts/StreamContext';
+import { useStreamingStatus } from '../../contexts/StreamContext';
 
 export function StreamingIndicator() {
   const { isConnected, isConnecting } = useStreamingStatus();
