@@ -2,7 +2,7 @@
 // Schwab WebSocket Streaming Client
 // Handles real-time market data streaming from Schwab API
 
-import { getSchwabAccessToken } from './schwab.ts';
+import { getSchwabAccessToken } from './schwab';
 
 // ============================================================
 // TYPES
