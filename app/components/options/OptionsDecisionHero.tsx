@@ -1,5 +1,5 @@
 import React from 'react';
-import { COMPANY_NAMES } from '@/app/page';
+import { COMPANY_NAMES } from '@/lib/companyNames';
 
 export function OptionsDecisionHero({ 
   ticker,
