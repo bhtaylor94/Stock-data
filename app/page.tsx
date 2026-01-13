@@ -475,13 +475,15 @@ function StockTab({
   loading, 
   ticker,
   onTrack,
-  onViewEvidence
+  onViewEvidence,
+  onTrade
 }: { 
   data: any; 
   loading: boolean;
   ticker: string;
   onTrack?: (success: boolean, message: string) => void;
   onViewEvidence?: () => void;
+  onTrade?: (symbol: string, price: number, action: 'BUY' | 'SELL' | 'HOLD') => void;
 }) {
   if (loading) return <LoadingSpinner />;
   if (!data) return <p className="text-slate-500 text-center py-12">Enter a ticker symbol to analyze</p>;
@@ -529,11 +531,11 @@ function StockTab({
           }
         }}
         onViewEvidence={onViewEvidence}
-        onTrade={() => handleTrade(
+        onTrade={onTrade ? () => onTrade(
           ticker, 
           data.price || data.quote?.c || 0,
           data.meta?.tradeDecision?.action || 'BUY'
-        )}
+        ) : undefined}
       />
       
       {/* Score Breakdown */}
@@ -1117,6 +1119,7 @@ export default function TradingDashboard() {
                 ticker={ticker}
                 onTrack={handleTrack}
                 onViewEvidence={() => handleViewEvidence(stockData)}
+                onTrade={handleTrade}
               />
             )}
             
