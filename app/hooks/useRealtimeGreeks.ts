@@ -2,7 +2,7 @@
 // React hook for subscribing to real-time options Greeks updates
 
 import { useState, useEffect } from 'react';
-import { schwabStream, OptionQuote } from '../../lib/schwabStream';
+import { schwabStream, OptionQuote, EquityQuote } from '../../lib/schwabStream';
 
 export interface RealtimeGreeks {
   symbol: string;
@@ -37,8 +37,11 @@ export function useRealtimeGreeks(optionSymbol: string | null) {
     schwabStream.connect().then(connected => {
       if (!connected || !isSubscribed) return;
 
-      const callback = (quote: OptionQuote) => {
+      const callback = (quote: EquityQuote | OptionQuote) => {
         if (!isSubscribed) return;
+
+        // Type guard: ensure it's an OptionQuote
+        if (!('delta' in quote)) return;
 
         setGreeks({
           symbol: quote.symbol,
@@ -89,8 +92,11 @@ export function useRealtimeGreeksMultiple(optionSymbols: string[]) {
     schwabStream.connect().then(connected => {
       if (!connected || !isSubscribed) return;
 
-      const callback = (quote: OptionQuote) => {
+      const callback = (quote: EquityQuote | OptionQuote) => {
         if (!isSubscribed) return;
+
+        // Type guard: ensure it's an OptionQuote
+        if (!('delta' in quote)) return;
 
         setGreeksMap(prev => {
           const next = new Map(prev);

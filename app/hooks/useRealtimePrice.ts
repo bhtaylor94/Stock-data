@@ -2,7 +2,7 @@
 // React hook for subscribing to real-time stock price updates
 
 import { useState, useEffect, useRef } from 'react';
-import { schwabStream, EquityQuote } from '../../lib/schwabStream';
+import { schwabStream, EquityQuote, OptionQuote } from '../../lib/schwabStream';
 
 export interface RealtimePrice {
   symbol: string;
@@ -52,8 +52,11 @@ export function useRealtimePrice(symbol: string | null, initialPrice?: number) {
       if (!connected || !isSubscribed) return;
 
       // Subscribe to updates
-      const callback = (quote: EquityQuote) => {
+      const callback = (quote: EquityQuote | OptionQuote) => {
         if (!isSubscribed) return;
+
+        // Type guard: ensure it's an EquityQuote
+        if (!('high' in quote)) return;
 
         const currentPrice = quote.last || quote.bid || quote.ask || 0;
         const prevPrice = prevPriceRef.current || currentPrice;
@@ -109,8 +112,11 @@ export function useRealtimePrices(symbols: string[]) {
     schwabStream.connect().then(connected => {
       if (!connected || !isSubscribed) return;
 
-      const callback = (quote: EquityQuote) => {
+      const callback = (quote: EquityQuote | OptionQuote) => {
         if (!isSubscribed) return;
+
+        // Type guard: ensure it's an EquityQuote
+        if (!('high' in quote)) return;
 
         const currentPrice = quote.last || quote.bid || quote.ask || 0;
         
