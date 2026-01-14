@@ -184,7 +184,7 @@ async function analyzeOptions(symbol: string, token: string): Promise<Suggestion
       }
     }
 
-    // Detect unusual activity
+    // Detect unusual activity with INSTITUTIONAL filters
     const unusualActivities = allOptions
       .map(opt => {
         const volume = opt.totalVolume || 0;
@@ -192,15 +192,19 @@ async function analyzeOptions(symbol: string, token: string): Promise<Suggestion
         const volumeOIRatio = volume / openInterest;
         const premium = (opt.last || opt.mark || 0) * volume * 100;
 
-        // Filters for unusual activity
-        if (volume < 500) return null; // Minimum volume threshold
-        if (volumeOIRatio < 1.5) return null; // Must be 1.5x open interest
-        if (premium < 100000) return null; // Min $100k premium
+        // INSTITUTIONAL FILTERS (based on research)
+        if (volume < 50) return null; // Minimum 50 contracts (institutional size)
+        if (volumeOIRatio < 5) return null; // Must be 5x open interest (significant new positioning)
+        if (premium < 500000) return null; // Min $500k premium (institutional threshold)
 
         const daysToExpiration = Math.ceil((new Date(opt.expiration).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
         
-        // Target 10-180 days (institutional timeframe)
-        if (daysToExpiration < 10 || daysToExpiration > 180) return null;
+        // INSTITUTIONAL TIME HORIZON: 30-180 days
+        if (daysToExpiration < 30 || daysToExpiration > 180) return null;
+
+        // Strike selection: Slightly OTM (2-10% from current price)
+        const strikeDistance = Math.abs(opt.strike - underlyingPrice) / underlyingPrice;
+        if (strikeDistance > 0.10) return null; // Skip deep OTM (lottery tickets)
 
         return {
           opt,
@@ -208,7 +212,8 @@ async function analyzeOptions(symbol: string, token: string): Promise<Suggestion
           premium,
           volumeOIRatio,
           daysToExpiration,
-          score: volumeOIRatio * (premium / 1000000),
+          strikeDistance,
+          score: volumeOIRatio * (premium / 1000000), // Score by size and urgency
         };
       })
       .filter(Boolean)
@@ -219,11 +224,16 @@ async function analyzeOptions(symbol: string, token: string): Promise<Suggestion
     const topActivity = unusualActivities[0] as any;
     const opt = topActivity.opt;
 
-    // Determine priority
-    const priority = topActivity.premium >= 2000000 ? 'URGENT' : topActivity.premium >= 500000 ? 'HIGH' : 'MEDIUM';
+    // Determine priority based on premium size
+    const priority = topActivity.premium >= 2000000 ? 'URGENT' : topActivity.premium >= 1000000 ? 'HIGH' : 'MEDIUM';
     
-    // Calculate confidence
-    const confidence = Math.min(95, 60 + (topActivity.volumeOIRatio * 5) + Math.min(20, topActivity.premium / 100000));
+    // Calculate confidence score
+    let confidence = 60; // Base
+    if (topActivity.premium >= 1000000) confidence += 10; // $1M+ premium
+    if (topActivity.daysToExpiration >= 30 && topActivity.daysToExpiration <= 90) confidence += 10; // Sweet spot DTE
+    if (topActivity.volumeOIRatio >= 10) confidence += 5; // Extremely unusual
+    if (topActivity.strikeDistance >= 0.02 && topActivity.strikeDistance <= 0.05) confidence += 5; // Slightly OTM (conviction)
+    confidence = Math.min(95, confidence);
 
     return {
       id: `options_${symbol}_${opt.strike}_${Date.now()}`,
@@ -234,8 +244,8 @@ async function analyzeOptions(symbol: string, token: string): Promise<Suggestion
       confidence: Math.round(confidence),
       currentPrice: underlyingPrice,
       reason: topActivity.premium >= 1000000 
-        ? `MASSIVE ${opt.type} SWEEP - Smart money detected`
-        : `Unusual ${opt.type} activity - Institutional positioning`,
+        ? `MAJOR ${opt.type} SWEEP - Institutional positioning detected`
+        : `Unusual ${opt.type} activity - Smart money flow detected`,
       details: {
         optionType: opt.type,
         strike: opt.strike,
