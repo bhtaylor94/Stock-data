@@ -82,19 +82,26 @@ export function OptionsAnalysisWrapper({
     <div className="space-y-4">
       <OptionsDecisionHero 
         ticker={ticker}
-        price={data.price || 0}
-        optionsData={data.optionsData}
-        strategies={data.strategies}
+        currentPrice={data.price || 0}
+        meta={data.meta || {}}
+        suggestions={data.suggestions || []}
+        onViewEvidence={onViewEvidence}
+        priceChange={data.changePercent}
       />
       <UnusualActivitySection 
-        ticker={ticker}
         activities={data.unusualActivity || []}
-        onViewEvidence={onViewEvidence}
       />
-      <OptionsSetupCard 
-        ticker={ticker}
-        recommendations={data.recommendations || []}
-      />
+      {/* Render recommendations if they exist */}
+      {data.recommendations && data.recommendations.length > 0 && (
+        <div className="space-y-3">
+          {data.recommendations.map((setup: any, i: number) => (
+            <OptionsSetupCard 
+              key={i}
+              setup={setup}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

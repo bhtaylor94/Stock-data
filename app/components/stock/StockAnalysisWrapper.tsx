@@ -90,8 +90,11 @@ export function StockAnalysisWrapper({
       />
       <StockScoreBreakdown analysis={data.analysis} />
       <ConsensusSourcesList 
-        ticker={ticker}
-        sources={data.analysis?.sources || []}
+        fundamentals={data.fundamentals}
+        technicals={data.technicals}
+        news={data.news}
+        analysts={data.analysts}
+        chartPatterns={data.chartPatterns}
       />
       <ChartPatternCard chartPatterns={data.chartPatterns} />
     </div>
