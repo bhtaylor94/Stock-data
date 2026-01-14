@@ -114,7 +114,7 @@ export default function HomePage() {
     if (active === 'alerts') {
       return (
         <div className="space-y-4">
-          <AlertManager defaultTicker={ticker} />
+		  <AlertManager />
         </div>
       );
     }
@@ -122,7 +122,7 @@ export default function HomePage() {
     if (active === 'backtest') {
       return (
         <div className="space-y-4">
-          <BacktestRunner defaultTicker={ticker} />
+		  <BacktestRunner />
         </div>
       );
     }
