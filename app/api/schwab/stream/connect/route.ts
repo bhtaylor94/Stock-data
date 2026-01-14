@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Get Schwab access token
-    const tokenResult = await getSchwabAccessToken('marketdata', { forceRefresh: false });
+    const tokenResult = await getSchwabAccessToken('options', { forceRefresh: false });
     
     if (!tokenResult.token) {
       return NextResponse.json(
