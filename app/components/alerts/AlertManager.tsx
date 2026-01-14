@@ -33,7 +33,7 @@ export function AlertManager() {
   const currentAlertTypes = assetType === 'STOCK' ? stockAlertTypes : optionAlertTypes;
 
   const createAlert = async () => {
-    const alert = {
+    const alertData = {
       type: alertType,
       ticker: ticker.toUpperCase(),
       assetType,
@@ -45,13 +45,13 @@ export function AlertManager() {
     const res = await fetch('/api/alerts/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(alert),
+      body: JSON.stringify(alertData),
     });
 
     const data = await res.json();
     
     if (data.success) {
-      alert('Alert created successfully!');
+      window.alert('Alert created successfully!');
       // Reset form
       setTicker('');
       setConditions({});
