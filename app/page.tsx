@@ -684,10 +684,9 @@ export default function ModernAIHedgeFund() {
           isOpen={showOrderModal}
           onClose={() => setShowOrderModal(false)}
           symbol={orderData.symbol}
-          action={orderData.action}
-          initialPrice={orderData.price}
-          onSuccess={handleOrderSuccess}
-          onError={handleOrderError}
+          currentPrice={orderData.price}
+          recommendation={orderData.action}
+          initialQuantity={orderData.quantity || 1}
         />
       )}
     </div>
