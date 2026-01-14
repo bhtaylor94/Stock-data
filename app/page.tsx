@@ -106,7 +106,7 @@ export default function HomePage() {
     if (active === 'tracker') {
       return (
         <div className="space-y-4">
-          <RealPortfolio defaultTicker={ticker} />
+          <RealPortfolio onAnalyze={(sym) => setTicker(sym)} />
         </div>
       );
     }
