@@ -106,7 +106,18 @@ export function LiveCalculator({
   }, [suggestion.symbol, tradeType]);
 
   // Calculate costs and metrics
-  const calculateMetrics = () => {
+  const calculateMetrics = (): {
+    totalCost: number;
+    pl: number;
+    plPercent: number;
+    portfolioPercent: number;
+    targetProfit: number;
+    canAfford: boolean;
+    riskLevel: string;
+    contractCost?: number;
+    breakeven?: number;
+    maxLoss?: number;
+  } => {
     if (tradeType === 'STOCK') {
       const totalCost = livePrice * quantity;
       const originalCost = suggestion.currentPrice * quantity;
@@ -218,7 +229,7 @@ export function LiveCalculator({
           <div className="text-3xl font-bold text-white">
             ${metrics.totalCost.toFixed(2)}
           </div>
-          {tradeType === 'OPTIONS' && (
+          {tradeType === 'OPTIONS' && metrics.contractCost !== undefined && (
             <div className="text-xs text-slate-500 mt-1">
               ${metrics.contractCost.toFixed(2)} per contract
             </div>
@@ -248,7 +259,7 @@ export function LiveCalculator({
               <div className="p-3 rounded-xl bg-slate-900/50">
                 <div className="text-xs text-slate-400">🎯 Breakeven</div>
                 <div className="text-lg font-bold text-white mt-1">
-                  ${metrics.breakeven.toFixed(2)}
+                  ${metrics.breakeven?.toFixed(2) || '0.00'}
                 </div>
               </div>
               <div className="p-3 rounded-xl bg-slate-900/50">
@@ -260,7 +271,7 @@ export function LiveCalculator({
               <div className="p-3 rounded-xl bg-slate-900/50">
                 <div className="text-xs text-slate-400">📉 Max Loss</div>
                 <div className="text-lg font-bold text-red-400 mt-1">
-                  ${metrics.maxLoss.toFixed(0)}
+                  ${metrics.maxLoss?.toFixed(0) || '0'}
                 </div>
               </div>
               <div className="p-3 rounded-xl bg-slate-900/50">
@@ -331,8 +342,8 @@ export function LiveCalculator({
                 </p>
                 <p>
                   {suggestion.details.optionType === 'CALL' 
-                    ? `You're betting ${suggestion.symbol} goes UP. You control ${quantity * 100} shares for $${metrics.totalCost.toFixed(0)}. Profit if ${suggestion.symbol} > $${metrics.breakeven.toFixed(2)} before expiry.`
-                    : `You're betting ${suggestion.symbol} goes DOWN. You control ${quantity * 100} shares for $${metrics.totalCost.toFixed(0)}. Profit if ${suggestion.symbol} < $${metrics.breakeven.toFixed(2)} before expiry.`
+                    ? `You're betting ${suggestion.symbol} goes UP. You control ${quantity * 100} shares for $${metrics.totalCost.toFixed(0)}. Profit if ${suggestion.symbol} > $${metrics.breakeven?.toFixed(2) || '0.00'} before expiry.`
+                    : `You're betting ${suggestion.symbol} goes DOWN. You control ${quantity * 100} shares for $${metrics.totalCost.toFixed(0)}. Profit if ${suggestion.symbol} < $${metrics.breakeven?.toFixed(2) || '0.00'} before expiry.`
                   }
                 </p>
               </div>
