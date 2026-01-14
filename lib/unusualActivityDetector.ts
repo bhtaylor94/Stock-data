@@ -122,7 +122,7 @@ function analyzeContract(contract: any, underlyingPrice: number): UnusualActivit
   }
 
   // Unusual volume detection
-  if (volumeOIRatio >= VOLUME_OI_RATIO_THRESHOLD) {
+  if (volumeOIRatio >= VOLUME_OI_THRESHOLD) {
     if (activityType === 'UNUSUAL_VOLUME') {
       severity = 'MEDIUM';
     }
@@ -168,7 +168,7 @@ function analyzeContract(contract: any, underlyingPrice: number): UnusualActivit
   // Calculate confidence score
   let confidence = 50;
   
-  if (volumeOIRatio >= VOLUME_OI_RATIO_THRESHOLD) confidence += 15;
+  if (volumeOIRatio >= VOLUME_OI_THRESHOLD) confidence += 15;
   if (volumeVsAvg >= VOLUME_VS_AVG_THRESHOLD) confidence += 15;
   if (premium >= WHALE_THRESHOLD) confidence += 20;
   if (volume >= SWEEP_THRESHOLD) confidence += 10;
