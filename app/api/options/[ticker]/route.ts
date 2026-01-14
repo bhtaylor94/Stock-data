@@ -558,7 +558,8 @@ function detectUnusualActivity(
   const unusual: UnusualActivity[] = [];
   
   const analyzeContract = (c: OptionContract) => {
-    if (c.dte < 10 || c.dte > 180) return;
+    // INSTITUTIONAL FILTER: 30-180 DTE only (not 10-180)
+    if (c.dte < 30 || c.dte > 180) return;
     if (c.volume < 50 || c.openInterest < 10) return;
     
     const signals: string[] = [];
@@ -584,9 +585,12 @@ function detectUnusualActivity(
     } else if (premiumValue >= 500000) {
       signals.push(`💰 Premium: $${(premiumValue / 1e3).toFixed(0)}K (Institutional)`);
       unusualScore += 25;
-    } else if (premiumValue >= 100000) {
+    } else if (premiumValue >= 250000) {
       signals.push(`💵 Premium: $${(premiumValue / 1e3).toFixed(0)}K`);
       unusualScore += 15;
+    } else {
+      // Below $250k premium = too small for institutional
+      return;
     }
     
     if (c.volume >= c.openInterest && c.openInterest > 100) {
