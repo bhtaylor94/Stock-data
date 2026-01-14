@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
 
-// Existing components
+// Components
 import { StockAnalysisWrapper } from './components/stock/StockAnalysisWrapper';
 import { OptionsAnalysisWrapper } from './components/options/OptionsAnalysisWrapper';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
@@ -11,15 +11,6 @@ import { AlertManager } from './components/alerts/AlertManager';
 import { BacktestRunner } from './components/backtest/BacktestRunner';
 import { PortfolioGreeksDashboard } from './components/portfolio/PortfolioGreeksDashboard';
 import { SuggestionFeed } from './components/ai-suggestions/SuggestionFeed';
-import { EvidenceDrawer } from './components/core/EvidenceDrawer';
-import { RealPortfolio } from './components/portfolio/RealPortfolio';
-import { PortfolioContextAlert } from './components/portfolio/PortfolioContextAlert';
-import { OrderModal } from './components/trading/OrderModal';
-import { AlertManager } from './components/alerts/AlertManager';
-import { BacktestRunner } from './components/backtest/BacktestRunner';
-import { PortfolioGreeksDashboard } from './components/portfolio/PortfolioGreeksDashboard';
-import { SuggestionFeed } from './components/ai-suggestions/SuggestionFeed';
-import { COMPANY_NAMES } from '@/lib/companyNames';
 
 // ============================================================
 // TYPES
