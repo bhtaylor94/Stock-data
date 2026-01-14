@@ -154,9 +154,9 @@ export default function HomePage() {
       </AppShell>
 
       <EvidenceDrawer
-        open={evidenceOpen}
+        isOpen={evidenceOpen}
         onClose={() => setEvidenceOpen(false)}
-        evidence={evidenceData}
+        data={evidenceData}
       />
     </>
   );
