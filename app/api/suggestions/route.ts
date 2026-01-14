@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSchwabAccessToken, schwabFetchJson } from '@/lib/schwab';
-import { detectUnusualActivity } from '@/lib/unusualActivityDetector';
+// Suggestions route performs its own institutional filters for speed.
 
 export const runtime = 'nodejs';
 
@@ -92,15 +92,29 @@ async function scanMarketForSuggestions(): Promise<Suggestion[]> {
     return [];
   }
 
+  const baseUrl = baseUrlFromEnv();
+
   // Scan each symbol
   for (const symbol of MARKET_UNIVERSE.slice(0, 15)) { // Limit to first 15 to avoid rate limits
     try {
-      // 1. Get stock data
-      const stockSuggestion = await analyzeStock(symbol, tokenResult.token);
+      // Fetch stock snapshot once (used for stock suggestion + earnings proximity for options gating)
+      let stockSnapshot: any = null;
+      try {
+        const r = await fetch(`${baseUrl}/api/stock/${symbol}`, { cache: 'no-store' });
+        stockSnapshot = await r.json();
+      } catch {
+        stockSnapshot = null;
+      }
+
+      // 1. Stock suggestion
+      const stockSuggestion = stockSnapshot ? buildStockSuggestion(stockSnapshot) : null;
       if (stockSuggestion) suggestions.push(stockSuggestion);
 
+      // Earnings proximity (days)
+      const daysToEarnings = getDaysToNextEarnings(stockSnapshot);
+
       // 2. Get options data for unusual activity
-      const optionsSuggestion = await analyzeOptions(symbol, tokenResult.token);
+      const optionsSuggestion = await analyzeOptions(symbol, tokenResult.token, daysToEarnings);
       if (optionsSuggestion) suggestions.push(optionsSuggestion);
 
       // Small delay to avoid rate limits
@@ -119,54 +133,55 @@ async function scanMarketForSuggestions(): Promise<Suggestion[]> {
   });
 }
 
-async function analyzeStock(symbol: string, token: string): Promise<Suggestion | null> {
+function getDaysToNextEarnings(stockSnapshot: any): number | null {
   try {
-    // Fetch stock data from our existing endpoint
-    const baseUrl = baseUrlFromEnv();
-    const res = await fetch(`${baseUrl}/api/stock/${symbol}`, { cache: 'no-store' });
-    const data: any = await res.json();
-
-    // Our stock endpoint returns { ... meta.tradeDecision, analysis..., suggestions... }
-    const td = data?.meta?.tradeDecision;
-    const top = Array.isArray(data?.suggestions) ? data.suggestions[0] : null;
-
-    if (!td || !td.action) return null;
-
-    // Only bubble up high-quality stock setups (avoid noise)
-    const actionable = ['BUY', 'STRONG_BUY', 'SELL', 'STRONG_SELL'].includes(td.action);
-    const conf = Number(td.confidence ?? 0);
-    if (!actionable || conf < 70) return null;
-
-    const isBull = td.action === 'BUY' || td.action === 'STRONG_BUY';
-    const priority = conf >= 85 ? 'HIGH' : conf >= 78 ? 'MEDIUM' : 'MEDIUM';
-    const reason = top?.reasoning?.[0] ? String(top.reasoning[0]) : `${td.action} (calibrated) – ${conf}%`; 
-
-    return {
-      id: `stock_${symbol}_${Date.now()}`,
-      symbol,
-      companyName: data?.name || symbol,
-      type: 'STOCK',
-      priority,
-      confidence: Math.round(conf),
-      currentPrice: Number(data?.price || 0),
-      reason,
-      details: {
-        action: td.action,
-        regime: data?.meta?.regime,
-        atrPct: data?.meta?.atrPct,
-        targetPrice: top?.target || null,
-        stop: top?.stop || null,
-        timeHorizon: top?.timeHorizon || null,
-        expectedReturn: data?.analysts?.targetUpside ?? null,
-      },
-      timestamp: new Date().toISOString(),
-    };
-  } catch (error) {
+    const cal = stockSnapshot?.earnings?.earningsCalendar;
+    const first = Array.isArray(cal) ? cal[0] : cal?.[0];
+    const dateStr = first?.date || first?.epsDate || first?.earningsDate || null;
+    if (!dateStr) return null;
+    const ms = new Date(String(dateStr)).getTime();
+    if (!Number.isFinite(ms)) return null;
+    return Math.ceil((ms - Date.now()) / (1000 * 60 * 60 * 24));
+  } catch {
     return null;
   }
 }
 
-async function analyzeOptions(symbol: string, token: string): Promise<Suggestion | null> {
+function buildStockSuggestion(data: any): Suggestion | null {
+  const td = data?.meta?.tradeDecision;
+  const top = Array.isArray(data?.suggestions) ? data.suggestions[0] : null;
+  if (!td || !td.action) return null;
+
+  const actionable = ['BUY', 'STRONG_BUY', 'SELL', 'STRONG_SELL'].includes(td.action);
+  const conf = Number(td.confidence ?? 0);
+  if (!actionable || conf < 70) return null;
+
+  const priority = conf >= 88 ? 'URGENT' : conf >= 82 ? 'HIGH' : 'MEDIUM';
+  const reason = top?.reasoning?.[0] ? String(top.reasoning[0]) : `${td.action} (calibrated) – ${conf}%`;
+
+  return {
+    id: `stock_${String(data?.ticker || data?.symbol || '').trim() || 'sym'}_${Date.now()}`,
+    symbol: String(data?.ticker || data?.symbol || data?.name || '').trim() || String(data?.ticker || ''),
+    companyName: data?.name || data?.ticker || '—',
+    type: 'STOCK',
+    priority,
+    confidence: Math.round(conf),
+    currentPrice: Number(data?.price || 0),
+    reason,
+    details: {
+      action: td.action,
+      regime: data?.meta?.regime,
+      atrPct: data?.meta?.atrPct,
+      targetPrice: top?.target || null,
+      stop: top?.stop || null,
+      timeHorizon: top?.timeHorizon || null,
+      earningsInDays: getDaysToNextEarnings(data),
+    },
+    timestamp: new Date().toISOString(),
+  };
+}
+
+async function analyzeOptions(symbol: string, token: string, daysToEarnings: number | null): Promise<Suggestion | null> {
   try {
     // Fetch options data
     const optionsResult = await schwabFetchJson<any>(
@@ -254,13 +269,18 @@ async function analyzeOptions(symbol: string, token: string): Promise<Suggestion
     // Determine priority based on premium size
     const priority = topActivity.premium >= 2000000 ? 'URGENT' : topActivity.premium >= 1000000 ? 'HIGH' : 'MEDIUM';
     
+    // Earnings risk gate: avoid short-dated long premium into earnings (IV crush risk)
+    const earningsSoon = typeof daysToEarnings === 'number' && daysToEarnings >= 0 && daysToEarnings <= 7;
+    const earnPenalty = earningsSoon && topActivity.daysToExpiration < 45;
+
     // Calculate confidence score
     let confidence = 60; // Base
     if (topActivity.premium >= 1000000) confidence += 10; // $1M+ premium
     if (topActivity.daysToExpiration >= 30 && topActivity.daysToExpiration <= 90) confidence += 10; // Sweet spot DTE
     if (topActivity.volumeOIRatio >= 10) confidence += 5; // Extremely unusual
     if (topActivity.strikeDistance >= 0.02 && topActivity.strikeDistance <= 0.05) confidence += 5; // Slightly OTM (conviction)
-    confidence = Math.min(95, confidence);
+    if (earnPenalty) confidence -= 12; // keep ideas, but de-rank them
+    confidence = Math.max(50, Math.min(95, confidence));
 
     return {
       id: `options_${symbol}_${opt.strike}_${Date.now()}`,
@@ -270,9 +290,11 @@ async function analyzeOptions(symbol: string, token: string): Promise<Suggestion
       priority,
       confidence: Math.round(confidence),
       currentPrice: underlyingPrice,
-      reason: topActivity.premium >= 1000000 
-        ? `MAJOR ${opt.type} SWEEP - Institutional positioning detected`
-        : `Unusual ${opt.type} activity - Smart money flow detected`,
+      reason: earnPenalty
+        ? `Unusual ${opt.type} flow - Earnings in ~${daysToEarnings}d (IV risk; prefer 45-90 DTE)`
+        : (topActivity.premium >= 1000000 
+          ? `MAJOR ${opt.type} SWEEP - Institutional positioning detected`
+          : `Unusual ${opt.type} activity - Smart money flow detected`),
       details: {
         optionType: opt.type,
         strike: opt.strike,
@@ -282,6 +304,7 @@ async function analyzeOptions(symbol: string, token: string): Promise<Suggestion
         premiumTotal: topActivity.premium,
         daysToExpiration: topActivity.daysToExpiration,
         volumeOIRatio: topActivity.volumeOIRatio,
+        earningsInDays: daysToEarnings,
       },
       timestamp: new Date().toISOString(),
     };

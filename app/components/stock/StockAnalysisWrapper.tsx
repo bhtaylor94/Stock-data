@@ -7,10 +7,12 @@ import { ChartPatternCard } from './ChartPatternCard';
 
 interface StockAnalysisWrapperProps {
   ticker: string;
+  onViewEvidence?: (data: any) => void;
 }
 
 export function StockAnalysisWrapper({ 
-  ticker
+  ticker,
+  onViewEvidence
 }: StockAnalysisWrapperProps) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -79,6 +81,16 @@ export function StockAnalysisWrapper({
 
   return (
     <div className="space-y-4">
+      {typeof onViewEvidence === 'function' ? (
+        <div className="flex justify-end">
+          <button
+            onClick={() => onViewEvidence(data)}
+            className="px-4 py-2 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/10 text-sm font-semibold"
+          >
+            Evidence packet
+          </button>
+        </div>
+      ) : null}
       <StockDecisionHero 
         ticker={ticker}
         price={data.price || data.quote?.c || 0}
