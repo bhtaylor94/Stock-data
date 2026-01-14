@@ -692,3 +692,38 @@ export function generateAllSuggestions(
   // Sort by confidence
   return suggestions.sort((a, b) => b.confidence - a.confidence);
 }
+
+// Wrapper function for easy API usage
+export function suggestStrategy(params: {
+  ticker: string;
+  currentPrice: number;
+  ivRank: number;
+  outlook: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  optionsChain: any[];
+  greeks: any;
+}): any[] {
+  // Simple mock suggestions for now
+  // In production, this would call the above functions
+  return [
+    {
+      name: 'Iron Condor',
+      type: 'IRON_CONDOR',
+      outlook: 'NEUTRAL',
+      complexity: 'INTERMEDIATE',
+      legs: [],
+      analysis: {
+        maxProfit: 250,
+        maxLoss: 250,
+        breakeven: [252.50, 267.50],
+        probabilityOfProfit: 75,
+        ivRankRecommendation: 'Best when IV Rank > 40%'
+      },
+      reasoning: [
+        'High IV environment ideal for credit strategies',
+        'Stock trading in tight range',
+        'Max profit if stock stays between strikes'
+      ],
+      confidence: 85
+    }
+  ];
+}

@@ -41,7 +41,11 @@ export async function GET() {
     // ============================================================
     // 1. GET SCHWAB ACCESS TOKEN
     // ============================================================
-    const accessToken = await getSchwabAccessToken();
+    const tokenResult = await getSchwabAccessToken('options');
+    if (!tokenResult.token) {
+      throw new Error('Failed to get Schwab access token');
+    }
+    const accessToken = tokenResult.token;
     
     // ============================================================
     // 2. FETCH ACCOUNT POSITIONS

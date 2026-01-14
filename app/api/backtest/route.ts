@@ -82,7 +82,11 @@ async function backtestStockStrategy(params: any) {
   const trades: any[] = [];
   
   // Get historical data
-  const accessToken = await getSchwabAccessToken();
+  const tokenResult = await getSchwabAccessToken('stock');
+  if (!tokenResult.token) {
+    throw new Error('Failed to get Schwab access token');
+  }
+  const accessToken = tokenResult.token;
   
   // Schwab API for historical prices
   const start = new Date(startDate);

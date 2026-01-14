@@ -1,6 +1,6 @@
 // app/api/options/flow/[ticker]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { UnusualActivityDetector } from '@/lib/unusualActivityDetector';
+import { detectUnusualActivity } from '@/lib/unusualActivityDetector';
 import { suggestStrategy } from '@/lib/optionsStrategySuggestions';
 import { getSchwabAccessToken } from '@/lib/schwab';
 
@@ -27,7 +27,11 @@ export async function GET(
     // ============================================================
     // 1. GET SCHWAB ACCESS TOKEN
     // ============================================================
-    const accessToken = await getSchwabAccessToken();
+    const tokenResult = await getSchwabAccessToken('options');
+    if (!tokenResult.token) {
+      throw new Error('Failed to get Schwab access token');
+    }
+    const accessToken = tokenResult.token;
     
     // ============================================================
     // 2. FETCH CURRENT STOCK PRICE FROM SCHWAB
@@ -180,13 +184,10 @@ export async function GET(
     // ============================================================
     // 6. RUN UNUSUAL ACTIVITY DETECTION
     // ============================================================
-    const detector = new UnusualActivityDetector();
-    
-    const unusualActivity = detector.detectUnusualActivity({
-      symbol: ticker,
-      optionsData: optionsChain,
-      volumeHistory: avgVolumeMap
-    });
+    const unusualActivity = detectUnusualActivity(
+      optionsChain,
+      currentPrice
+    );
 
     // Sort by severity and confidence
     const sortedAlerts = unusualActivity

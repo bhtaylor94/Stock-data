@@ -5,7 +5,13 @@ import { getSchwabAccessToken } from '@/lib/schwab';
 export async function POST(request: NextRequest) {
   try {
     const { alerts } = await request.json();
-    const accessToken = await getSchwabAccessToken();
+    const tokenResult = await getSchwabAccessToken('options');
+    
+    if (!tokenResult.token) {
+      throw new Error('Failed to get Schwab access token');
+    }
+    
+    const accessToken = tokenResult.token;
     
     const triggered: any[] = [];
 
