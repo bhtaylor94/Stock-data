@@ -120,13 +120,13 @@ async function analyzeStock(symbol: string, token: string): Promise<Suggestion |
 
     const { analysis, suggestions: aiSuggestions } = data;
     
-    // Only suggest if AI confidence is high
-    if (!analysis || analysis.consensus !== 'BUY' || analysis.consensusScore < 80) {
+    // Only suggest if AI confidence is reasonable
+    if (!analysis || analysis.consensus !== 'BUY' || analysis.consensusScore < 65) {
       return null;
     }
 
     // Calculate priority based on consensus strength
-    const priority = analysis.consensusScore >= 90 ? 'HIGH' : 'MEDIUM';
+    const priority = analysis.consensusScore >= 85 ? 'HIGH' : analysis.consensusScore >= 75 ? 'MEDIUM' : 'MEDIUM';
 
     return {
       id: `stock_${symbol}_${Date.now()}`,

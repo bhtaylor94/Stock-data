@@ -31,11 +31,19 @@ export function SuggestionFeed() {
   const [loading, setLoading] = useState(true);
   const [selectedSuggestion, setSelectedSuggestion] = useState<Suggestion | null>(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [lastUpdate, setLastUpdate] = useState(Date.now());
+  const [now, setNow] = useState(Date.now());
   const [filters, setFilters] = useState({
     minConfidence: 75,
     types: ['STOCK', 'OPTIONS'],
     priorities: ['URGENT', 'HIGH', 'MEDIUM'],
   });
+
+  // Update "now" every second for relative time display
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Fetch suggestions on mount and every 30 seconds
   useEffect(() => {
@@ -57,6 +65,7 @@ export function SuggestionFeed() {
       
       if (data.success) {
         setSuggestions(data.suggestions || []);
+        setLastUpdate(Date.now());
       }
     } catch (error) {
       console.error('Failed to fetch suggestions:', error);
@@ -101,9 +110,16 @@ export function SuggestionFeed() {
           <div>
             <h2 className="text-xl md:text-2xl font-bold text-white flex items-center gap-2">
               🤖 AI Trade Suggestions
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                  <div className="absolute inset-0 w-2 h-2 bg-emerald-500 rounded-full animate-ping opacity-75" />
+                </div>
+                <span className="text-xs font-normal text-emerald-400">LIVE</span>
+              </div>
             </h2>
             <p className="text-xs md:text-sm text-slate-400 mt-1">
-              Live • Updated {new Date().toLocaleTimeString()}
+              Last updated {Math.floor((now - lastUpdate) / 1000)}s ago • Auto-refresh every 30s
             </p>
           </div>
           <div className="flex items-center gap-2">
