@@ -6,12 +6,10 @@ import { OptionsSetupCard } from './OptionsSetupCard';
 
 interface OptionsAnalysisWrapperProps {
   ticker: string;
-  onViewEvidence?: (data: any) => void;
 }
 
 export function OptionsAnalysisWrapper({ 
-  ticker, 
-  onViewEvidence 
+  ticker
 }: OptionsAnalysisWrapperProps) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -85,7 +83,6 @@ export function OptionsAnalysisWrapper({
         currentPrice={data.price || 0}
         meta={data.meta || {}}
         suggestions={data.suggestions || []}
-        onViewEvidence={onViewEvidence}
         priceChange={data.changePercent}
       />
       <UnusualActivitySection 

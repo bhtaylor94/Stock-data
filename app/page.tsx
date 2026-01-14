@@ -576,7 +576,6 @@ export default function ModernAIHedgeFund() {
               />
               <StockAnalysisWrapper 
                 ticker={ticker}
-                onViewEvidence={handleViewEvidence}
               />
             </div>
           )}
@@ -589,7 +588,6 @@ export default function ModernAIHedgeFund() {
               />
               <OptionsAnalysisWrapper 
                 ticker={ticker}
-                onViewEvidence={handleViewEvidence}
               />
             </div>
           )}

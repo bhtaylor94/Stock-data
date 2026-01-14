@@ -7,12 +7,10 @@ import { ChartPatternCard } from './ChartPatternCard';
 
 interface StockAnalysisWrapperProps {
   ticker: string;
-  onViewEvidence?: (data: any) => void;
 }
 
 export function StockAnalysisWrapper({ 
-  ticker, 
-  onViewEvidence 
+  ticker
 }: StockAnalysisWrapperProps) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -86,7 +84,6 @@ export function StockAnalysisWrapper({
         price={data.price || data.quote?.c || 0}
         analysis={{ ...data.analysis, changePercent: data.changePercent }}
         meta={data.meta}
-        onViewEvidence={onViewEvidence}
       />
       <StockScoreBreakdown analysis={data.analysis} />
       <ConsensusSourcesList 
