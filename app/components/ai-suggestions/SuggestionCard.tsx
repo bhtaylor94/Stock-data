@@ -1,6 +1,5 @@
 'use client';
 import React from 'react';
-import { TipLabel } from '../core/Tooltip';
 
 interface SuggestionCardProps {
   suggestion: any;
@@ -89,26 +88,20 @@ export function SuggestionCard({ suggestion, onExecute, onDismiss }: SuggestionC
                 ${suggestion.details.strike} {suggestion.details.optionType}
               </p>
             </div>
-		    <div className="p-2 rounded-lg bg-slate-900/50">
-		      <TipLabel labelKey="PREMIUM" iconClassName="h-3 w-3 text-slate-500">
-		        <span className="text-xs text-slate-400">Premium</span>
-		      </TipLabel>
+            <div className="p-2 rounded-lg bg-slate-900/50">
+              <p className="text-xs text-slate-400">Premium</p>
               <p className="text-sm font-bold text-white">
                 {formatCurrency(suggestion.details.premiumTotal || 0)}
               </p>
             </div>
-		    <div className="p-2 rounded-lg bg-slate-900/50">
-		      <TipLabel labelKey="VOLUME" iconClassName="h-3 w-3 text-slate-500">
-		        <span className="text-xs text-slate-400">Volume</span>
-		      </TipLabel>
+            <div className="p-2 rounded-lg bg-slate-900/50">
+              <p className="text-xs text-slate-400">Volume</p>
               <p className="text-sm font-bold text-white">
                 {(suggestion.details.volumeContracts || 0).toLocaleString()}
               </p>
             </div>
-		    <div className="p-2 rounded-lg bg-slate-900/50">
-		      <TipLabel labelKey="DTE" iconClassName="h-3 w-3 text-slate-500">
-		        <span className="text-xs text-slate-400">Expiry</span>
-		      </TipLabel>
+            <div className="p-2 rounded-lg bg-slate-900/50">
+              <p className="text-xs text-slate-400">Expiry</p>
               <p className="text-sm font-bold text-white truncate">
                 {suggestion.details.expiration}
               </p>

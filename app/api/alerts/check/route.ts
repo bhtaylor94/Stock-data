@@ -2,25 +2,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSchwabAccessToken } from '@/lib/schwab';
 
-export const runtime = 'nodejs';
-
-function baseUrlFromEnv(): string {
-  const explicit = (process.env.NEXT_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || '').trim();
-  if (explicit) return explicit.replace(/\/$/, '');
-  const vercel = (process.env.VERCEL_URL || '').trim();
-  if (vercel) return `https://${vercel}`;
-  return 'http://localhost:3000';
-}
-
-export async function GET() {
-  // The top-level app polls this endpoint; keep it safe even if there are no persisted alerts.
-  return NextResponse.json({ checked: 0, triggered: 0, alerts: [] });
-}
-
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json().catch(() => ({}));
-    const alerts = Array.isArray(body.alerts) ? body.alerts : [];
+    const { alerts } = await request.json();
     const tokenResult = await getSchwabAccessToken('options');
     
     if (!tokenResult.token) {
@@ -88,7 +72,9 @@ export async function POST(request: NextRequest) {
 
           case 'AI_SIGNAL':
             // Check our AI analysis
-            const analysisRes = await fetch(`${baseUrlFromEnv()}/api/stock/${alert.ticker}`, { cache: 'no-store' });
+            const analysisRes = await fetch(
+              `${process.env.NEXT_PUBLIC_APP_URL}/api/stock/${alert.ticker}`
+            );
             const analysis = await analysisRes.json();
             
             const rating = analysis.meta?.tradeDecision?.action;
@@ -105,7 +91,9 @@ export async function POST(request: NextRequest) {
       // ============================================================
       else if (alert.assetType === 'OPTION') {
         // Get options flow data
-        const flowRes = await fetch(`${baseUrlFromEnv()}/api/options/flow/${alert.ticker}`, { cache: 'no-store' });
+        const flowRes = await fetch(
+          `${process.env.NEXT_PUBLIC_APP_URL}/api/options/flow/${alert.ticker}`
+        );
         const flowData = await flowRes.json();
 
         switch (alert.type) {

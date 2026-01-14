@@ -879,10 +879,8 @@ function liquidityOk(c: OptionContract): boolean {
   return Boolean(spreadOk && interestOk && priceOk);
 }
 
-  // Institutional time horizon (avoid short-dated gamma/theta traps)
-  // 30–180 DTE tends to align with "smart money" positioning and reduces near-expiration noise.
-  const validCalls = calls.filter(c => c.dte >= 30 && c.dte <= 180 && liquidityOk(c));
-  const validPuts  = puts.filter(p => p.dte >= 30 && p.dte <= 180 && liquidityOk(p));
+  const validCalls = calls.filter(c => c.dte >= 7 && c.dte <= 90 && liquidityOk(c));
+  const validPuts = puts.filter(p => p.dte >= 7 && p.dte <= 90 && liquidityOk(p));
 
   const scoredCalls = validCalls.map(c => ({ contract: c, score: scoreOption(c, trend, ivAnalysis.atmIV) }));
   const scoredPuts = validPuts.map(p => ({ contract: p, score: scoreOption(p, trend, ivAnalysis.atmIV) }));

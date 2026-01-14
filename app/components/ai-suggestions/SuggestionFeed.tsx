@@ -26,13 +26,7 @@ interface Suggestion {
   timestamp: string;
 }
 
-interface SuggestionFeedProps {
-  onSymbolSelect?: (symbol: string) => void;
-  onViewEvidence?: (data: any) => void;
-  onTrack?: (success: boolean, message: string) => void;
-}
-
-export function SuggestionFeed({ onSymbolSelect, onViewEvidence, onTrack }: SuggestionFeedProps = {}) {
+export function SuggestionFeed() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSuggestion, setSelectedSuggestion] = useState<Suggestion | null>(null);
