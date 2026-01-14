@@ -18,6 +18,91 @@ import { SuggestionFeed } from './components/ai-suggestions/SuggestionFeed';
 
 type TabType = 'feed' | 'stock' | 'options' | 'tracker' | 'alerts' | 'backtest' | 'greeks';
 
+const POPULAR_TICKERS: string[] = ['SPY','QQQ','AAPL','MSFT','NVDA','AMZN','META','TSLA','GOOGL','AMD'];
+
+const SECTOR_TICKERS: Record<string, string[]> = {
+  'Technology': ['AAPL','MSFT','NVDA','AVGO','ORCL','CRM','ADBE','AMD','INTC','CSCO','QCOM','MU','NOW','SNOW','PLTR'],
+  'Financials': ['JPM','BAC','WFC','GS','MS','C','V','MA','AXP','BLK','SCHW','SPGI','ICE','COF','PNC'],
+  'Health Care': ['UNH','JNJ','LLY','MRK','ABBV','PFE','TMO','ABT','DHR','BMY','AMGN','ISRG','GILD','VRTX','REGN'],
+  'Consumer': ['AMZN','WMT','COST','HD','LOW','MCD','NKE','SBUX','TGT','TJX','BKNG','DIS','CMG','ROST','ORLY'],
+  'Industrials': ['CAT','BA','GE','RTX','LMT','DE','UPS','FDX','HON','ETN','WM','UNP','CSX','GD','NOC'],
+  'Energy': ['XOM','CVX','COP','SLB','EOG','MPC','PSX','OXY','VLO','KMI','WMB','PXD','HAL','DVN','BKR'],
+  'Utilities': ['NEE','DUK','SO','AEP','EXC','SRE','XEL','D','PEG','ED','PCG','EIX','AWK','PPL','AES'],
+  'Materials': ['LIN','SHW','APD','FCX','NEM','DOW','DD','ECL','NUE','VMC','MLM','CTVA','PPG','ALB','IFF'],
+  'Real Estate': ['AMT','PLD','EQIX','PSA','SPG','O','WELL','DLR','CCI','VICI','CBRE','AVB','EQR','IRM','SBAC'],
+  'Crypto / Vol': ['COIN','MSTR','RIOT','MARA','SQ','HOOD','BITO','ARKK','UVXY','VXX','HYG','TLT','IEF','GLD','SLV'],
+};
+
+function QuickTickerBar({
+  onSelect,
+}: {
+  onSelect: (t: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+        {POPULAR_TICKERS.map((t) => (
+          <button
+            key={t}
+            onClick={() => onSelect(t)}
+            className="shrink-0 px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-sm font-semibold text-slate-200 transition"
+          >
+            {t}
+          </button>
+        ))}
+        <button
+          onClick={() => setOpen(true)}
+          className="shrink-0 px-3 py-1.5 rounded-full bg-gradient-to-r from-slate-700 to-slate-800 border border-white/10 text-sm font-semibold text-white hover:opacity-90 transition"
+        >
+          Browse sectors ▸
+        </button>
+      </div>
+
+      {open && (
+        <div className="fixed inset-0 z-[65] bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)}>
+          <div className="fixed inset-x-4 top-24 max-w-2xl mx-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6 rounded-3xl bg-slate-900/95 backdrop-blur-2xl border border-white/10 shadow-2xl max-h-[70vh] overflow-auto">
+              <div className="flex items-center justify-between mb-5">
+                <div>
+                  <h3 className="text-xl font-bold text-white">Top tickers by sector</h3>
+                  <p className="text-slate-400 text-sm">Tap a ticker to load it instantly.</p>
+                </div>
+                <button onClick={() => setOpen(false)} className="p-2 hover:bg-white/10 rounded-xl transition">
+                  <span className="text-slate-300">✕</span>
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {Object.entries(SECTOR_TICKERS).map(([sector, tickers]) => (
+                  <div key={sector}>
+                    <div className="text-sm font-semibold text-slate-200 mb-3">{sector}</div>
+                    <div className="flex flex-wrap gap-2">
+                      {tickers.map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => {
+                            onSelect(t);
+                            setOpen(false);
+                          }}
+                          className="px-3 py-1.5 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-sm font-semibold text-slate-200 transition"
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ToastMessage {
   id: string;
   type: 'success' | 'error' | 'info';
@@ -139,7 +224,7 @@ function FloatingSearchBar({
   );
 }
 
-function BottomNavBar({ activeTab, onTabChange }: { activeTab: TabType; onTabChange: (tab: TabType) => void }) {
+function TopNavBar({ activeTab, onTabChange }: { activeTab: TabType; onTabChange: (tab: TabType) => void }) {
   const tabs = [
     { id: 'feed' as TabType, icon: '🎯', label: 'Feed', gradient: 'from-blue-500 to-cyan-500' },
     { id: 'stock' as TabType, icon: '📈', label: 'Stock', gradient: 'from-green-500 to-emerald-500' },
@@ -148,23 +233,21 @@ function BottomNavBar({ activeTab, onTabChange }: { activeTab: TabType; onTabCha
   ];
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 pb-safe">
-      {/* Blur background */}
-      <div className="absolute inset-0 bg-slate-900/95 backdrop-blur-2xl border-t border-white/10" />
-      
-      {/* Nav items */}
-      <div className="relative px-4 py-3">
-        <div className="flex items-center justify-around max-w-2xl mx-auto">
+    <div className="sticky top-0 z-40 -mx-4 px-4 py-3">
+      <div className="absolute inset-0 bg-slate-950/85 backdrop-blur-2xl border-b border-white/10" />
+
+      <div className="relative max-w-2xl mx-auto">
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
             return (
               <button
                 key={tab.id}
                 onClick={() => onTabChange(tab.id)}
-                className="flex flex-col items-center gap-1 transition-all duration-300 min-w-0 flex-1"
+                className="flex items-center gap-2 shrink-0 transition-all duration-300"
               >
                 <div className={`
-                  relative px-6 py-2.5 rounded-2xl transition-all duration-300
+                  relative px-4 py-2 rounded-2xl transition-all duration-300
                   ${isActive 
                     ? 'bg-gradient-to-r ' + tab.gradient + ' shadow-lg' 
                     : 'bg-white/5 hover:bg-white/10'
@@ -173,16 +256,11 @@ function BottomNavBar({ activeTab, onTabChange }: { activeTab: TabType; onTabCha
                   {isActive && (
                     <div className={`absolute inset-0 bg-gradient-to-r ${tab.gradient} rounded-2xl blur-xl opacity-50`} />
                   )}
-                  <span className={`relative text-2xl ${isActive ? 'scale-110' : 'scale-100'} transition-transform`}>
+                  <span className={`relative text-xl ${isActive ? 'scale-110' : 'scale-100'} transition-transform`}>
                     {tab.icon}
                   </span>
                 </div>
-                <span className={`
-                  text-xs font-semibold transition-all duration-300
-                  ${isActive ? 'text-white' : 'text-slate-400'}
-                `}>
-                  {tab.label}
-                </span>
+                <span className={`text-sm font-semibold ${isActive ? 'text-white' : 'text-slate-300'}`}>{tab.label}</span>
               </button>
             );
           })}
@@ -191,18 +269,18 @@ function BottomNavBar({ activeTab, onTabChange }: { activeTab: TabType; onTabCha
           <div className="relative">
             <button
               onClick={() => onTabChange('alerts')}
-              className="flex flex-col items-center gap-1"
+              className="flex items-center gap-2 shrink-0"
             >
               <div className={`
-                relative px-6 py-2.5 rounded-2xl transition-all duration-300
+                relative px-4 py-2 rounded-2xl transition-all duration-300
                 ${['alerts', 'backtest', 'greeks'].includes(activeTab)
                   ? 'bg-gradient-to-r from-slate-600 to-slate-700 shadow-lg' 
                   : 'bg-white/5 hover:bg-white/10'
                 }
               `}>
-                <span className="text-2xl">⋯</span>
+                <span className="text-xl">⋯</span>
               </div>
-              <span className="text-xs font-semibold text-slate-400">More</span>
+              <span className="text-sm font-semibold text-slate-300">More</span>
             </button>
           </div>
         </div>
@@ -231,8 +309,8 @@ function MoreMenu({
       className="fixed inset-0 z-[60] bg-black/60 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
     >
-      <div 
-        className="fixed bottom-20 left-4 right-4 max-w-md mx-auto animate-slide-up"
+        <div 
+        className="fixed top-28 left-4 right-4 max-w-md mx-auto animate-slide-up"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-6 rounded-3xl bg-slate-900/95 backdrop-blur-2xl border border-white/10 shadow-2xl">
@@ -537,13 +615,27 @@ export default function ModernAIHedgeFund() {
       </div>
 
       {/* Main content */}
-      <div className="relative z-10 px-4 pt-6 pb-32 max-w-2xl mx-auto">
+      <div className="relative z-10 px-4 pt-6 pb-14 max-w-2xl mx-auto">
         {/* Search bar (always visible) */}
         <div className="mb-6">
           <FloatingSearchBar 
             value={ticker}
             onChange={setTicker}
             onSearch={handleSearch}
+          />
+        </div>
+
+        {/* Re-thought navigation + fast ticker access (always visible) */}
+        <TopNavBar activeTab={activeTab} onTabChange={handleTabChange} />
+        <div className="mb-6">
+          <QuickTickerBar
+            onSelect={(t) => {
+              setTicker(t);
+              // Don't auto-switch tabs unless the user is in an analysis view
+              if (activeTab === 'stock' || activeTab === 'options') {
+                // keep current view
+              }
+            }}
           />
         </div>
 
@@ -634,9 +726,6 @@ export default function ModernAIHedgeFund() {
           )}
         </div>
       </div>
-
-      {/* Bottom Navigation */}
-      <BottomNavBar activeTab={activeTab} onTabChange={handleTabChange} />
 
       {/* More Menu */}
       {showMoreMenu && (

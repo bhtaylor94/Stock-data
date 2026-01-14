@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import { TipLabel } from '../core/Tooltip';
 
 interface SuggestionCardProps {
   suggestion: any;
@@ -89,19 +90,19 @@ export function SuggestionCard({ suggestion, onExecute, onDismiss }: SuggestionC
               </p>
             </div>
             <div className="p-2 rounded-lg bg-slate-900/50">
-              <p className="text-xs text-slate-400">Premium</p>
+              <TipLabel label="Premium" tipKey="PREMIUM" className="text-xs text-slate-400" />
               <p className="text-sm font-bold text-white">
                 {formatCurrency(suggestion.details.premiumTotal || 0)}
               </p>
             </div>
             <div className="p-2 rounded-lg bg-slate-900/50">
-              <p className="text-xs text-slate-400">Volume</p>
+              <TipLabel label="Volume" tipKey="VOLUME" className="text-xs text-slate-400" />
               <p className="text-sm font-bold text-white">
                 {(suggestion.details.volumeContracts || 0).toLocaleString()}
               </p>
             </div>
             <div className="p-2 rounded-lg bg-slate-900/50">
-              <p className="text-xs text-slate-400">Expiry</p>
+              <TipLabel label="Expiry" tipKey="DTE" className="text-xs text-slate-400" />
               <p className="text-sm font-bold text-white truncate">
                 {suggestion.details.expiration}
               </p>

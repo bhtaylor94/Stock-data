@@ -1,4 +1,5 @@
 import React from 'react';
+import { TipLabel } from '../core/Tooltip';
 
 export function StockScoreBreakdown({ analysis }: { analysis: any }) {
   const fundScore = analysis?.fundamental?.score || 0;
@@ -14,7 +15,7 @@ export function StockScoreBreakdown({ analysis }: { analysis: any }) {
         {/* Fundamental */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-slate-400">Fundamental</span>
+            <TipLabel label="Fundamental" tipKey="STOCK_SCORE" className="text-xs text-slate-400" />
             <span className={`text-xs font-bold ${
               fundScore >= 7 ? 'text-emerald-400' :
               fundScore >= 5 ? 'text-blue-400' : 'text-amber-400'
@@ -34,7 +35,7 @@ export function StockScoreBreakdown({ analysis }: { analysis: any }) {
         {/* Technical */}
         <div>
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-slate-400">Technical</span>
+            <TipLabel label="Technical" tipKey="TREND" className="text-xs text-slate-400" />
             <span className={`text-xs font-bold ${
               techScore >= 7 ? 'text-emerald-400' :
               techScore >= 5 ? 'text-blue-400' : 'text-amber-400'

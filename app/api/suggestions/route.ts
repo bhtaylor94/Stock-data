@@ -9,6 +9,15 @@ let cachedSuggestions: any[] = [];
 let lastFetchTime = 0;
 const CACHE_DURATION = 30000; // 30 seconds
 
+function baseUrlFromEnv(): string {
+  // Prefer explicit base URL when set, otherwise fall back to Vercel URL or localhost.
+  const explicit = (process.env.NEXT_PUBLIC_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || '').trim();
+  if (explicit) return explicit.replace(/\/$/, '');
+  const vercel = (process.env.VERCEL_URL || '').trim();
+  if (vercel) return `https://${vercel}`;
+  return 'http://localhost:3000';
+}
+
 // Top liquid stocks and ETFs to scan
 const MARKET_UNIVERSE = [
   'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA', 'AMD', 'NFLX', 'DIS',
@@ -113,37 +122,42 @@ async function scanMarketForSuggestions(): Promise<Suggestion[]> {
 async function analyzeStock(symbol: string, token: string): Promise<Suggestion | null> {
   try {
     // Fetch stock data from our existing endpoint
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/stock/${symbol}`);
-    const data = await res.json();
+    const baseUrl = baseUrlFromEnv();
+    const res = await fetch(`${baseUrl}/api/stock/${symbol}`, { cache: 'no-store' });
+    const data: any = await res.json();
 
-    if (!data.success) return null;
+    // Our stock endpoint returns { ... meta.tradeDecision, analysis..., suggestions... }
+    const td = data?.meta?.tradeDecision;
+    const top = Array.isArray(data?.suggestions) ? data.suggestions[0] : null;
 
-    const { analysis, suggestions: aiSuggestions } = data;
-    
-    // Only suggest if AI confidence is reasonable
-    if (!analysis || analysis.consensus !== 'BUY' || analysis.consensusScore < 65) {
-      return null;
-    }
+    if (!td || !td.action) return null;
 
-    // Calculate priority based on consensus strength
-    const priority = analysis.consensusScore >= 85 ? 'HIGH' : analysis.consensusScore >= 75 ? 'MEDIUM' : 'MEDIUM';
+    // Only bubble up high-quality stock setups (avoid noise)
+    const actionable = ['BUY', 'STRONG_BUY', 'SELL', 'STRONG_SELL'].includes(td.action);
+    const conf = Number(td.confidence ?? 0);
+    if (!actionable || conf < 70) return null;
+
+    const isBull = td.action === 'BUY' || td.action === 'STRONG_BUY';
+    const priority = conf >= 85 ? 'HIGH' : conf >= 78 ? 'MEDIUM' : 'MEDIUM';
+    const reason = top?.reasoning?.[0] ? String(top.reasoning[0]) : `${td.action} (calibrated) – ${conf}%`; 
 
     return {
       id: `stock_${symbol}_${Date.now()}`,
       symbol,
-      companyName: data.companyName || symbol,
+      companyName: data?.name || symbol,
       type: 'STOCK',
       priority,
-      confidence: analysis.consensusScore,
-      currentPrice: analysis.currentPrice || 0,
-      reason: `${analysis.voteBreakdown.buy} of ${analysis.totalVoters} AI investors recommend BUY`,
+      confidence: Math.round(conf),
+      currentPrice: Number(data?.price || 0),
+      reason,
       details: {
-        targetPrice: analysis.targetPrice,
-        expectedReturn: analysis.targetPrice ? ((analysis.targetPrice - analysis.currentPrice) / analysis.currentPrice) * 100 : 0,
-        aiVotes: {
-          total: analysis.totalVoters,
-          bullish: analysis.voteBreakdown.buy,
-        },
+        action: td.action,
+        regime: data?.meta?.regime,
+        atrPct: data?.meta?.atrPct,
+        targetPrice: top?.target || null,
+        stop: top?.stop || null,
+        timeHorizon: top?.timeHorizon || null,
+        expectedReturn: data?.analysts?.targetUpside ?? null,
       },
       timestamp: new Date().toISOString(),
     };
@@ -166,23 +180,26 @@ async function analyzeOptions(symbol: string, token: string): Promise<Suggestion
     const optionsData = optionsResult.data;
     const underlyingPrice = optionsData.underlyingPrice || 0;
 
-    // Build options chain array
-    const callMap = optionsData.callExpDateMap || {};
+    // Build options chain array (CALLS + PUTS)
     const allOptions: any[] = [];
-
-    for (const expDate in callMap) {
-      for (const strike in callMap[expDate]) {
-        const calls = callMap[expDate][strike];
-        calls.forEach((opt: any) => {
-          allOptions.push({
-            ...opt,
-            type: 'CALL',
-            strike: parseFloat(strike),
-            expiration: expDate,
+    const pushMap = (expDateMap: any, type: 'CALL' | 'PUT') => {
+      if (!expDateMap) return;
+      for (const expKey in expDateMap) {
+        for (const strike in expDateMap[expKey]) {
+          const arr = expDateMap[expKey][strike];
+          (arr || []).forEach((opt: any) => {
+            allOptions.push({
+              ...opt,
+              type,
+              strike: parseFloat(strike),
+              expiration: expKey,
+            });
           });
-        });
+        }
       }
-    }
+    };
+    pushMap(optionsData.callExpDateMap, 'CALL');
+    pushMap(optionsData.putExpDateMap, 'PUT');
 
     // Detect unusual activity with INSTITUTIONAL filters
     const unusualActivities = allOptions
@@ -197,14 +214,24 @@ async function analyzeOptions(symbol: string, token: string): Promise<Suggestion
         if (volumeOIRatio < 5) return null; // Must be 5x open interest (significant new positioning)
         if (premium < 500000) return null; // Min $500k premium (institutional threshold)
 
-        const daysToExpiration = Math.ceil((new Date(opt.expiration).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+        // Schwab expiration keys often look like "YYYY-MM-DD:###".
+        // If we don't strip the suffix, Date parsing can yield NaN which bypasses our DTE filter.
+        const expIso = String(opt.expiration || '').split(':')[0];
+        const expMs = new Date(expIso).getTime();
+        const daysToExpiration = Number.isFinite(expMs)
+          ? Math.ceil((expMs - Date.now()) / (1000 * 60 * 60 * 24))
+          : (opt.daysToExpiration ?? 0);
         
         // INSTITUTIONAL TIME HORIZON: 30-180 days
         if (daysToExpiration < 30 || daysToExpiration > 180) return null;
 
         // Strike selection: Slightly OTM (2-10% from current price)
-        const strikeDistance = Math.abs(opt.strike - underlyingPrice) / underlyingPrice;
+        const strikeDistance = underlyingPrice > 0 ? Math.abs(opt.strike - underlyingPrice) / underlyingPrice : 1;
         if (strikeDistance > 0.10) return null; // Skip deep OTM (lottery tickets)
+
+        // Avoid ultra-cheap lottery tickets even if volume is high
+        const premiumPerContract = (opt.last || opt.mark || 0) * 100;
+        if (premiumPerContract < 40) return null;
 
         return {
           opt,
