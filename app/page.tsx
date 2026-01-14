@@ -15,6 +15,11 @@ import { PortfolioContextAlert } from './components/portfolio/PortfolioContextAl
 import { OrderModal } from './components/trading/OrderModal';
 import { COMPANY_NAMES } from '@/lib/companyNames';
 
+// Phase 6-9: New features
+import { AlertManager } from './components/alerts/AlertManager';
+import { BacktestRunner } from './components/backtest/BacktestRunner';
+import { PortfolioGreeksDashboard } from './components/portfolio/PortfolioGreeksDashboard';
+
 // ============================================================
 // UTILITY COMPONENTS
 // ============================================================
@@ -904,7 +909,7 @@ export default function TradingDashboard() {
   
   const [ticker, setTicker] = useState('');
   const [showMoreTickers, setShowMoreTickers] = useState(false);
-  const [activeTab, setActiveTab] = useState<'stock' | 'options' | 'tracker'>('stock');
+  const [activeTab, setActiveTab] = useState<'stock' | 'options' | 'tracker' | 'alerts' | 'backtest' | 'greeks'>('stock');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
   const [stockLoading, setStockLoading] = useState(false);
@@ -1122,12 +1127,12 @@ export default function TradingDashboard() {
         </div>
         
         {/* Tabs */}
-        <div className="flex gap-2 mb-6 p-1 bg-slate-800/50 rounded-xl border border-slate-700">
-          {(['stock', 'options', 'tracker'] as const).map((tab) => (
+        <div className="flex gap-2 mb-6 p-1 bg-slate-800/50 rounded-xl border border-slate-700 overflow-x-auto">
+          {(['stock', 'options', 'tracker', 'alerts', 'backtest', 'greeks'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`flex-1 px-4 py-2 rounded-lg font-medium transition-all duration-200 ${
+              className={`flex-1 px-4 py-2 rounded-lg font-medium transition-all duration-200 whitespace-nowrap ${
                 activeTab === tab
                   ? 'bg-gradient-to-r from-blue-500 to-emerald-500 text-white shadow-lg'
                   : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
@@ -1136,6 +1141,9 @@ export default function TradingDashboard() {
               {tab === 'stock' && '📊 Stock Analysis'}
               {tab === 'options' && '📈 Options Intel'}
               {tab === 'tracker' && '💼 Portfolio'}
+              {tab === 'alerts' && '🔔 Alerts'}
+              {tab === 'backtest' && '📈 Backtest'}
+              {tab === 'greeks' && '🎯 Greeks'}
             </button>
           ))}
         </div>
@@ -1174,6 +1182,18 @@ export default function TradingDashboard() {
                 }}
                 onTrade={handleTrade}
               />
+            )}
+            
+            {activeTab === 'alerts' && (
+              <AlertManager />
+            )}
+            
+            {activeTab === 'backtest' && (
+              <BacktestRunner />
+            )}
+            
+            {activeTab === 'greeks' && (
+              <PortfolioGreeksDashboard />
             )}
           </ErrorBoundary>
         </div>

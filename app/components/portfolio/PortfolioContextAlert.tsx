@@ -10,6 +10,24 @@ export function PortfolioContextAlert({ portfolioContext }: PortfolioContextAler
   }
 
   const { position, warnings, suggestions, portfolioScore, portfolioMaxScore } = portfolioContext;
+  
+  // Filter out buying power warnings if user has $0 (makes no sense to show them)
+  const buyingPower = portfolioContext.buyingPower || 0;
+  const relevantWarnings = warnings.filter((w: string) => {
+    // Hide "insufficient buying power" warnings when user literally has $0
+    if (buyingPower === 0 && (w.includes('insufficient') || w.includes('Cannot afford') || w.includes('Buying Power'))) {
+      return false;
+    }
+    return true;
+  });
+  
+  const relevantSuggestions = suggestions.filter((s: string) => {
+    // Hide purchase suggestions when user has $0
+    if (buyingPower === 0 && (s.includes('Cannot afford') || s.includes('at current price'))) {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <div className="space-y-3">
@@ -70,14 +88,14 @@ export function PortfolioContextAlert({ portfolioContext }: PortfolioContextAler
       )}
 
       {/* Warnings */}
-      {warnings && warnings.length > 0 && (
+      {relevantWarnings && relevantWarnings.length > 0 && (
         <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-lg">⚠️</span>
             <span className="font-semibold text-amber-400">Portfolio Alerts</span>
           </div>
           <div className="space-y-2">
-            {warnings.map((warning: string, i: number) => (
+            {relevantWarnings.map((warning: string, i: number) => (
               <p key={i} className="text-sm text-slate-300 flex items-start gap-2">
                 <span className="text-slate-500 mt-0.5">•</span>
                 {warning}
@@ -88,14 +106,14 @@ export function PortfolioContextAlert({ portfolioContext }: PortfolioContextAler
       )}
 
       {/* Suggestions */}
-      {suggestions && suggestions.length > 0 && (
+      {relevantSuggestions && relevantSuggestions.length > 0 && (
         <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/30">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-lg">💡</span>
             <span className="font-semibold text-blue-400">Smart Recommendations</span>
           </div>
           <div className="space-y-2">
-            {suggestions.map((suggestion: string, i: number) => (
+            {relevantSuggestions.map((suggestion: string, i: number) => (
               <p key={i} className="text-sm text-slate-300 flex items-start gap-2">
                 <span className="text-blue-500 mt-0.5">→</span>
                 {suggestion}
