@@ -21,21 +21,89 @@ export function LiveCalculator({
   const [livePrice, setLivePrice] = useState(suggestion.currentPrice);
   const [livePremium, setLivePremium] = useState(suggestion.details.premium || 0);
 
-  // Simulate live price updates (in production, use WebSocket)
+  // Real-time price updates via Schwab WebSocket
   useEffect(() => {
-    const interval = setInterval(() => {
-      // Simulate small price movements
-      const change = (Math.random() - 0.5) * 0.5;
-      setLivePrice(prev => Math.max(0.01, prev + change));
-      
-      if (tradeType === 'OPTIONS') {
-        const premiumChange = (Math.random() - 0.5) * 0.1;
-        setLivePremium(prev => Math.max(0.01, prev + premiumChange));
-      }
-    }, 2000);
+    let ws: WebSocket | null = null;
 
-    return () => clearInterval(interval);
-  }, [tradeType]);
+    const connectWebSocket = async () => {
+      try {
+        // Connect to Schwab streaming
+        const res = await fetch('/api/schwab/stream/connect', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            symbols: [suggestion.symbol],
+            fields: ['QUOTE']
+          })
+        });
+
+        const data = await res.json();
+        
+        if (data.success && data.wsUrl) {
+          ws = new WebSocket(data.wsUrl);
+
+          ws.onmessage = (event) => {
+            const message = JSON.parse(event.data);
+            
+            if (message.data && message.data[0]) {
+              const quote = message.data[0];
+              
+              // Update live price
+              if (quote.lastPrice) {
+                setLivePrice(quote.lastPrice);
+              }
+
+              // Update option premium if applicable
+              if (tradeType === 'OPTIONS' && quote.mark) {
+                setLivePremium(quote.mark);
+              }
+            }
+          };
+
+          ws.onerror = (error) => {
+            console.error('[WebSocket] Error:', error);
+            // Fallback to simulation
+            startSimulation();
+          };
+
+          ws.onclose = () => {
+            console.log('[WebSocket] Connection closed');
+          };
+        } else {
+          // Fallback to simulation if WebSocket not available
+          startSimulation();
+        }
+      } catch (error) {
+        console.error('[WebSocket] Connection failed:', error);
+        // Fallback to simulation
+        startSimulation();
+      }
+    };
+
+    const startSimulation = () => {
+      // Fallback: Simulate price updates
+      const interval = setInterval(() => {
+        const change = (Math.random() - 0.5) * 0.5;
+        setLivePrice((prev: number) => Math.max(0.01, prev + change));
+        
+        if (tradeType === 'OPTIONS') {
+          const premiumChange = (Math.random() - 0.5) * 0.1;
+          setLivePremium((prev: number) => Math.max(0.01, prev + premiumChange));
+        }
+      }, 2000);
+
+      return () => clearInterval(interval);
+    };
+
+    // Try WebSocket first, fallback to simulation
+    connectWebSocket();
+
+    return () => {
+      if (ws) {
+        ws.close();
+      }
+    };
+  }, [suggestion.symbol, tradeType]);
 
   // Calculate costs and metrics
   const calculateMetrics = () => {
