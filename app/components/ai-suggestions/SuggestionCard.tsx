@@ -89,20 +89,26 @@ export function SuggestionCard({ suggestion, onExecute, onDismiss }: SuggestionC
                 ${suggestion.details.strike} {suggestion.details.optionType}
               </p>
             </div>
-            <div className="p-2 rounded-lg bg-slate-900/50">
-              <TipLabel label="Premium" tipKey="PREMIUM" className="text-xs text-slate-400" />
+		    <div className="p-2 rounded-lg bg-slate-900/50">
+		      <TipLabel labelKey="PREMIUM" iconClassName="h-3 w-3 text-slate-500">
+		        <span className="text-xs text-slate-400">Premium</span>
+		      </TipLabel>
               <p className="text-sm font-bold text-white">
                 {formatCurrency(suggestion.details.premiumTotal || 0)}
               </p>
             </div>
-            <div className="p-2 rounded-lg bg-slate-900/50">
-              <TipLabel label="Volume" tipKey="VOLUME" className="text-xs text-slate-400" />
+		    <div className="p-2 rounded-lg bg-slate-900/50">
+		      <TipLabel labelKey="VOLUME" iconClassName="h-3 w-3 text-slate-500">
+		        <span className="text-xs text-slate-400">Volume</span>
+		      </TipLabel>
               <p className="text-sm font-bold text-white">
                 {(suggestion.details.volumeContracts || 0).toLocaleString()}
               </p>
             </div>
-            <div className="p-2 rounded-lg bg-slate-900/50">
-              <TipLabel label="Expiry" tipKey="DTE" className="text-xs text-slate-400" />
+		    <div className="p-2 rounded-lg bg-slate-900/50">
+		      <TipLabel labelKey="DTE" iconClassName="h-3 w-3 text-slate-500">
+		        <span className="text-xs text-slate-400">Expiry</span>
+		      </TipLabel>
               <p className="text-sm font-bold text-white truncate">
                 {suggestion.details.expiration}
               </p>
