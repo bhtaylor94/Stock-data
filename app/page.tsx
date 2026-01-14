@@ -2,13 +2,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 
 // Existing components
-import { StockDecisionHero } from './components/stock/StockDecisionHero';
-import { StockScoreBreakdown } from './components/stock/StockScoreBreakdown';
-import { ConsensusSourcesList } from './components/stock/ConsensusSourcesList';
-import { ChartPatternCard } from './components/stock/ChartPatternCard';
-import { OptionsDecisionHero } from './components/options/OptionsDecisionHero';
-import { UnusualActivitySection } from './components/options/UnusualActivitySection';
-import { OptionsSetupCard } from './components/options/OptionsSetupCard';
+import { StockAnalysisWrapper } from './components/stock/StockAnalysisWrapper';
+import { OptionsAnalysisWrapper } from './components/options/OptionsAnalysisWrapper';
+import { EvidenceDrawer } from './components/core/EvidenceDrawer';
+import { RealPortfolio } from './components/portfolio/RealPortfolio';
+import { OrderModal } from './components/trading/OrderModal';
+import { AlertManager } from './components/alerts/AlertManager';
+import { BacktestRunner } from './components/backtest/BacktestRunner';
+import { PortfolioGreeksDashboard } from './components/portfolio/PortfolioGreeksDashboard';
+import { SuggestionFeed } from './components/ai-suggestions/SuggestionFeed';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
 import { RealPortfolio } from './components/portfolio/RealPortfolio';
 import { PortfolioContextAlert } from './components/portfolio/PortfolioContextAlert';
@@ -581,19 +583,10 @@ export default function ModernAIHedgeFund() {
                 title="Stock Analysis"
                 subtitle={ticker || 'Enter a ticker to begin'}
               />
-              {ticker ? (
-                <div className="space-y-4">
-                  <StockDecisionHero ticker={ticker} />
-                  <StockScoreBreakdown ticker={ticker} />
-                  <ConsensusSourcesList ticker={ticker} />
-                  <ChartPatternCard ticker={ticker} />
-                </div>
-              ) : (
-                <div className="p-12 text-center text-slate-400">
-                  <p className="text-6xl mb-4">📈</p>
-                  <p>Search for a stock to analyze</p>
-                </div>
-              )}
+              <StockAnalysisWrapper 
+                ticker={ticker}
+                onViewEvidence={handleViewEvidence}
+              />
             </div>
           )}
 
@@ -603,18 +596,10 @@ export default function ModernAIHedgeFund() {
                 title="Options Analysis"
                 subtitle={ticker || 'Enter a ticker to begin'}
               />
-              {ticker ? (
-                <div className="space-y-4">
-                  <OptionsDecisionHero ticker={ticker} />
-                  <UnusualActivitySection ticker={ticker} />
-                  <OptionsSetupCard ticker={ticker} />
-                </div>
-              ) : (
-                <div className="p-12 text-center text-slate-400">
-                  <p className="text-6xl mb-4">⚡</p>
-                  <p>Search for a stock to analyze options</p>
-                </div>
-              )}
+              <OptionsAnalysisWrapper 
+                ticker={ticker}
+                onViewEvidence={handleViewEvidence}
+              />
             </div>
           )}
 
