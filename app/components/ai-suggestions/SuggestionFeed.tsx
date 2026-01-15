@@ -242,7 +242,9 @@ useEffect(() => {
                       instrument: isOpt ? 'OPTION' : 'STOCK',
                       side: 'BUY',
                       quantity: 1,
-                      entryPrice: suggestion.details?.markPrice || suggestion.currentPrice || 0,
+                      // For options, use the per-contract premium when available.
+                      // (The backend suggestion shape does not expose `markPrice`.)
+                      entryPrice: (suggestion.details?.premium ?? suggestion.currentPrice ?? 0),
                       confidence: suggestion.confidence,
                       reasons: suggestion.reason ? [suggestion.reason] : [],
                       invalidation: suggestion.details?.invalidation || '',
