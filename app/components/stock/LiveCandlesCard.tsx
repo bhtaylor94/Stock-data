@@ -1,10 +1,14 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
-import SimpleLineChart from '@/app/components/charts/SimpleLineChart';
+import React, { useEffect, useState } from 'react';
+import dynamic from 'next/dynamic';
+
+const CandlestickChart = dynamic(() => import('@/app/components/charts/CandlestickChart'), { ssr: false });
 
 type RangeKey = '1D' | '1W' | '1M' | '3M' | 'YTD' | '1Y' | '5Y';
 type Candle = { time: number; open: number; high: number; low: number; close: number; volume?: number };
+
+type OverlayKey = 'EMA20' | 'EMA50' | 'VWAP' | 'BBANDS';
 
 async function fetchCandles(symbol: string, range: RangeKey, signal?: AbortSignal): Promise<Candle[]> {
   const qs = new URLSearchParams({ symbol, range });
@@ -19,6 +23,13 @@ export default function LiveCandlesCard({ symbol }: { symbol: string }) {
   const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>('');
+
+  const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({
+    EMA20: true,
+    EMA50: true,
+    VWAP: true,
+    BBANDS: true,
+  });
 
   const pollMs = range === '1D' || range === '1W' ? 15000 : 60000;
 
@@ -51,12 +62,6 @@ export default function LiveCandlesCard({ symbol }: { symbol: string }) {
     };
   }, [symbol, range, pollMs]);
 
-  const values = useMemo(() => {
-    return (candles || [])
-      .filter((c) => Number.isFinite(c.close) && c.time > 0)
-      .map((c) => ({ t: c.time, v: c.close }));
-  }, [candles]);
-
   return (
     <div className="rounded-2xl border border-slate-800 bg-slate-900/20 p-3">
       <div className="flex items-center justify-between gap-3 mb-3">
@@ -82,6 +87,30 @@ export default function LiveCandlesCard({ symbol }: { symbol: string }) {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-1.5 mb-2">
+        {(
+          [
+            { k: 'EMA20' as const, label: 'EMA 20' },
+            { k: 'EMA50' as const, label: 'EMA 50' },
+            { k: 'VWAP' as const, label: 'VWAP' },
+            { k: 'BBANDS' as const, label: 'Bollinger' },
+          ]
+        ).map((o) => (
+          <button
+            key={o.k}
+            onClick={() => setOverlays((prev) => ({ ...prev, [o.k]: !prev[o.k] }))}
+            className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition ${
+              overlays[o.k]
+                ? 'border-slate-600 bg-slate-800/60 text-slate-100'
+                : 'border-slate-800 bg-slate-950/30 text-slate-400 hover:bg-slate-900/30'
+            }`}
+            title="Toggle indicator overlay"
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+
       {error ? (
         <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-xs text-red-200">{error}</div>
       ) : (
@@ -89,7 +118,7 @@ export default function LiveCandlesCard({ symbol }: { symbol: string }) {
           {loading && (
             <div className="absolute right-2 top-2 text-[11px] text-slate-400">Updating…</div>
           )}
-          <SimpleLineChart values={values} height={240} className="p-0 border-0 bg-transparent" />
+          <CandlestickChart candles={candles} overlays={overlays} height={260} />
         </div>
       )}
 

@@ -626,18 +626,18 @@ function StockTab({
                 });
                 if (onTrack) onTrack(true, `✓ Tracked (Paper) ${ticker}`);
               }}
-              className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/40 text-slate-100 text-xs hover:bg-slate-800 transition"
+              className="px-4 py-2 rounded-full border border-slate-700 bg-slate-950/40 text-slate-100 text-xs font-semibold hover:bg-slate-900/40 transition"
             >
-              📌 Track (Paper)
+              📌 Track
             </button>
             <button
               onClick={() => {
                 if (!onTrade) return;
                 onTrade(ticker, price, action === 'SELL' ? 'SELL' : action === 'HOLD' ? 'HOLD' : 'BUY', 1);
               }}
-              className="px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/15 text-emerald-200 text-xs hover:bg-emerald-500/25 transition"
+              className="px-5 py-2 rounded-full border border-emerald-500/30 bg-emerald-500/20 text-emerald-100 text-xs font-semibold hover:bg-emerald-500/30 transition"
             >
-              ⚡ Trade (Live)
+              ⚡ Trade
             </button>
           </div>
         </div>
@@ -667,44 +667,12 @@ function StockTab({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                addPaperTrade({
-                  symbol: ticker,
-                  companyName,
-                  instrument: 'STOCK',
-                  side: action === 'SELL' ? 'SELL' : 'BUY',
-                  quantity: 1,
-                  entryPrice: price,
-                  confidence,
-                  reasons: (reasons || []).slice(0, 3),
-                  invalidation,
-                });
-                if (onTrack) onTrack(true, `✓ Tracked (Paper) ${ticker}`);
-              }}
-              className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/40 text-slate-100 text-xs hover:bg-slate-800 transition"
-            >
-              📌 Track (Paper)
-            </button>
-
-            <button
-              onClick={() => {
-                if (!onTrade) return;
-                onTrade(ticker, price, action === 'SELL' ? 'SELL' : action === 'HOLD' ? 'HOLD' : 'BUY', 1);
-              }}
-              className="px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/15 text-emerald-200 text-xs hover:bg-emerald-500/25 transition"
-            >
-              ⚡ Make Trade (Live)
-            </button>
-
-            <button
-              onClick={onViewEvidence}
-              className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-950/40 text-slate-200 text-xs hover:bg-slate-950/60 transition"
-            >
-              View evidence →
-            </button>
-          </div>
+          <button
+            onClick={onViewEvidence}
+            className="px-3 py-2 rounded-full border border-slate-700 bg-slate-950/30 text-slate-200 text-xs font-semibold hover:bg-slate-950/50 transition"
+          >
+            Evidence →
+          </button>
         </div>
 
         {/* Execution */}
