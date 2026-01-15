@@ -575,6 +575,31 @@ function StockTab({
   const horizon = primary?.timeHorizon || 'N/A';
   const setup = primary?.setup || primary?.strategy || 'N/A';
 
+const fmtPx = (v: any) => (typeof v === 'number' && Number.isFinite(v) ? `$${v.toFixed(2)}` : (v ? String(v) : ''));
+
+const planEntry = fmtPx(entry) || `$${price.toFixed(2)}`;
+const planStop =
+  fmtPx(stop) ||
+  (action === 'BUY'
+    ? `$${(price * 0.96).toFixed(2)}`
+    : action === 'SELL'
+      ? `$${(price * 1.04).toFixed(2)}`
+      : `$${(price * 0.97).toFixed(2)}`);
+const planTarget =
+  fmtPx(target) ||
+  (action === 'BUY'
+    ? `$${(price * 1.08).toFixed(2)}`
+    : action === 'SELL'
+      ? `$${(price * 0.92).toFixed(2)}`
+      : `$${(price * 1.03).toFixed(2)}`);
+
+const keyWhy: string[] = (reasons || [])
+  .map((r) => String(r))
+  .filter(Boolean)
+  .map((r) => r.replace(/^Regime:\s*/i, 'Regime: ').replace(/^Combined Score:\s*/i, 'Score: '))
+  .slice(0, 3);
+
+
   const actionLabel =
     action === 'BUY' ? 'BUY STOCK' :
     action === 'SELL' ? 'SELL / TRIM' :
@@ -646,9 +671,9 @@ function StockTab({
           <LiveCandlesCard
             symbol={ticker}
             tradePlan={{
-              entry: entry ?? '—',
-              stop: stop ?? '—',
-              target: target ?? '—',
+              entry: planEntry,
+              stop: planStop,
+              target: planTarget,
               horizon,
               why: (reasons || []).slice(0, 8),
             }}
@@ -684,52 +709,66 @@ function StockTab({
           </button>
         </div>
 
-        {/* Execution */}
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/40">
-            <div className="text-[11px] text-slate-400">Current</div>
-            <div className="text-base font-bold text-white">${price.toFixed(2)}</div>
-            <div className="text-[11px] text-slate-500">Horizon: {horizon}</div>
-          </div>
-          <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/40">
-            <div className="text-[11px] text-slate-400">Execution</div>
-            <div className="text-sm text-slate-200">
-              Entry: <span className="font-semibold text-white">{entry ?? '—'}</span>
-            </div>
-            <div className="text-sm text-slate-200">
-              Target: <span className="font-semibold text-white">{target ?? '—'}</span>
-            </div>
-            <div className="text-sm text-slate-200">
-              Stop: <span className="font-semibold text-white">{stop ?? '—'}</span>
-            </div>
-          </div>
-          <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/40">
-            <div className="text-[11px] text-slate-400">Setup</div>
-            <div className="text-sm font-semibold text-white">{setup}</div>
-            {invalidation ? (
-              <div className="mt-2 text-[12px] text-amber-300">
-                Invalidation: <span className="text-slate-200">{invalidation}</span>
-              </div>
-            ) : (
-              <div className="mt-2 text-[12px] text-slate-500">Invalidation: —</div>
-            )}
-          </div>
-        </div>
+        
+{/* Trade plan + key signals (simple) */}
+<div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/40">
+    <div className="flex items-center justify-between">
+      <div className="text-xs font-semibold text-white">Trade plan</div>
+      <div className="text-[11px] text-slate-500">Horizon: {horizon}</div>
+    </div>
 
-        {/* Why (max 3) */}
-        {reasons && reasons.length > 0 && (
-          <div className="mt-4">
-            <div className="text-xs font-semibold text-slate-300 mb-2">Why</div>
-            <ul className="text-sm text-slate-300 list-disc pl-5 space-y-1">
-              {reasons.slice(0, 3).map((r, idx) => (
-                <li key={idx}>{r}</li>
-              ))}
-            </ul>
-          </div>
-        )}
+    <div className="mt-3 grid grid-cols-3 gap-2">
+      <div className="p-2 rounded-lg border border-slate-800 bg-slate-950/40">
+        <div className="text-[11px] text-slate-500">Entry</div>
+        <div className="text-sm font-bold text-white">{planEntry}</div>
       </div>
+      <div className="p-2 rounded-lg border border-slate-800 bg-slate-950/40">
+        <div className="text-[11px] text-slate-500">Stop</div>
+        <div className="text-sm font-bold text-white">{planStop}</div>
+      </div>
+      <div className="p-2 rounded-lg border border-slate-800 bg-slate-950/40">
+        <div className="text-[11px] text-slate-500">Target</div>
+        <div className="text-sm font-bold text-white">{planTarget}</div>
+      </div>
+    </div>
 
-      {/* Portfolio Context Alert (kept, but below the ticket) */}
+    <div className="mt-3 text-[11px] text-slate-400">
+      Setup: <span className="text-slate-200 font-semibold">{setup}</span>
+      {invalidation ? (
+        <>
+          <span className="opacity-50"> • </span>
+          <span className="text-slate-500">Invalidation: {invalidation}</span>
+        </>
+      ) : null}
+    </div>
+  </div>
+
+  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/40">
+    <div className="text-xs font-semibold text-white">Why this decision</div>
+    <div className="mt-2 space-y-2">
+      {(keyWhy.length ? keyWhy : ['Not enough aligned signals yet — keep watching.']).map((r, i) => (
+        <div key={i} className="flex gap-2 text-sm text-slate-200">
+          <span className="text-slate-500">•</span>
+          <span className="leading-snug">{r}</span>
+        </div>
+      ))}
+    </div>
+
+    <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
+      <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-2">
+        <div className="text-slate-500">Fundamental</div>
+        <div className="text-slate-200 font-semibold">{analysis?.fundamental?.score ?? '—'}/9</div>
+      </div>
+      <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-2">
+        <div className="text-slate-500">Technical</div>
+        <div className="text-slate-200 font-semibold">{analysis?.technical?.score ?? '—'}/9</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{/* Portfolio Context Alert (kept, but below the ticket) */}
       {data.portfolioContext && (
         <PortfolioContextAlert portfolioContext={data.portfolioContext} />
       )}

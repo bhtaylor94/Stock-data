@@ -181,6 +181,10 @@ export default function CandlestickChart({
   const macdSignalRef = useRef<ISeriesApi<'Line'> | null>(null);
   const macdHistRef = useRef<ISeriesApi<'Histogram'> | null>(null);
 
+  // Preserve user zoom/scroll between polling updates
+  const lastVisibleRangeRef = useRef<any>(null);
+  const didInitialFitRef = useRef(false);
+
   const { candleData, volumeData, lineOverlays, rsiLine, macdLines } = useMemo(() => {
     const rows = (candles || [])
       .filter((c) => c && c.time && Number.isFinite(c.open) && Number.isFinite(c.close))
@@ -381,7 +385,13 @@ export default function CandlestickChart({
         try { rsiChart?.timeScale().setVisibleRange(range); } catch {}
         try { macdChart?.timeScale().setVisibleRange(range); } catch {}
       };
-      priceChart.timeScale().subscribeVisibleTimeRangeChange(syncRange);
+
+      const onRange = (range: any) => {
+        lastVisibleRangeRef.current = range || null;
+        syncRange(range);
+      };
+
+      priceChart.timeScale().subscribeVisibleTimeRangeChange(onRange);
 
       // Resize observer
       const ro = new ResizeObserver(() => {
@@ -396,7 +406,7 @@ export default function CandlestickChart({
 
       // Cleanup handler
       return () => {
-        try { priceChart.timeScale().unsubscribeVisibleTimeRangeChange(syncRange); } catch {}
+        try { priceChart.timeScale().unsubscribeVisibleTimeRangeChange(onRange); } catch {}
         ro.disconnect();
       };
     })();
@@ -431,9 +441,18 @@ export default function CandlestickChart({
     const volSeries = volumeSeriesRef.current;
     if (!priceChart || !candleSeries || !volSeries) return;
 
+    const prevRange = lastVisibleRangeRef.current;
+
     candleSeries.setData(candleData);
     volSeries.setData(volumeData);
-    try { priceChart.timeScale().fitContent(); } catch {}
+
+    // Only auto-fit on first load; afterwards preserve the user's zoom/scroll.
+    if (!didInitialFitRef.current) {
+      try { priceChart.timeScale().fitContent(); } catch {}
+      didInitialFitRef.current = true;
+    } else if (prevRange) {
+      try { priceChart.timeScale().setVisibleRange(prevRange); } catch {}
+    }
 
     // RSI / MACD
     if (rsiSeriesRef.current) {
