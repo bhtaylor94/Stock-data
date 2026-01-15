@@ -62,7 +62,6 @@ useEffect(() => {
 }, []);
 
 // Update "now" every second for relative time display
- for relative time display
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
