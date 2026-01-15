@@ -41,9 +41,10 @@ export function ema(values: number[], period: number): (number | null)[] {
       out[i] = null;
       continue;
     }
-    const next = v * k + prev * (1 - k);
-    prev = next;
-    out[i] = next;
+    // Avoid using the identifier name "next" (can confuse certain TS/Next toolchains).
+    const emaNext: number = v * k + prev * (1 - k);
+    prev = emaNext;
+    out[i] = emaNext;
   }
   // For stability: null out the first (period-1) outputs.
   for (let i = 0; i < Math.min(values.length, period - 1); i++) out[i] = null;
