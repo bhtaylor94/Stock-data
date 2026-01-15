@@ -644,7 +644,7 @@ function StockTab({
         </div>
       </div>
 
-      <LiveCandlesCard ticker={symbol} currentPrice={currentPrice || 0} tradePlan={tradePlan} />
+      <LiveCandlesCard symbol={symbol} tradePlan={tradePlan} />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <StockScoreBreakdown data={data} />
