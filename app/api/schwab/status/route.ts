@@ -5,15 +5,17 @@ export const runtime = 'nodejs';
 
 export async function GET() {
   try {
-    const tokenResult = await getSchwabAccessToken();
+    // Use the same scope as other account/trading endpoints.
+    const tokenResult = await getSchwabAccessToken('tracker', { forceRefresh: false });
     if (!tokenResult.token) {
       return NextResponse.json({ ok: false, canTrade: false, hasAccount: false, error: tokenResult.error, status: tokenResult.status }, { status: tokenResult.status || 401 });
     }
 
     // Accounts endpoint is the most reliable lightweight auth check.
     const accounts = await schwabFetchJson<any[]>(
-      '/trader/v1/accounts/accountNumbers',
-      tokenResult.token
+      tokenResult.token,
+      'https://api.schwabapi.com/trader/v1/accounts/accountNumbers',
+      { scope: 'tracker' }
     );
 
     if (!accounts.ok) {
