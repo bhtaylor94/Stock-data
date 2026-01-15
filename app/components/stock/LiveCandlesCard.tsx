@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
+import { TradePlanDrawer, type TradePlan } from '@/app/components/core/TradePlanDrawer';
 
 const CandlestickChart = dynamic(() => import('@/app/components/charts/CandlestickChart'), { ssr: false });
 
@@ -18,7 +19,13 @@ async function fetchCandles(symbol: string, range: RangeKey, signal?: AbortSigna
   return Array.isArray(data?.candles) ? data.candles : [];
 }
 
-export default function LiveCandlesCard({ symbol }: { symbol: string }) {
+export default function LiveCandlesCard({
+  symbol,
+  tradePlan,
+}: {
+  symbol: string;
+  tradePlan?: TradePlan | null;
+}) {
   const [range, setRange] = useState<RangeKey>('1D');
   const [candles, setCandles] = useState<Candle[]>([]);
   const [loading, setLoading] = useState(false);
@@ -30,6 +37,12 @@ export default function LiveCandlesCard({ symbol }: { symbol: string }) {
     VWAP: true,
     BBANDS: true,
   });
+
+  const [showRSI, setShowRSI] = useState(false);
+  const [showMACD, setShowMACD] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
+
+  const plan: TradePlan | null = tradePlan || null;
 
   const pollMs = range === '1D' || range === '1W' ? 15000 : 60000;
 
@@ -109,6 +122,41 @@ export default function LiveCandlesCard({ symbol }: { symbol: string }) {
             {o.label}
           </button>
         ))}
+
+        <span className="mx-1 h-5 w-px bg-slate-800" />
+
+        <button
+          onClick={() => setShowRSI((p) => !p)}
+          className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition ${
+            showRSI
+              ? 'border-slate-600 bg-slate-800/60 text-slate-100'
+              : 'border-slate-800 bg-slate-950/30 text-slate-400 hover:bg-slate-900/30'
+          }`}
+          title="Toggle RSI panel"
+        >
+          RSI
+        </button>
+        <button
+          onClick={() => setShowMACD((p) => !p)}
+          className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition ${
+            showMACD
+              ? 'border-slate-600 bg-slate-800/60 text-slate-100'
+              : 'border-slate-800 bg-slate-950/30 text-slate-400 hover:bg-slate-900/30'
+          }`}
+          title="Toggle MACD panel"
+        >
+          MACD
+        </button>
+
+        {plan ? (
+          <button
+            onClick={() => setPlanOpen(true)}
+            className="ml-auto px-3 py-1 rounded-full text-[11px] font-semibold border border-emerald-500/30 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-500/15"
+            title="View trade plan"
+          >
+            Trade plan
+          </button>
+        ) : null}
       </div>
 
       {error ? (
@@ -118,13 +166,22 @@ export default function LiveCandlesCard({ symbol }: { symbol: string }) {
           {loading && (
             <div className="absolute right-2 top-2 text-[11px] text-slate-400">Updating…</div>
           )}
-          <CandlestickChart candles={candles} overlays={overlays} height={260} />
+          <CandlestickChart candles={candles} overlays={overlays} height={260} showRSI={showRSI} showMACD={showMACD} />
         </div>
       )}
 
       <div className="mt-2 text-[11px] text-slate-500">
         Updates {range === '1D' || range === '1W' ? 'every 15s' : 'every 60s'} • Source: Schwab pricehistory
       </div>
+
+      {plan ? (
+        <TradePlanDrawer
+          isOpen={planOpen}
+          onClose={() => setPlanOpen(false)}
+          title={`${symbol} plan`}
+          plan={plan}
+        />
+      ) : null}
     </div>
   );
 }

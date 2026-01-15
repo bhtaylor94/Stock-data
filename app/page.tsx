@@ -643,7 +643,16 @@ function StockTab({
         </div>
 
         <div className="mt-4">
-          <LiveCandlesCard symbol={ticker} />
+          <LiveCandlesCard
+            symbol={ticker}
+            tradePlan={{
+              entry: entry ?? '—',
+              stop: stop ?? '—',
+              target: target ?? '—',
+              horizon,
+              why: (reasons || []).slice(0, 8),
+            }}
+          />
         </div>
       </div>
 
