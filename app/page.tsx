@@ -29,6 +29,15 @@ import { SuggestionFeed } from './components/ai-suggestions/SuggestionFeed';
 // UTILITY COMPONENTS
 // ============================================================
 
+const formatCurrency = (value: number) => {
+  const safe = Number.isFinite(value) ? value : 0;
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(safe);
+};
+
 function LoadingSpinner() {
   return (
     <div className="flex items-center justify-center py-12">
