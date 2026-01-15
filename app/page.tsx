@@ -22,8 +22,9 @@ import { AlertManager } from './components/alerts/AlertManager';
 import { BacktestRunner } from './components/backtest/BacktestRunner';
 import { PortfolioGreeksDashboard } from './components/portfolio/PortfolioGreeksDashboard';
 
-// NEW: AI Suggestions Feed
-import { SuggestionFeed } from './components/ai-suggestions/SuggestionFeed';
+// NEW: Strategy-first Signals + Strategy Library
+import { SignalsFeed } from './components/signals/SignalsFeed';
+import { StrategyLibrary } from './components/strategies/StrategyLibrary';
 
 // ============================================================
 // UTILITY COMPONENTS
@@ -1052,7 +1053,7 @@ export default function TradingDashboard() {
   
   const [ticker, setTicker] = useState('');
   const [showMoreTickers, setShowMoreTickers] = useState(false);
-  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'tracker' | 'alerts' | 'backtest' | 'greeks'>('feed');
+  const [activeTab, setActiveTab] = useState<'signals' | 'strategies' | 'stock' | 'options' | 'tracker' | 'alerts' | 'backtest' | 'greeks'>('signals');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
   const [stockLoading, setStockLoading] = useState(false);
@@ -1271,7 +1272,7 @@ export default function TradingDashboard() {
         
         {/* Tabs */}
         <div className="flex gap-2 mb-6 p-1 bg-slate-800/50 rounded-xl border border-slate-700 overflow-x-auto">
-          {(['feed', 'stock', 'options', 'tracker', 'alerts', 'backtest', 'greeks'] as const).map((tab) => (
+          {(['signals', 'strategies', 'stock', 'options', 'tracker', 'alerts', 'backtest', 'greeks'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1281,7 +1282,8 @@ export default function TradingDashboard() {
                   : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
               }`}
             >
-              {tab === 'feed' && '🤖 AI Feed'}
+              {tab === 'signals' && '📡 Signals'}
+              {tab === 'strategies' && '📚 Strategies'}
               {tab === 'stock' && '📊 Stocks'}
               {tab === 'options' && '📈 Options'}
               {tab === 'tracker' && '💼 Portfolio'}
@@ -1295,8 +1297,12 @@ export default function TradingDashboard() {
         {/* Tab Content */}
         <div className="min-h-[60vh]">
           <ErrorBoundary>
-            {activeTab === 'feed' && (
-              <SuggestionFeed />
+            {activeTab === 'signals' && (
+              <SignalsFeed />
+            )}
+
+            {activeTab === 'strategies' && (
+              <StrategyLibrary />
             )}
             
             {activeTab === 'stock' && (
