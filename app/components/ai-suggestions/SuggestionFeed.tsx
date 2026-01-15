@@ -247,7 +247,9 @@ useEffect(() => {
                       entryPrice: (suggestion.details?.premium ?? suggestion.currentPrice ?? 0),
                       confidence: suggestion.confidence,
                       reasons: suggestion.reason ? [suggestion.reason] : [],
-                      invalidation: suggestion.details?.invalidation || '',
+                      // The suggestion.details shape is option-focused and does not include invalidation.
+                      // Some endpoints may provide invalidation at the top-level; fall back safely.
+                      invalidation: ((suggestion as any).invalidation ?? ''),
                       optionType: isOpt ? (suggestion.details?.optionType || 'CALL') : undefined,
                       strike: isOpt ? suggestion.details?.strike : undefined,
                       expiration: isOpt ? suggestion.details?.expiration : undefined,
