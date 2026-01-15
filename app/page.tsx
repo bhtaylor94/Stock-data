@@ -25,6 +25,7 @@ import { PortfolioGreeksDashboard } from './components/portfolio/PortfolioGreeks
 // NEW: Strategy-first Signals + Strategy Library
 import { SignalsFeed } from './components/signals/SignalsFeed';
 import { StrategyLibrary } from './components/strategies/StrategyLibrary';
+import { AutomationControls } from './components/automation/AutomationControls';
 
 // ============================================================
 // UTILITY COMPONENTS
@@ -1053,7 +1054,7 @@ export default function TradingDashboard() {
   
   const [ticker, setTicker] = useState('');
   const [showMoreTickers, setShowMoreTickers] = useState(false);
-  const [activeTab, setActiveTab] = useState<'signals' | 'strategies' | 'stock' | 'options' | 'tracker' | 'alerts' | 'backtest' | 'greeks'>('signals');
+  const [activeTab, setActiveTab] = useState<'signals' | 'strategies' | 'automation' | 'stock' | 'options' | 'tracker' | 'alerts' | 'backtest' | 'greeks'>('signals');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
   const [stockLoading, setStockLoading] = useState(false);
@@ -1272,7 +1273,7 @@ export default function TradingDashboard() {
         
         {/* Tabs */}
         <div className="flex gap-2 mb-6 p-1 bg-slate-800/50 rounded-xl border border-slate-700 overflow-x-auto">
-          {(['signals', 'strategies', 'stock', 'options', 'tracker', 'alerts', 'backtest', 'greeks'] as const).map((tab) => (
+          {(['signals', 'strategies', 'automation', 'stock', 'options', 'tracker', 'alerts', 'backtest', 'greeks'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -1284,6 +1285,7 @@ export default function TradingDashboard() {
             >
               {tab === 'signals' && '📡 Signals'}
               {tab === 'strategies' && '📚 Strategies'}
+              {tab === 'automation' && '⚙️ Automation'}
               {tab === 'stock' && '📊 Stocks'}
               {tab === 'options' && '📈 Options'}
               {tab === 'tracker' && '💼 Portfolio'}
@@ -1303,6 +1305,10 @@ export default function TradingDashboard() {
 
             {activeTab === 'strategies' && (
               <StrategyLibrary />
+            )}
+
+            {activeTab === 'automation' && (
+              <AutomationControls />
             )}
             
             {activeTab === 'stock' && (
