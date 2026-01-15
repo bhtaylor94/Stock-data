@@ -5,6 +5,7 @@ import React, { useState, useEffect } from 'react';
 import { StockScoreBreakdown } from './components/stock/StockScoreBreakdown';
 import { ConsensusSourcesList } from './components/stock/ConsensusSourcesList';
 import { ChartPatternCard } from './components/stock/ChartPatternCard';
+import LiveCandlesCard from './components/stock/LiveCandlesCard';
 import { OptionsDecisionHero } from './components/options/OptionsDecisionHero';
 import { UnusualActivitySection } from './components/options/UnusualActivitySection';
 import { OptionsSetupCard } from './components/options/OptionsSetupCard';
@@ -538,6 +539,17 @@ function StockTab({
   const tradeDecision = data?.meta?.tradeDecision;
   const price = Number(data.price || data.quote?.c || 0) || 0;
 
+  const changeAbs = Number(
+    data?.quote?.d ??
+    data?.quote?.netChange ??
+    (Number.isFinite(data?.quote?.o) ? (price - Number(data.quote.o)) : 0)
+  ) || 0;
+  const changePct = Number(
+    data?.quote?.dp ??
+    data?.quote?.percentChange ??
+    (price && Number.isFinite(data?.quote?.o) ? ((price - Number(data.quote.o)) / price) * 100 : 0)
+  ) || 0;
+
   const actionRaw: string = (primary?.type || tradeDecision?.action || 'NO_TRADE') as string;
   const action: 'BUY' | 'SELL' | 'HOLD' | 'NO_TRADE' =
     actionRaw === 'STRONG_BUY' ? 'BUY' :
@@ -583,6 +595,58 @@ function StockTab({
 
   return (
     <div className="space-y-4 animate-fade-in">
+
+      {/* Robinhood-style header + chart */}
+      <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/20">
+        <div className="flex items-end justify-between gap-3">
+          <div>
+            <div className="text-xs text-slate-400">{ticker}</div>
+            <div className="text-2xl font-bold text-white leading-tight">{companyName}</div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <div className="text-4xl font-extrabold text-white">${price.toFixed(2)}</div>
+              <div className={`text-sm font-semibold ${changeAbs >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {changeAbs >= 0 ? '▲' : '▼'} {Math.abs(changeAbs).toFixed(2)} ({Math.abs(changePct).toFixed(2)}%)
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                addPaperTrade({
+                  symbol: ticker,
+                  companyName,
+                  instrument: 'STOCK',
+                  side: action === 'SELL' ? 'SELL' : 'BUY',
+                  quantity: 1,
+                  entryPrice: price,
+                  confidence,
+                  reasons: (reasons || []).slice(0, 3),
+                  invalidation,
+                });
+                if (onTrack) onTrack(true, `✓ Tracked (Paper) ${ticker}`);
+              }}
+              className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/40 text-slate-100 text-xs hover:bg-slate-800 transition"
+            >
+              📌 Track (Paper)
+            </button>
+            <button
+              onClick={() => {
+                if (!onTrade) return;
+                onTrade(ticker, price, action === 'SELL' ? 'SELL' : action === 'HOLD' ? 'HOLD' : 'BUY', 1);
+              }}
+              className="px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/15 text-emerald-200 text-xs hover:bg-emerald-500/25 transition"
+            >
+              ⚡ Trade (Live)
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <LiveCandlesCard symbol={ticker} />
+        </div>
+      </div>
+
       {/* Decision Ticket (clarity-first) */}
       <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/30">
         <div className="flex items-start justify-between gap-3">
