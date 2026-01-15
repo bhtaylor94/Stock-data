@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 
 // New refactored components
-import { StockDecisionHero } from './components/stock/StockDecisionHero';
 import { StockScoreBreakdown } from './components/stock/StockScoreBreakdown';
 import { ConsensusSourcesList } from './components/stock/ConsensusSourcesList';
 import { ChartPatternCard } from './components/stock/ChartPatternCard';
@@ -11,9 +10,11 @@ import { UnusualActivitySection } from './components/options/UnusualActivitySect
 import { OptionsSetupCard } from './components/options/OptionsSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
 import { RealPortfolio } from './components/portfolio/RealPortfolio';
+import { PaperPortfolio } from './components/portfolio/PaperPortfolio';
 import { PortfolioContextAlert } from './components/portfolio/PortfolioContextAlert';
 import { OrderModal } from './components/trading/OrderModal';
 import { COMPANY_NAMES } from '@/lib/companyNames';
+import { addPaperTrade } from '@/lib/paperTrades';
 
 // Phase 6-9: New features
 import { AlertManager } from './components/alerts/AlertManager';
@@ -317,6 +318,8 @@ function TrackerTab({
           View Live Schwab Account
         </button>
       </div>
+
+      <PaperPortfolio />
       
       {/* Portfolio Summary */}
       <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-slate-700/50">
@@ -530,52 +533,187 @@ function StockTab({
 
   const { analysis, suggestions, chartPatterns, technicals, fundamentals, news, analysts } = data;
 
+  const companyName = data.name || COMPANY_NAMES[ticker as keyof typeof COMPANY_NAMES] || ticker;
+  const primary = Array.isArray(suggestions) && suggestions.length > 0 ? suggestions[0] : null;
+  const tradeDecision = data?.meta?.tradeDecision;
+  const price = Number(data.price || data.quote?.c || 0) || 0;
+
+  const actionRaw: string = (primary?.type || tradeDecision?.action || 'NO_TRADE') as string;
+  const action: 'BUY' | 'SELL' | 'HOLD' | 'NO_TRADE' =
+    actionRaw === 'STRONG_BUY' ? 'BUY' :
+    actionRaw === 'STRONG_SELL' ? 'SELL' :
+    actionRaw === 'BUY' ? 'BUY' :
+    actionRaw === 'SELL' ? 'SELL' :
+    actionRaw === 'HOLD' ? 'HOLD' :
+    'NO_TRADE';
+
+  const confidence: number =
+    typeof primary?.confidence === 'number' ? primary.confidence :
+    typeof tradeDecision?.confidence === 'number' ? tradeDecision.confidence :
+    0;
+
+  const reasons: string[] = Array.isArray(primary?.reasoning) ? primary.reasoning : (Array.isArray(tradeDecision?.rationale) ? tradeDecision.rationale : []);
+  const invalidation: string =
+    typeof primary?.invalidation === 'string' && primary.invalidation ? primary.invalidation :
+    (Array.isArray(tradeDecision?.rationale) && tradeDecision.rationale.length > 0 ? String(tradeDecision.rationale[0]) : '');
+
+  const entry = primary?.entry ?? null;
+  const target = primary?.target ?? null;
+  const stop = primary?.stop ?? null;
+  const horizon = primary?.timeHorizon || 'N/A';
+  const setup = primary?.setup || primary?.strategy || 'N/A';
+
+  const actionLabel =
+    action === 'BUY' ? 'BUY STOCK' :
+    action === 'SELL' ? 'SELL / TRIM' :
+    action === 'HOLD' ? 'HOLD' :
+    'NO TRADE';
+
+  const actionBadgeClass =
+    action === 'BUY' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' :
+    action === 'SELL' ? 'bg-red-500/15 text-red-300 border-red-500/30' :
+    action === 'HOLD' ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' :
+    'bg-amber-500/15 text-amber-300 border-amber-500/30';
+
+  const confidenceLabel =
+    confidence >= 75 ? 'STRONG' :
+    confidence >= 60 ? 'GOOD' :
+    confidence >= 45 ? 'MIXED' :
+    'LOW';
+
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* Decision Hero - Sticky at top */}
-      <StockDecisionHero 
-        ticker={ticker}
-        price={data.price || data.quote?.c || 0}
-        analysis={{ ...analysis, changePercent: data.changePercent }}
-        meta={data.meta}
-        onTrack={() => {
-          if (suggestions?.[0] && onTrack) {
-            const sug = suggestions[0];
-            const trackData = {
-              ticker,
-              type: sug.type === 'BUY' ? 'STOCK_BUY' : 'STOCK_SELL',
-              strategy: sug.strategy,
-              entryPrice: data.price || data.quote?.c,
-              confidence: sug.confidence || 0,
-              reasoning: sug.reasoning || [],
-              evidencePacket: data, // Store full evidence
-            };
-            
-            fetch('/api/tracker', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(trackData),
-            }).then(res => res.json()).then(result => {
-              onTrack(result.success, result.success ? `✓ Tracking ${ticker}` : result.error);
-            });
-          }
-        }}
-        onViewEvidence={onViewEvidence}
-        onTrade={onTrade ? () => onTrade(
-          ticker, 
-          data.price || data.quote?.c || 0,
-          data.meta?.tradeDecision?.action || 'BUY',
-          1
-        ) : undefined}
-      />
-      
-      {/* Portfolio Context Alert */}
+      {/* Decision Ticket (clarity-first) */}
+      <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/30">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="text-lg font-semibold text-white">
+              {companyName} <span className="text-slate-400 font-normal">({ticker})</span>
+            </div>
+            <div className="mt-2 inline-flex items-center gap-2">
+              <span className={`px-3 py-1 rounded-full text-xs font-bold border ${actionBadgeClass}`}>{actionLabel}</span>
+              <span className="px-3 py-1 rounded-full text-xs font-semibold border border-slate-700 bg-slate-800/40 text-slate-200">
+                Confidence {confidence}/100 • {confidenceLabel}
+              </span>
+              {data?.meta?.regime && (
+                <span className="hidden sm:inline px-3 py-1 rounded-full text-xs font-semibold border border-slate-800 bg-slate-950/40 text-slate-300">
+                  Regime: {String(data.meta.regime)}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                addPaperTrade({
+                  symbol: ticker,
+                  companyName,
+                  instrument: 'STOCK',
+                  side: action === 'SELL' ? 'SELL' : 'BUY',
+                  quantity: 1,
+                  entryPrice: price,
+                  confidence,
+                  reasons: (reasons || []).slice(0, 3),
+                  invalidation,
+                });
+                if (onTrack) onTrack(true, `✓ Tracked (Paper) ${ticker}`);
+              }}
+              className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/40 text-slate-100 text-xs hover:bg-slate-800 transition"
+            >
+              📌 Track (Paper)
+            </button>
+
+            <button
+              onClick={() => {
+                if (!onTrade) return;
+                onTrade(ticker, price, action === 'SELL' ? 'SELL' : action === 'HOLD' ? 'HOLD' : 'BUY', 1);
+              }}
+              className="px-3 py-2 rounded-lg border border-emerald-500/30 bg-emerald-500/15 text-emerald-200 text-xs hover:bg-emerald-500/25 transition"
+            >
+              ⚡ Make Trade (Live)
+            </button>
+
+            <button
+              onClick={onViewEvidence}
+              className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-950/40 text-slate-200 text-xs hover:bg-slate-950/60 transition"
+            >
+              View evidence →
+            </button>
+          </div>
+        </div>
+
+        {/* Execution */}
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/40">
+            <div className="text-[11px] text-slate-400">Current</div>
+            <div className="text-base font-bold text-white">${price.toFixed(2)}</div>
+            <div className="text-[11px] text-slate-500">Horizon: {horizon}</div>
+          </div>
+          <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/40">
+            <div className="text-[11px] text-slate-400">Execution</div>
+            <div className="text-sm text-slate-200">
+              Entry: <span className="font-semibold text-white">{entry ?? '—'}</span>
+            </div>
+            <div className="text-sm text-slate-200">
+              Target: <span className="font-semibold text-white">{target ?? '—'}</span>
+            </div>
+            <div className="text-sm text-slate-200">
+              Stop: <span className="font-semibold text-white">{stop ?? '—'}</span>
+            </div>
+          </div>
+          <div className="p-3 rounded-xl border border-slate-800 bg-slate-950/40">
+            <div className="text-[11px] text-slate-400">Setup</div>
+            <div className="text-sm font-semibold text-white">{setup}</div>
+            {invalidation ? (
+              <div className="mt-2 text-[12px] text-amber-300">
+                Invalidation: <span className="text-slate-200">{invalidation}</span>
+              </div>
+            ) : (
+              <div className="mt-2 text-[12px] text-slate-500">Invalidation: —</div>
+            )}
+          </div>
+        </div>
+
+        {/* Why (max 3) */}
+        {reasons && reasons.length > 0 && (
+          <div className="mt-4">
+            <div className="text-xs font-semibold text-slate-300 mb-2">Why</div>
+            <ul className="text-sm text-slate-300 list-disc pl-5 space-y-1">
+              {reasons.slice(0, 3).map((r, idx) => (
+                <li key={idx}>{r}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      {/* Portfolio Context Alert (kept, but below the ticket) */}
       {data.portfolioContext && (
         <PortfolioContextAlert portfolioContext={data.portfolioContext} />
       )}
-      
-      {/* Score Breakdown */}
-      <StockScoreBreakdown analysis={analysis} />
+
+      {/* Deep details (collapsed by default to avoid overload) */}
+      <details className="group rounded-2xl border border-slate-800 bg-slate-900/20 p-4">
+        <summary className="cursor-pointer list-none flex items-center justify-between">
+          <div className="text-sm font-semibold text-white">Details (scores, patterns, sources)</div>
+          <div className="text-xs text-slate-400 group-open:hidden">Expand</div>
+          <div className="text-xs text-slate-400 hidden group-open:block">Collapse</div>
+        </summary>
+        <div className="mt-4 space-y-4">
+          <StockScoreBreakdown analysis={analysis} />
+
+          <ConsensusSourcesList 
+            fundamentals={fundamentals}
+            technicals={technicals}
+            news={news}
+            analysts={analysts}
+            chartPatterns={chartPatterns}
+          />
+
+          <ChartPatternCard chartPatterns={chartPatterns} />
+        </div>
+      </details>
 
 {/* Data quality (candles) */}
 {data?.meta?.warnings?.technicals && (
@@ -642,45 +780,6 @@ function StockTab({
   </div>
 )}
 
-      {/* Consensus Sources - Collapsible */}
-      <ConsensusSourcesList 
-        fundamentals={fundamentals}
-        technicals={technicals}
-        news={news}
-        analysts={analysts}
-        chartPatterns={chartPatterns}
-      />
-      
-      {/* Chart Pattern Card */}
-      <ChartPatternCard chartPatterns={chartPatterns} />
-      
-      {/* Suggestions (keep compact version) */}
-      {suggestions && suggestions.length > 0 && (
-        <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
-          <h3 className="text-sm font-semibold text-white mb-3">Recommendations</h3>
-          <div className="space-y-2">
-            {suggestions.slice(0, 3).map((sug: any, i: number) => (
-              <div key={i} className={`p-3 rounded-xl border ${
-                sug.type === 'BUY' ? 'border-emerald-500/30 bg-emerald-500/5' :
-                sug.type === 'SELL' ? 'border-red-500/30 bg-red-500/5' :
-                'border-amber-500/30 bg-amber-500/5'
-              } transition-all duration-200 hover:border-opacity-50`}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium text-white">{sug.strategy}</span>
-                  {sug.confidence && (
-                    <span className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">
-                      {sug.confidence}% confidence
-                    </span>
-                  )}
-                </div>
-                {sug.reasoning?.slice(0, 2).map((r: string, j: number) => (
-                  <p key={j} className="text-xs text-slate-400">• {r}</p>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

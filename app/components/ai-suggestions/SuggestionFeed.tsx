@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { SuggestionCard } from './SuggestionCard';
 import { ExecutionModal } from './ExecutionModal';
+import { addPaperTrade } from '../../../lib/paperTrades';
 
 interface Suggestion {
   id: string;
@@ -30,17 +31,38 @@ export function SuggestionFeed() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSuggestion, setSelectedSuggestion] = useState<Suggestion | null>(null);
-  const [showFilters, setShowFilters] = useState(false);
   const [showAvoid, setShowAvoid] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(Date.now());
   const [now, setNow] = useState(Date.now());
+  const [liveReady, setLiveReady] = useState(false);
+  const [liveError, setLiveError] = useState<string | null>(null);
   const [filters, setFilters] = useState({
     minConfidence: 75,
     types: ['STOCK', 'OPTIONS'],
     priorities: ['URGENT', 'HIGH', 'MEDIUM'],
   });
 
-  // Update "now" every second for relative time display
+    // Check Schwab live trading readiness (token + account)
+useEffect(() => {
+  let mounted = true;
+  fetch('/api/schwab/status')
+    .then((r) => r.json())
+    .then((d) => {
+      if (!mounted) return;
+      setLiveReady(!!d?.canTrade);
+      setLiveError(d?.ok ? null : (d?.error || 'Live trading not ready'));
+    })
+    .catch(() => {
+      if (!mounted) return;
+      setLiveReady(false);
+      setLiveError('Live trading not ready');
+    });
+  return () => { mounted = false; };
+}, []);
+
+// Update "now" every second for relative time display
+ for relative time display
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
@@ -65,10 +87,7 @@ export function SuggestionFeed() {
       const data = await res.json();
       
       if (data.success) {
-        const raw: Suggestion[] = data.suggestions || [];
-        // UI contract: AI Feed is sorted by highest confidence first (simple + predictable)
-        const sorted = [...raw].sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
-        setSuggestions(sorted);
+        setSuggestions((data.suggestions || []).slice().sort((a:any,b:any)=> (b.confidence||0)-(a.confidence||0)));
         setLastUpdate(Date.now());
       }
     } catch (error) {
@@ -77,20 +96,6 @@ export function SuggestionFeed() {
       setLoading(false);
     }
   };
-
-  const getAction = (s: Suggestion) => {
-    // Note: backend currently returns only actionable ideas, but the UI supports hiding AVOID behind a toggle.
-    const explicit = (s as any)?.action || (s as any)?.details?.action;
-    if (explicit === 'AVOID' || explicit === 'DONT_BUY') return 'AVOID';
-    if (s.type === 'OPTIONS') return s.details?.optionType === 'PUT' ? 'BUY_PUT' : 'BUY_CALL';
-    return 'BUY_STOCK';
-  };
-
-  const visibleSuggestions = suggestions.filter(s => {
-    const action = getAction(s);
-    if (!showAvoid && action === 'AVOID') return false;
-    return true;
-  });
 
   const handleDismiss = (id: string) => {
     setSuggestions(prev => prev.filter(s => s.id !== id));
@@ -197,29 +202,19 @@ export function SuggestionFeed() {
         )}
 
         {/* Suggestions Count */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 px-4 py-3 rounded-xl bg-gradient-to-r from-blue-500/10 to-emerald-500/10 border border-blue-500/30">
+        <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-gradient-to-r from-blue-500/10 to-emerald-500/10 border border-blue-500/30">
           <span className="text-sm md:text-base font-medium text-white">
-            {visibleSuggestions.length} High-Confidence Opportunities
+            {suggestions.length} High-Confidence Opportunities
           </span>
-          <div className="flex items-center justify-between md:justify-end gap-3">
-            <label className="flex items-center gap-2 text-xs text-slate-300 select-none">
-              <input
-                type="checkbox"
-                checked={showAvoid}
-                onChange={(e) => setShowAvoid(e.target.checked)}
-              />
-              Show AVOID
-            </label>
-            {visibleSuggestions.length > 0 && (
-              <span className="text-xs text-slate-400">
-                Sorted by confidence
-              </span>
-            )}
-          </div>
+          {suggestions.length > 0 && (
+            <span className="text-xs text-slate-400">
+              Top ranked by AI
+            </span>
+          )}
         </div>
 
         {/* Suggestions List */}
-        {visibleSuggestions.length === 0 ? (
+        {suggestions.length === 0 ? (
           <div className="text-center py-12 px-4">
             <p className="text-lg text-slate-400 mb-2">🔍 No suggestions right now</p>
             <p className="text-sm text-slate-500">
@@ -228,7 +223,7 @@ export function SuggestionFeed() {
           </div>
         ) : (
           <div className="space-y-3">
-            {visibleSuggestions.map((suggestion, index) => (
+            {suggestions.map((suggestion, index) => (
               <div key={suggestion.id} className="relative">
                 {/* Priority Badge */}
                 <div className="absolute -top-2 -left-2 z-10">
@@ -240,7 +235,31 @@ export function SuggestionFeed() {
 
                 <SuggestionCard
                   suggestion={suggestion}
-                  onExecute={() => setSelectedSuggestion(suggestion)}
+                  onTrack={() => {
+                    const isOpt = suggestion.type === 'OPTIONS';
+                    addPaperTrade({
+                      symbol: suggestion.symbol,
+                      companyName: suggestion.companyName || suggestion.symbol,
+                      instrument: isOpt ? 'OPTION' : 'STOCK',
+                      side: 'BUY',
+                      quantity: 1,
+                      entryPrice: suggestion.details?.markPrice || suggestion.currentPrice || 0,
+                      confidence: suggestion.confidence,
+                      reasons: suggestion.reason ? [suggestion.reason] : [],
+                      invalidation: suggestion.details?.invalidation || '',
+                      optionType: isOpt ? (suggestion.details?.optionType || 'CALL') : undefined,
+                      strike: isOpt ? suggestion.details?.strike : undefined,
+                      expiration: isOpt ? suggestion.details?.expiration : undefined,
+                    });
+                    handleDismiss(suggestion.id);
+                  }}
+                  onTrade={() => {
+                    if (!liveReady) {
+                      alert(liveError || 'Live trading not ready. Check Schwab auth and account access.');
+                      return;
+                    }
+                    setSelectedSuggestion(suggestion);
+                  }}
                   onDismiss={() => handleDismiss(suggestion.id)}
                 />
               </div>
@@ -249,7 +268,7 @@ export function SuggestionFeed() {
         )}
 
         {/* Load More */}
-        {visibleSuggestions.length >= 10 && (
+        {suggestions.length >= 10 && (
           <button
             onClick={fetchSuggestions}
             className="w-full py-3 rounded-xl bg-slate-800 border border-slate-700 hover:bg-slate-700 transition-colors text-sm font-medium text-white"
