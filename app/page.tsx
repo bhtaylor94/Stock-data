@@ -504,374 +504,150 @@ function TrackerTab({
 // ============================================================
 // STOCK TAB - REFACTORED with Decision-First Layout
 // ============================================================
-function StockTab({ 
-  data, 
-  loading, 
+function StockTab({
+  data,
+  loading,
   ticker,
-  onTrack,
+  onTrackPaper,
+  onMakeLive,
   onViewEvidence,
-  onTrade
-}: { 
-  data: any; 
+}: {
+  data: any;
   loading: boolean;
   ticker: string;
-  onTrack?: (success: boolean, message: string) => void;
-  onViewEvidence?: () => void;
-  onTrade?: (symbol: string, price: number, action: 'BUY' | 'SELL' | 'HOLD', quantity: number) => void;
+  onTrackPaper: (payload: any) => void;
+  onMakeLive: (payload: any) => void;
+  onViewEvidence: (data: any) => void;
 }) {
   if (loading) return <LoadingSpinner />;
-  if (!data) return <p className="text-slate-500 text-center py-12">Enter a ticker symbol to analyze</p>;
-  if (data.error) {
+  if (!data) return null;
+  if (data?.error) {
     return (
-      <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5 animate-fade-in">
-        <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ {data.error}</h3>
-        {(Array.isArray(data.instructions) ? data.instructions : (data.instructions ? [String(data.instructions)] : [])).map((i: string, idx: number) => (
-            <p key={idx} className="text-xs text-slate-400">• {i}</p>
-          ))}
+      <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/20">
+        <div className="text-white font-semibold">Could not load stock analysis.</div>
+        <div className="text-sm text-slate-300 mt-1">{String(data.error)}</div>
       </div>
     );
   }
 
-  const { analysis, suggestions, chartPatterns, technicals, fundamentals, news, analysts } = data;
+  const primary = data?.ai?.primary || data?.stock?.primary || data?.primary || {};
+  const metaName = data?.meta?.name || data?.company?.name || '';
+  const symbol = (data?.meta?.symbol || data?.ticker || data?.symbol || ticker || '').toUpperCase();
+  const companyName = metaName || primary?.companyName || primary?.name || symbol;
 
-  const companyName = data.name || COMPANY_NAMES[ticker as keyof typeof COMPANY_NAMES] || ticker;
-  const primary = Array.isArray(suggestions) && suggestions.length > 0 ? suggestions[0] : null;
-  const tradeDecision = data?.meta?.tradeDecision;
-  const price = Number(data.price || data.quote?.c || 0) || 0;
+  const action = String(primary?.action || primary?.signal || primary?.setup || 'NO_TRADE').toUpperCase();
+  const confidence = Number(primary?.confidence ?? primary?.score ?? 0);
 
-  const changeAbs = Number(
-    data?.quote?.d ??
-    data?.quote?.netChange ??
-    (Number.isFinite(data?.quote?.o) ? (price - Number(data.quote.o)) : 0)
-  ) || 0;
-  const changePct = Number(
-    data?.quote?.dp ??
-    data?.quote?.percentChange ??
-    (price && Number.isFinite(data?.quote?.o) ? ((price - Number(data.quote.o)) / price) * 100 : 0)
-  ) || 0;
+  const currentPrice =
+    Number(data?.price?.last ?? data?.quote?.last ?? data?.meta?.last ?? primary?.currentPrice ?? primary?.price ?? 0) || 0;
 
-  const actionRaw: string = (primary?.type || tradeDecision?.action || 'NO_TRADE') as string;
-  const action: 'BUY' | 'SELL' | 'HOLD' | 'NO_TRADE' =
-    actionRaw === 'STRONG_BUY' ? 'BUY' :
-    actionRaw === 'STRONG_SELL' ? 'SELL' :
-    actionRaw === 'BUY' ? 'BUY' :
-    actionRaw === 'SELL' ? 'SELL' :
-    actionRaw === 'HOLD' ? 'HOLD' :
-    'NO_TRADE';
+  const whyRaw = primary?.why || primary?.reasons || primary?.signals || [];
+  const why: string[] = Array.isArray(whyRaw) ? whyRaw.map((x: any) => String(x)) : String(whyRaw).split('\n').filter(Boolean);
 
-  const confidence: number =
-    typeof primary?.confidence === 'number' ? primary.confidence :
-    typeof tradeDecision?.confidence === 'number' ? tradeDecision.confidence :
-    0;
-
-  const reasons: string[] =
-    Array.isArray((primary as any)?.reasons) ? (primary as any).reasons :
-    (typeof (primary as any)?.reason === 'string' && (primary as any).reason ? [(primary as any).reason] :
-      (Array.isArray((primary as any)?.reasoning) ? (primary as any).reasoning :
-        (Array.isArray(tradeDecision?.rationale) ? tradeDecision.rationale : [])));
-  const invalidation: string =
-    typeof primary?.invalidation === 'string' && primary.invalidation ? primary.invalidation :
-    (typeof (tradeDecision as any)?.invalidation === 'string' && (tradeDecision as any).invalidation ? String((tradeDecision as any).invalidation) :
-      (Array.isArray(tradeDecision?.rationale) && tradeDecision.rationale.length > 0 ? String(tradeDecision.rationale[0]) : ''));
-
-  const entry = primary?.entry ?? null;
-  const target = primary?.target ?? null;
-  const stop = primary?.stop ?? null;
-  const horizon = primary?.timeHorizon || 'N/A';
-  const setup = primary?.setup || primary?.strategy || 'N/A';
-
-const fmtPx = (v: any) => (typeof v === 'number' && Number.isFinite(v) ? `$${v.toFixed(2)}` : (v ? String(v) : ''));
-
-const planEntry = fmtPx(entry) || `$${price.toFixed(2)}`;
-const planStop =
-  fmtPx(stop) ||
-  (action === 'BUY'
-    ? `$${(price * 0.96).toFixed(2)}`
-    : action === 'SELL'
-      ? `$${(price * 1.04).toFixed(2)}`
-      : `$${(price * 0.97).toFixed(2)}`);
-const planTarget =
-  fmtPx(target) ||
-  (action === 'BUY'
-    ? `$${(price * 1.08).toFixed(2)}`
-    : action === 'SELL'
-      ? `$${(price * 0.92).toFixed(2)}`
-      : `$${(price * 1.03).toFixed(2)}`);
-
-const keyWhy: string[] = (reasons || [])
-  .map((r) => String(r))
-  .filter(Boolean)
-  .map((r) => r.replace(/^Regime:\s*/i, 'Regime: ').replace(/^Combined Score:\s*/i, 'Score: '))
-  .slice(0, 3);
-
-
-  const actionLabel =
-    action === 'BUY' ? 'BUY STOCK' :
-    action === 'SELL' ? 'SELL / TRIM' :
-    action === 'HOLD' ? 'HOLD' :
-    'NO TRADE';
-
-  const actionBadgeClass =
-    action === 'BUY' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' :
-    action === 'SELL' ? 'bg-red-500/15 text-red-300 border-red-500/30' :
-    action === 'HOLD' ? 'bg-blue-500/15 text-blue-300 border-blue-500/30' :
-    'bg-amber-500/15 text-amber-300 border-amber-500/30';
+  const tradePlan = {
+    entry: primary?.tradePlan?.entry ?? primary?.entry ?? null,
+    stop: primary?.tradePlan?.stop ?? primary?.stop ?? null,
+    target: primary?.tradePlan?.target ?? primary?.target ?? null,
+    horizon: primary?.horizon ?? null,
+    invalidation: primary?.invalidation ?? primary?.tradePlan?.invalidation ?? primary?.details?.invalidation ?? '',
+    why,
+  };
 
   const confidenceLabel =
-    confidence >= 75 ? 'STRONG' :
-    confidence >= 60 ? 'GOOD' :
-    confidence >= 45 ? 'MIXED' :
-    'LOW';
+    confidence >= 75 ? 'STRONG' : confidence >= 60 ? 'GOOD' : confidence >= 45 ? 'MIXED' : 'LOW';
+
+  const actionLabel = action.includes('BUY') ? 'BUY STOCK' : action.includes('SELL') ? 'SELL / AVOID' : 'NO TRADE';
+
+  const badgeClass =
+    actionLabel === 'BUY STOCK'
+      ? 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30'
+      : actionLabel === 'SELL / AVOID'
+        ? 'bg-rose-500/15 text-rose-200 border-rose-500/30'
+        : 'bg-amber-500/15 text-amber-200 border-amber-500/30';
+
+  const onTrack = () =>
+    onTrackPaper({
+      kind: 'STOCK',
+      ticker: symbol,
+      side: actionLabel === 'BUY STOCK' ? 'BUY' : 'WATCH',
+      quantity: 1,
+      entryPrice: currentPrice || 0,
+      confidence,
+      reasons: why.slice(0, 6),
+      invalidation: tradePlan.invalidation || '',
+    });
+
+  const onLive = () =>
+    onMakeLive({
+      kind: 'STOCK',
+      ticker: symbol,
+      side: actionLabel === 'BUY STOCK' ? 'BUY' : 'WATCH',
+      quantity: 1,
+      entryPrice: currentPrice || 0,
+      confidence,
+      reasons: why.slice(0, 6),
+      invalidation: tradePlan.invalidation || '',
+    });
 
   return (
     <div className="space-y-4 animate-fade-in">
-
-      {/* Robinhood-style header + chart */}
       <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/20">
-        <div className="flex items-end justify-between gap-3">
-          <div>
-            <div className="text-xs text-slate-400">{ticker}</div>
-            <div className="text-2xl font-bold text-white leading-tight">{companyName}</div>
-            <div className="mt-2 flex items-baseline gap-2">
-              <div className="text-4xl font-extrabold text-white">${price.toFixed(2)}</div>
-              <div className={`text-sm font-semibold ${changeAbs >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {changeAbs >= 0 ? '▲' : '▼'} {Math.abs(changeAbs).toFixed(2)} ({Math.abs(changePct).toFixed(2)}%)
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                addPaperTrade({
-                  symbol: ticker,
-                  companyName,
-                  instrument: 'STOCK',
-                  side: action === 'SELL' ? 'SELL' : 'BUY',
-                  quantity: 1,
-                  entryPrice: price,
-                  confidence,
-                  reasons: (reasons || []).slice(0, 3),
-                  invalidation,
-                });
-                if (onTrack) onTrack(true, `✓ Tracked (Paper) ${ticker}`);
-              }}
-              className="px-4 py-2 rounded-full border border-slate-700 bg-slate-950/40 text-slate-100 text-xs font-semibold hover:bg-slate-900/40 transition"
-            >
-              📌 Track
-            </button>
-            <button
-              onClick={() => {
-                if (!onTrade) return;
-                onTrade(ticker, price, action === 'SELL' ? 'SELL' : action === 'HOLD' ? 'HOLD' : 'BUY', 1);
-              }}
-              className="px-5 py-2 rounded-full border border-emerald-500/30 bg-emerald-500/20 text-emerald-100 text-xs font-semibold hover:bg-emerald-500/30 transition"
-            >
-              ⚡ Trade
-            </button>
-          </div>
-        </div>
-
-        <div className="mt-4">
-          <LiveCandlesCard
-            symbol={ticker}
-            tradePlan={{
-              entry: planEntry,
-              stop: planStop,
-              target: planTarget,
-              horizon,
-              why: (reasons || []).slice(0, 8),
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Decision Ticket (clarity-first) */}
-      <div className="p-4 rounded-2xl border border-slate-800 bg-slate-900/30">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-lg font-semibold text-white">
-              {companyName} <span className="text-slate-400 font-normal">({ticker})</span>
-            </div>
-            <div className="mt-2 inline-flex items-center gap-2">
-              <span className={`px-3 py-1 rounded-full text-xs font-bold border ${actionBadgeClass}`}>{actionLabel}</span>
-              <span className="px-3 py-1 rounded-full text-xs font-semibold border border-slate-700 bg-slate-800/40 text-slate-200">
-                Confidence {confidence}/100 • {confidenceLabel}
+            <div className="text-2xl font-semibold text-white">{companyName}</div>
+            <div className="text-slate-400 font-semibold">({symbol})</div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className={"px-3 py-1 rounded-full border text-xs font-semibold " + badgeClass}>{actionLabel}</span>
+
+              <span className="px-3 py-1 rounded-full border border-slate-700 bg-slate-900/40 text-xs font-semibold text-slate-200">
+                Confidence {Math.round(confidence)}/100 • {confidenceLabel}
               </span>
-              {data?.meta?.regime && (
-                <span className="hidden sm:inline px-3 py-1 rounded-full text-xs font-semibold border border-slate-800 bg-slate-950/40 text-slate-300">
-                  Regime: {String(data.meta.regime)}
-                </span>
-              )}
+
+              <button
+                onClick={onTrack}
+                className="px-3 py-2 rounded-xl border border-slate-700 bg-slate-900/40 hover:bg-slate-900/60 text-sm text-slate-100"
+              >
+                📌 Track (Paper)
+              </button>
+
+              <button
+                onClick={onLive}
+                className="px-3 py-2 rounded-xl border border-emerald-700/40 bg-emerald-500/15 hover:bg-emerald-500/20 text-sm text-emerald-100"
+              >
+                ⚡ Make Trade (Live)
+              </button>
+
+              <button
+                onClick={() => onViewEvidence(data)}
+                className="px-3 py-2 rounded-xl border border-slate-700 bg-slate-900/40 hover:bg-slate-900/60 text-sm text-slate-100"
+              >
+                Evidence →
+              </button>
             </div>
           </div>
 
-          <button
-            onClick={onViewEvidence}
-            className="px-3 py-2 rounded-full border border-slate-700 bg-slate-950/30 text-slate-200 text-xs font-semibold hover:bg-slate-950/50 transition"
-          >
-            Evidence →
-          </button>
-        </div>
-
-        
-{/* Trade plan + key signals (simple) */}
-<div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/40">
-    <div className="flex items-center justify-between">
-      <div className="text-xs font-semibold text-white">Trade plan</div>
-      <div className="text-[11px] text-slate-500">Horizon: {horizon}</div>
-    </div>
-
-    <div className="mt-3 grid grid-cols-3 gap-2">
-      <div className="p-2 rounded-lg border border-slate-800 bg-slate-950/40">
-        <div className="text-[11px] text-slate-500">Entry</div>
-        <div className="text-sm font-bold text-white">{planEntry}</div>
-      </div>
-      <div className="p-2 rounded-lg border border-slate-800 bg-slate-950/40">
-        <div className="text-[11px] text-slate-500">Stop</div>
-        <div className="text-sm font-bold text-white">{planStop}</div>
-      </div>
-      <div className="p-2 rounded-lg border border-slate-800 bg-slate-950/40">
-        <div className="text-[11px] text-slate-500">Target</div>
-        <div className="text-sm font-bold text-white">{planTarget}</div>
-      </div>
-    </div>
-
-    <div className="mt-3 text-[11px] text-slate-400">
-      Setup: <span className="text-slate-200 font-semibold">{setup}</span>
-      {invalidation ? (
-        <>
-          <span className="opacity-50"> • </span>
-          <span className="text-slate-500">Invalidation: {invalidation}</span>
-        </>
-      ) : null}
-    </div>
-  </div>
-
-  <div className="p-4 rounded-xl border border-slate-800 bg-slate-950/40">
-    <div className="text-xs font-semibold text-white">Why this decision</div>
-    <div className="mt-2 space-y-2">
-      {(keyWhy.length ? keyWhy : ['Not enough aligned signals yet — keep watching.']).map((r, i) => (
-        <div key={i} className="flex gap-2 text-sm text-slate-200">
-          <span className="text-slate-500">•</span>
-          <span className="leading-snug">{r}</span>
-        </div>
-      ))}
-    </div>
-
-    <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
-      <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-2">
-        <div className="text-slate-500">Fundamental</div>
-        <div className="text-slate-200 font-semibold">{analysis?.fundamental?.score ?? '—'}/9</div>
-      </div>
-      <div className="rounded-lg border border-slate-800 bg-slate-950/40 p-2">
-        <div className="text-slate-500">Technical</div>
-        <div className="text-slate-200 font-semibold">{analysis?.technical?.score ?? '—'}/9</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-{/* Portfolio Context Alert (kept, but below the ticket) */}
-      {data.portfolioContext && (
-        <PortfolioContextAlert portfolioContext={data.portfolioContext} />
-      )}
-
-      {/* Deep details (collapsed by default to avoid overload) */}
-      <details className="group rounded-2xl border border-slate-800 bg-slate-900/20 p-4">
-        <summary className="cursor-pointer list-none flex items-center justify-between">
-          <div className="text-sm font-semibold text-white">Details (scores, patterns, sources)</div>
-          <div className="text-xs text-slate-400 group-open:hidden">Expand</div>
-          <div className="text-xs text-slate-400 hidden group-open:block">Collapse</div>
-        </summary>
-        <div className="mt-4 space-y-4">
-          <StockScoreBreakdown analysis={analysis} />
-
-          <ConsensusSourcesList 
-            fundamentals={fundamentals}
-            technicals={technicals}
-            news={news}
-            analysts={analysts}
-            chartPatterns={chartPatterns}
-          />
-
-          <ChartPatternCard chartPatterns={chartPatterns} />
-        </div>
-      </details>
-
-{/* Data quality (candles) */}
-{data?.meta?.warnings?.technicals && (
-  <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
-    <h3 className="text-sm font-semibold text-amber-300 mb-1">📈 Limited technical data</h3>
-    <p className="text-xs text-slate-300">{data.meta.warnings.technicals}</p>
-    {data?.meta?.priceHistory && (
-      <p className="text-[11px] text-slate-400 mt-1">
-        Candles: <span className="font-mono">{data.meta.priceHistory.candles}</span> • Source: <span className="font-mono">{data.meta.priceHistory.source}</span>
-      </p>
-    )}
-  </div>
-)}
-
-      {/* News warning (usually missing FINNHUB_API_KEY) */}
-      {(!news?.headlines || news.headlines.length === 0) && data?.meta?.warnings?.news && (
-        <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-amber-300 mb-1">📰 News unavailable</h3>
-              <p className="text-xs text-slate-300">{data.meta.warnings.news}</p>
-              <p className="text-xs text-slate-400 mt-1">Set <span className="font-mono">FINNHUB_API_KEY</span> in Vercel (Production env) and redeploy.</p>
-            </div>
+          <div className="text-right">
+            <div className="text-slate-400 text-sm">Current</div>
+            <div className="text-2xl font-semibold text-white">{formatCurrency(currentPrice || 0)}</div>
+            <div className="text-slate-500 text-xs mt-1">Updates every 15s • Source: Schwab pricehistory</div>
           </div>
         </div>
-      )}
-      
-{/* News (on Stock page) */}
-{news?.headlines?.length > 0 && (
-  <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
-    <div className="flex items-center justify-between mb-3">
-      <h3 className="text-sm font-semibold text-white">📰 Recent News</h3>
-      <button
-        onClick={onViewEvidence}
-        className="text-xs text-slate-300 hover:text-white underline underline-offset-2"
-      >
-        View in Evidence Packet
-      </button>
-    </div>
-    <div className="space-y-2">
-      {news.headlines.slice(0, 8).map((item: any, i: number) => (
-        <div key={i} className="p-3 rounded-xl bg-slate-900/40 border border-slate-700/40">
-          <div className="text-sm text-white">{item.headline || item.title || 'Headline'}</div>
-          <div className="mt-1 text-xs text-slate-400 flex items-center gap-2">
-            <span>{item.source || ''}</span>
-            <span className="opacity-50">•</span>
-            <span>{(() => {
-              const dt = item.datetime;
-              if (!dt) return '';
-              if (typeof dt === 'number') return new Date(dt * 1000).toLocaleDateString();
-              const d = new Date(dt);
-              return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
-            })()}</span>
-            {item.url && (
-              <>
-                <span className="opacity-50">•</span>
-                <a className="underline underline-offset-2 hover:text-white" href={item.url} target="_blank" rel="noreferrer">Open</a>
-              </>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  </div>
-)}
+      </div>
 
+      <LiveCandlesCard ticker={symbol} currentPrice={currentPrice || 0} tradePlan={tradePlan} />
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <StockScoreBreakdown data={data} />
+        <ConsensusSourcesList data={data} />
+      </div>
+
+      <ChartPatternCard data={data} />
+      <PortfolioContextAlert data={data} />
     </div>
   );
 }
 
-// ============================================================
-// OPTIONS TAB - REFACTORED with UOA Prominent
-// ============================================================
 function OptionsTab({
   data,
   loading,
