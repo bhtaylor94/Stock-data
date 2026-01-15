@@ -564,10 +564,15 @@ function StockTab({
     typeof tradeDecision?.confidence === 'number' ? tradeDecision.confidence :
     0;
 
-  const reasons: string[] = Array.isArray(primary?.reasoning) ? primary.reasoning : (Array.isArray(tradeDecision?.rationale) ? tradeDecision.rationale : []);
+  const reasons: string[] =
+    Array.isArray((primary as any)?.reasons) ? (primary as any).reasons :
+    (typeof (primary as any)?.reason === 'string' && (primary as any).reason ? [(primary as any).reason] :
+      (Array.isArray((primary as any)?.reasoning) ? (primary as any).reasoning :
+        (Array.isArray(tradeDecision?.rationale) ? tradeDecision.rationale : [])));
   const invalidation: string =
     typeof primary?.invalidation === 'string' && primary.invalidation ? primary.invalidation :
-    (Array.isArray(tradeDecision?.rationale) && tradeDecision.rationale.length > 0 ? String(tradeDecision.rationale[0]) : '');
+    (typeof (tradeDecision as any)?.invalidation === 'string' && (tradeDecision as any).invalidation ? String((tradeDecision as any).invalidation) :
+      (Array.isArray(tradeDecision?.rationale) && tradeDecision.rationale.length > 0 ? String(tradeDecision.rationale[0]) : ''));
 
   const entry = primary?.entry ?? null;
   const target = primary?.target ?? null;
