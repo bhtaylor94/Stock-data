@@ -195,7 +195,9 @@ export async function computeBrokerTruthDailyRealizedPnl(args: {
     ].join('?');
 
     const txResp = await schwabFetchJson<Transaction[]>(tokenResult.token, url, { scope: 'tracker' });
-    if (!txResp.ok || !txResp.data) {
+
+    // Split the checks so TypeScript narrows the union correctly.
+    if (!txResp.ok) {
       return {
         ok: false,
         month: args.month,
