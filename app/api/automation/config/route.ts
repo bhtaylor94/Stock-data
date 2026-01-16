@@ -142,6 +142,13 @@ export async function POST(req: NextRequest) {
           defaultContracts: clampNum(ap.options?.defaultContracts, 1, 1000, Number((next.autopilot as any).options?.defaultContracts ?? 1)),
           maxContractsPerTrade: clampNum(ap.options?.maxContractsPerTrade, 1, 2000, Number((next.autopilot as any).options?.maxContractsPerTrade ?? 10)),
           maxPremiumNotionalUSD: clampNum(ap.options?.maxPremiumNotionalUSD, 0, 10000000, Number((next.autopilot as any).options?.maxPremiumNotionalUSD ?? 2500)),
+          takeProfitPct: clampNum(ap.options?.takeProfitPct, 0, 5, Number((next.autopilot as any).options?.takeProfitPct ?? 0.1)),
+          stopLossPct: clampNum(ap.options?.stopLossPct, 0, 5, Number((next.autopilot as any).options?.stopLossPct ?? 0.1)),
+          timeStopMinutes: clampNum(ap.options?.timeStopMinutes, 0, 7 * 24 * 60, Number((next.autopilot as any).options?.timeStopMinutes ?? 120)),
+          sizeByBudget:
+            typeof ap.options?.sizeByBudget === 'boolean'
+              ? ap.options.sizeByBudget
+              : Boolean((next.autopilot as any).options?.sizeByBudget ?? true),
           useUnderlyingForStopsTargets:
             typeof ap.options?.useUnderlyingForStopsTargets === 'boolean'
               ? ap.options.useUnderlyingForStopsTargets

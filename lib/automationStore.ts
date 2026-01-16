@@ -86,6 +86,20 @@ export type AutomationConfig = {
       defaultContracts: number;
       maxContractsPerTrade: number;
       maxPremiumNotionalUSD: number;
+      // If true, quantity is derived from maxPremiumNotionalUSD and option mid.
+      // If false, uses defaultContracts (still capped by maxContractsPerTrade).
+      sizeByBudget: boolean;
+
+      // Exit policy (options premium based)
+      // Example: 0.10 = +10% target, 0.10 = -10% stop
+      takeProfitPct: number;
+      stopLossPct: number;
+      // If > 0, close an options position after this many minutes in trade.
+      timeStopMinutes: number;
+
+      // If true, contract count is sized by budget (maxPremiumNotionalUSD).
+      // If false, use defaultContracts (still capped by maxContractsPerTrade).
+      sizeByBudget: boolean;
 
       // If true, stops/targets are evaluated on the underlying price (recommended)
       useUnderlyingForStopsTargets: boolean;
@@ -173,8 +187,14 @@ export function defaultAutomationConfig(): AutomationConfig {
         minVolume: 100,
         maxBidAskPct: 12,
         defaultContracts: 1,
-        maxContractsPerTrade: 10,
-        maxPremiumNotionalUSD: 2500,
+        maxContractsPerTrade: 3,
+        maxPremiumNotionalUSD: 600,
+      sizeByBudget: true,
+
+        takeProfitPct: 0.10,
+        stopLossPct: 0.10,
+        timeStopMinutes: 120,
+        sizeByBudget: true,
         useUnderlyingForStopsTargets: true,
       },
     },

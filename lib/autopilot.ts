@@ -457,19 +457,33 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
       let qty = 1;
       if (isLiveish) {
         if (execInstr === 'OPTION') {
-          const defC = Number((cfg.autopilot as any).options?.defaultContracts ?? 1);
-          const maxC = Number((cfg.autopilot as any).options?.maxContractsPerTrade ?? 10);
-          qty = Math.max(1, Math.min(maxC, Math.floor(defC || 1)));
+          // For options, contract quantity may be sized later once we know premium (mid).
+          // Default to 1 here; we will apply caps + budget sizing after contract selection.
+          qty = 1;
         } else {
           qty = Math.max(1, Math.min(1000, Number(cfg.autopilot.defaultQuantity || 1)));
         }
       }
-      const notional = Number.isFinite(entry) ? entry * qty : NaN;
-      const maxNotional = Math.max(0, Number(cfg.autopilot.maxNotionalPerTradeUSD || 0));
-      if (maxNotional > 0 && Number.isFinite(notional) && notional > maxNotional) {
-        actions.push({ symbol, strategyId, presetId, action: 'SKIP', reason: 'Max notional per trade exceeded.' , signal: sig});
-        continue;
+      // Notional cap (stocks only at this stage; options notional is evaluated after premium is known)
+      if (execInstr !== 'OPTION') {
+        const notional = Number.isFinite(entry) ? entry * qty : NaN;
+        const maxNotional = Math.max(0, Number(cfg.autopilot.maxNotionalPerTradeUSD || 0));
+        if (maxNotional > 0 && Number.isFinite(notional) && notional > maxNotional) {
+          actions.push({ symbol, strategyId, presetId, action: 'SKIP', reason: 'Max notional per trade exceeded.' , signal: sig});
+          continue;
+        }
       }
+
+      const computeOptionQty = (mid: number, optCfg: any): number => {
+        const maxC = Math.max(1, Math.min(2000, Number(optCfg.maxContractsPerTrade ?? 3)));
+        const defC = Math.max(1, Math.min(maxC, Math.floor(Number(optCfg.defaultContracts ?? 1) || 1)));
+        const sizeByBudget = Boolean(optCfg.sizeByBudget ?? true);
+        const maxPrem = Math.max(0, Number(optCfg.maxPremiumNotionalUSD ?? 0));
+        if (!sizeByBudget) return defC;
+        if (!(mid > 0) || !(maxPrem > 0)) return defC;
+        const budgetQty = Math.floor(maxPrem / (mid * 100));
+        return Math.max(1, Math.min(maxC, budgetQty || 1));
+      };
 
       if (cfg.autopilot.mode === 'PAPER') {
         const tracked = signalToTrackedSuggestion(sig, presetId);
@@ -521,10 +535,25 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
           }
           selectedOption = sel.contract;
 
-          // Premium cap (options-specific) before we even queue
+          // Size contracts using budget + caps (defaults to "whatever fits budget")
           const mid = Number(selectedOption.mid ?? NaN);
-          const premiumNotional = Number.isFinite(mid) ? mid * 100 * qty : NaN;
+          const maxC = Math.max(1, Math.min(2000, Number(optCfg.maxContractsPerTrade ?? 10)));
+          const defC = Math.max(1, Math.min(maxC, Math.floor(Number(optCfg.defaultContracts ?? 1))));
           const maxPrem = Number(optCfg.maxPremiumNotionalUSD ?? 0);
+          const sizeByBudget = Boolean(optCfg.sizeByBudget ?? true);
+          if (Number.isFinite(mid) && mid > 0) {
+            if (sizeByBudget && maxPrem > 0) {
+              const byBudget = Math.floor(maxPrem / (mid * 100));
+              qty = Math.max(1, Math.min(maxC, byBudget > 0 ? byBudget : 1));
+            } else {
+              qty = Math.max(1, Math.min(maxC, defC));
+            }
+          } else {
+            qty = Math.max(1, Math.min(maxC, defC));
+          }
+
+          // Premium cap (options-specific) before we even queue
+          const premiumNotional = Number.isFinite(mid) ? mid * 100 * qty : NaN;
           if (maxPrem > 0 && Number.isFinite(premiumNotional) && premiumNotional > maxPrem) {
             actions.push({ symbol, strategyId, presetId, action: 'SKIP', reason: 'Max options premium notional exceeded.', signal: sig });
             continue;
@@ -595,9 +624,24 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
               continue;
             }
             selectedOption = sel.contract;
+            // Size contracts using budget + caps (defaults to "whatever fits budget")
             const mid = Number(selectedOption.mid ?? NaN);
-            const premiumNotional = Number.isFinite(mid) ? mid * 100 * qty : NaN;
+            const maxC = Math.max(1, Math.min(2000, Number(optCfg.maxContractsPerTrade ?? 10)));
+            const defC = Math.max(1, Math.min(maxC, Math.floor(Number(optCfg.defaultContracts ?? 1))));
             const maxPrem = Number(optCfg.maxPremiumNotionalUSD ?? 0);
+            const sizeByBudget = Boolean(optCfg.sizeByBudget ?? true);
+            if (Number.isFinite(mid) && mid > 0) {
+              if (sizeByBudget && maxPrem > 0) {
+                const byBudget = Math.floor(maxPrem / (mid * 100));
+                qty = Math.max(1, Math.min(maxC, byBudget > 0 ? byBudget : 1));
+              } else {
+                qty = Math.max(1, Math.min(maxC, defC));
+              }
+            } else {
+              qty = Math.max(1, Math.min(maxC, defC));
+            }
+
+            const premiumNotional = Number.isFinite(mid) ? mid * 100 * qty : NaN;
             if (maxPrem > 0 && Number.isFinite(premiumNotional) && premiumNotional > maxPrem) {
               actions.push({ symbol, strategyId, presetId, action: 'SKIP', reason: 'Max options premium notional exceeded.', signal: sig });
               continue;
