@@ -22,7 +22,8 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const monthRaw = String(searchParams.get('month') || '').trim(); // YYYY-MM
-    const scope = String(searchParams.get('scope') || 'live').toLowerCase(); // live|paper|all
+    const scopeRaw = String(searchParams.get('scope') || 'live').toLowerCase(); // live|paper|all
+    const scope: 'live' | 'paper' | 'all' = scopeRaw === 'paper' ? 'paper' : scopeRaw === 'all' ? 'all' : 'live';
     const source = String(searchParams.get('source') || '').toLowerCase(); // broker|tracker
 
     const nowMonth = new Date().toLocaleDateString('en-CA', { timeZone: TZ }).slice(0, 7);
