@@ -91,6 +91,13 @@ export async function POST(req: NextRequest) {
     const tracked = signalToTrackedSuggestion(item.signal as Signal, item.presetId as PresetId);
     if (tracked) {
       tracked.evidencePacket = { ...(tracked.evidencePacket || {}), orderId } as any;
+      tracked.broker = {
+        ...(tracked.broker || {}),
+        provider: 'SCHWAB',
+        orderId: orderId,
+        status: 'SUBMITTED',
+        lastUpdate: nowIso(),
+      } as any;
       await upsertSuggestion(tracked as any);
     }
 

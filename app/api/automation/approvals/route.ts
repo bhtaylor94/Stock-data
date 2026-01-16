@@ -99,6 +99,12 @@ export async function POST(request: Request) {
           orderId: placed.orderId,
           approvalId,
         },
+        broker: {
+          provider: 'SCHWAB',
+          orderId: placed.orderId,
+          status: 'SUBMITTED',
+          lastUpdate: nowIso(),
+        },
       } as any);
     }
 
