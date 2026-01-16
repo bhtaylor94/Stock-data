@@ -617,6 +617,13 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
         const tracked = signalToTrackedSuggestion(sig, presetId);
         if (tracked && !dryRun) {
           tracked.evidencePacket = { ...(tracked.evidencePacket || {}), orderId } as any;
+          tracked.broker = {
+            ...(tracked.broker || {}),
+            provider: 'SCHWAB',
+            orderId: orderId,
+            status: 'SUBMITTED',
+            lastUpdate: nowIso(),
+          } as any;
           if (execInstr === 'OPTION' && selectedOption) {
             tracked.type = 'OPTION' as any;
             tracked.optionContract = {

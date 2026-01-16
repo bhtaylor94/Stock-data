@@ -65,8 +65,17 @@ export type TrackedSuggestion = {
     remainingQuantity?: number;
     averageFillPrice?: number;
     lastUpdate?: string;
+
+    // Exit order bookkeeping (for lifecycle exits)
+    exitOrderId?: string;
+    exitStatus?: string;
+    exitSubmittedAt?: string;
+    exitFilledQuantity?: number;
+    exitAverageFillPrice?: number;
+    exitCloseTime?: string;
   };
   optionContract?: {
+    optionSymbol?: string;
     strike: number;
     expiration: string; // ISO date
     dte?: number;

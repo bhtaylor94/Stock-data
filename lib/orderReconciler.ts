@@ -13,7 +13,7 @@ function norm(x: any): string {
   return String(x ?? '').trim();
 }
 
-function extractOrderIdFromSuggestion(t: TrackedSuggestion): string | null {
+function extractEntryOrderId(t: TrackedSuggestion): string | null {
   const direct = norm((t as any)?.broker?.orderId);
   if (direct) return direct;
   const ep = (t as any)?.evidencePacket;
@@ -22,8 +22,28 @@ function extractOrderIdFromSuggestion(t: TrackedSuggestion): string | null {
   return null;
 }
 
-function keyFor(symbol: string, orderId: string): string {
-  return [norm(symbol).toUpperCase(), norm(orderId)].join('|');
+function extractExitOrderId(t: TrackedSuggestion): string | null {
+  const direct = norm((t as any)?.broker?.exitOrderId);
+  if (direct) return direct;
+  const ep = (t as any)?.evidencePacket;
+  const epId = norm(ep?.exitOrderId);
+  if (epId) return epId;
+  return null;
+}
+
+function keyFor(instrumentSymbol: string, orderId: string): string {
+  return [norm(instrumentSymbol).toUpperCase(), norm(orderId)].join('|');
+}
+
+function instrumentSymbolForSuggestion(t: TrackedSuggestion): string {
+  const opt = norm((t as any)?.optionContract?.optionSymbol);
+  if (opt) return opt;
+  return norm((t as any)?.ticker || (t as any)?.symbol || '');
+}
+
+function classifyFilled(status: string): boolean {
+  const s = norm(status).toUpperCase();
+  return s === 'FILLED' || s === 'EXECUTED' || s === 'COMPLETED';
 }
 
 export async function reconcileSchwabOrders(opts?: {
@@ -36,10 +56,9 @@ export async function reconcileSchwabOrders(opts?: {
   const errors: string[] = [];
   const suggestions = await loadSuggestions();
 
-  // Only reconcile suggestions that have an orderId
+  // Candidates: any suggestion with an entry or exit order id.
   const candidates = (suggestions || []).filter((t: TrackedSuggestion) => {
-    const id = extractOrderIdFromSuggestion(t);
-    return Boolean(id);
+    return Boolean(extractEntryOrderId(t) || extractExitOrderId(t));
   });
 
   let matched = 0;
@@ -62,32 +81,64 @@ export async function reconcileSchwabOrders(opts?: {
     }
 
     for (const t of candidates) {
-      const orderId = extractOrderIdFromSuggestion(t);
-      if (!orderId) continue;
+      const instrumentSym = instrumentSymbolForSuggestion(t);
+      if (!instrumentSym) continue;
 
-      const sym = norm((t as any)?.ticker || (t as any)?.symbol || '');
-      const o = byKey.get(keyFor(sym, orderId));
-      if (!o) continue;
+      const entryOrderId = extractEntryOrderId(t);
+      const exitOrderId = extractExitOrderId(t);
+
+      const entryOrder = entryOrderId ? byKey.get(keyFor(instrumentSym, entryOrderId)) : null;
+      const exitOrder = exitOrderId ? byKey.get(keyFor(instrumentSym, exitOrderId)) : null;
+
+      if (!entryOrder && !exitOrder) continue;
       matched += 1;
 
-      const nextBroker = {
-        ...(t as any)?.broker,
+      const prevBroker = (t as any)?.broker || {};
+
+      const nextBroker: any = {
+        ...prevBroker,
         provider: 'SCHWAB' as const,
         accountHash,
-        orderId,
-        status: norm(o?.status) || (t as any)?.broker?.status || 'UNKNOWN',
-        enteredTime: norm(o?.enteredTime) || (t as any)?.broker?.enteredTime,
-        closeTime: norm(o?.closeTime) || (t as any)?.broker?.closeTime,
-        filledQuantity: typeof o?.filledQuantity === 'number' ? o.filledQuantity : (t as any)?.broker?.filledQuantity,
-        remainingQuantity: typeof o?.remainingQuantity === 'number' ? o.remainingQuantity : (t as any)?.broker?.remainingQuantity,
-        averageFillPrice: typeof o?.averageFillPrice === 'number' ? o.averageFillPrice : (t as any)?.broker?.averageFillPrice,
         lastUpdate: new Date().toISOString(),
       };
 
-      const prev = JSON.stringify((t as any)?.broker || {});
-      const next = JSON.stringify(nextBroker);
-      if (prev !== next) {
-        await updateSuggestion(t.id, { broker: nextBroker } as any);
+      if (entryOrder && entryOrderId) {
+        nextBroker.orderId = entryOrderId;
+        nextBroker.status = norm(entryOrder?.status) || prevBroker.status || 'UNKNOWN';
+        nextBroker.enteredTime = norm(entryOrder?.enteredTime) || prevBroker.enteredTime;
+        nextBroker.closeTime = norm(entryOrder?.closeTime) || prevBroker.closeTime;
+        nextBroker.filledQuantity = typeof entryOrder?.filledQuantity === 'number' ? entryOrder.filledQuantity : prevBroker.filledQuantity;
+        nextBroker.remainingQuantity = typeof entryOrder?.remainingQuantity === 'number' ? entryOrder.remainingQuantity : prevBroker.remainingQuantity;
+        nextBroker.averageFillPrice = typeof entryOrder?.averageFillPrice === 'number' ? entryOrder.averageFillPrice : prevBroker.averageFillPrice;
+      }
+
+      if (exitOrder && exitOrderId) {
+        nextBroker.exitOrderId = exitOrderId;
+        nextBroker.exitStatus = norm(exitOrder?.status) || prevBroker.exitStatus || 'UNKNOWN';
+        nextBroker.exitSubmittedAt = prevBroker.exitSubmittedAt || new Date().toISOString();
+        nextBroker.exitCloseTime = norm(exitOrder?.closeTime) || prevBroker.exitCloseTime;
+        nextBroker.exitFilledQuantity = typeof exitOrder?.filledQuantity === 'number' ? exitOrder.filledQuantity : prevBroker.exitFilledQuantity;
+        nextBroker.exitAverageFillPrice = typeof exitOrder?.averageFillPrice === 'number' ? exitOrder.averageFillPrice : prevBroker.exitAverageFillPrice;
+      }
+
+      const patch: any = { broker: nextBroker };
+
+      // If we have a FILLED exit order, mark trade closed broker-truthfully.
+      const exitFilled = classifyFilled(nextBroker.exitStatus);
+      if (exitFilled && (t as any)?.status === 'ACTIVE') {
+        patch.status = 'CLOSED';
+        patch.closedAt = nextBroker.exitCloseTime || new Date().toISOString();
+        // For options, closedPrice is contract fill price; for equities it's per-share fill price.
+        const px = Number(nextBroker.exitAverageFillPrice);
+        if (Number.isFinite(px)) patch.closedPrice = px;
+      }
+
+      const prevStr = JSON.stringify(prevBroker);
+      const nextStr = JSON.stringify(nextBroker);
+      const statusChanged = patch.status && patch.status !== (t as any)?.status;
+
+      if (prevStr !== nextStr || statusChanged) {
+        await updateSuggestion(t.id, patch);
         updated += 1;
       }
     }
