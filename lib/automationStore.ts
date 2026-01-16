@@ -97,10 +97,6 @@ export type AutomationConfig = {
       // If > 0, close an options position after this many minutes in trade.
       timeStopMinutes: number;
 
-      // If true, contract count is sized by budget (maxPremiumNotionalUSD).
-      // If false, use defaultContracts (still capped by maxContractsPerTrade).
-      sizeByBudget: boolean;
-
       // If true, stops/targets are evaluated on the underlying price (recommended)
       useUnderlyingForStopsTargets: boolean;
     };
