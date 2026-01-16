@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-import { listPendingApprovals, updateApproval } from '@/lib/pendingApprovalsStore';
+import { loadPendingApprovals, updatePendingApproval, getPendingApproval } from '@/lib/pendingApprovalsStore';
 import { placeMarketEquityOrder } from '@/lib/liveOrders';
 import { loadAutomationConfig, isLiveArmed } from '@/lib/automationStore';
 import { upsertSuggestion } from '@/lib/trackerStore';
@@ -13,7 +13,8 @@ function nowIso(): string {
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit') || 50)));
-  const pending = await listPendingApprovals(limit);
+  const all = await loadPendingApprovals();
+  const pending = all.filter((a) => a.status === 'PENDING').slice(0, limit);
   return NextResponse.json({ ok: true, approvals: pending });
 }
 
@@ -27,22 +28,22 @@ export async function POST(request: Request) {
     if (action !== 'APPROVE' && action !== 'REJECT') return NextResponse.json({ ok: false, error: 'Invalid action' }, { status: 400 });
 
     // Load current pending approvals and locate the requested one.
-    const pending = await listPendingApprovals(200);
-    const appr = pending.find((a) => a.id === approvalId) || null;
-    if (!appr) return NextResponse.json({ ok: false, error: 'Approval not found (or not pending).' }, { status: 404 });
+    const appr = await getPendingApproval(approvalId);
+    if (!appr || appr.status !== 'PENDING') {
+      return NextResponse.json({ ok: false, error: 'Approval not found (or not pending).' }, { status: 404 });
+    }
 
     if (action === 'REJECT') {
-      const updated = await updateApproval(approvalId, {
-        status: 'REJECTED',
-        decidedAt: nowIso(),
-        decisionNote: note || 'Rejected',
+      const updated = await updatePendingApproval(approvalId, {
+        status: 'DECLINED',
+        error: note || 'Declined',
       });
       return NextResponse.json({ ok: true, approval: updated });
     }
 
     // APPROVE: enforce LIVE safety gates again
     const cfg = await loadAutomationConfig();
-    if (cfg.autopilot.mode !== 'LIVE') {
+    if (cfg.autopilot.mode !== 'LIVE' && cfg.autopilot.mode !== 'LIVE_CONFIRM') {
       return NextResponse.json({ ok: false, error: 'Autopilot is not in LIVE mode.' }, { status: 400 });
     }
     if (process.env.ALLOW_LIVE_AUTOPILOT !== 'true') {
@@ -59,7 +60,14 @@ export async function POST(request: Request) {
     }
 
     // Place the order
-    const placed = await placeMarketEquityOrder(appr.symbol, appr.quantity, appr.instruction);
+    const placed = await placeMarketEquityOrder(appr.symbol, appr.quantity, appr.action);
+    if (!placed.ok || !placed.orderId) {
+      const updated = await updatePendingApproval(approvalId, {
+        status: 'ERROR',
+        error: placed.error || 'Order failed',
+      });
+      return NextResponse.json({ ok: false, error: placed.error || 'Order failed', approval: updated }, { status: 500 });
+    }
 
     // Track it (same shape as autopilot tracking)
     const entry = Number(appr.signal.tradePlan?.entry);
@@ -94,12 +102,11 @@ export async function POST(request: Request) {
       } as any);
     }
 
-    const updated = await updateApproval(approvalId, {
+    const updated = await updatePendingApproval(approvalId, {
       status: 'APPROVED',
-      decidedAt: nowIso(),
-      decisionNote: note || 'Approved',
       orderId: placed.orderId,
-      trackedId,
+      executedAt: nowIso(),
+      error: note || undefined,
     });
 
     return NextResponse.json({ ok: true, approval: updated, orderId: placed.orderId, trackedId });
