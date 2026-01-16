@@ -3,7 +3,7 @@ import path from 'path';
 
 import type { PresetId, StrategyId } from '@/strategies/registry';
 
-export type AutopilotMode = 'OFF' | 'PAPER' | 'LIVE';
+export type AutopilotMode = 'OFF' | 'PAPER' | 'LIVE' | 'LIVE_CONFIRM';
 
 export type StrategyAutomationConfig = {
   enabled: boolean;
@@ -54,6 +54,11 @@ export type AutomationConfig = {
     enableTrailingStop: boolean;
     trailAfterR: number;
     trailLockInR: number;
+
+    // Kill switch (halts NEW entries; lifecycle exits can still run)
+    haltNewEntries: boolean;
+    haltReason?: string;
+    haltSetAt?: string;
 
     // Safety: LIVE requires explicit arm window.
     liveArmExpiresAt?: string;
@@ -126,6 +131,10 @@ export function defaultAutomationConfig(): AutomationConfig {
       enableTrailingStop: true,
       trailAfterR: 1,
       trailLockInR: 0.1,
+
+      haltNewEntries: false,
+      haltReason: '',
+      haltSetAt: undefined,
     },
     strategies: {},
     updatedAt: now,

@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { StrategySpec } from '@/strategies/registry';
 
-type AutopilotMode = 'OFF' | 'PAPER' | 'LIVE';
+type AutopilotMode = 'OFF' | 'PAPER' | 'LIVE' | 'LIVE_CONFIRM';
 
 type AutomationConfig = {
   version: 1;
@@ -38,6 +38,11 @@ type AutomationConfig = {
     enableTrailingStop: boolean;
     trailAfterR: number;
     trailLockInR: number;
+
+    // Kill switch (halts NEW entries)
+    haltNewEntries?: boolean;
+    haltReason?: string;
+    haltSetAt?: string;
 
     liveArmExpiresAt?: string;
   };
@@ -75,6 +80,17 @@ export function AutomationControls() {
   const [tickResult, setTickResult] = useState<any>(null);
   const [runs, setRuns] = useState<any[]>([]);
   const [runsLoading, setRunsLoading] = useState(false);
+  const [pendingApprovals, setPendingApprovals] = useState<any[]>([]);
+  const [pendingLoading, setPendingLoading] = useState(false);
+  const [pendingActionLoading, setPendingActionLoading] = useState<string>('');
+  const [alertsConfig, setAlertsConfig] = useState<any>(null);
+  const [alertsEvents, setAlertsEvents] = useState<any[]>([]);
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [alertsSaving, setAlertsSaving] = useState(false);
+
+
+  const [summary, setSummary] = useState<any>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
   const [tickLoading, setTickLoading] = useState(false);
   const [lifecycleLoading, setLifecycleLoading] = useState(false);
   const [lifecycleResult, setLifecycleResult] = useState<any>(null);
@@ -114,11 +130,90 @@ export function AutomationControls() {
     } finally {
       setRunsLoading(false);
     }
+
+
+  const fetchPending = async () => {
+    setPendingLoading(true);
+    try {
+      const res = await fetch('/api/automation/pending');
+      const data = await res.json();
+      if (data?.ok) setPendingApprovals(Array.isArray(data.pending) ? data.pending : []);
+    } catch {
+      // quiet
+    } finally {
+      setPendingLoading(false);
+    }
+  };
+
+  const fetchSummary = async () => {
+    setSummaryLoading(true);
+    try {
+      const res = await fetch('/api/automation/summary?scope=autopilot');
+      const data = await res.json();
+      if (data?.ok) setSummary(data.summary);
+    } catch {
+      // quiet
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
+
+  const fetchAlerts = async () => {
+    setAlertsLoading(true);
+    try {
+      const [cfgRes, inboxRes] = await Promise.all([
+        fetch("/api/alerts/config"),
+        fetch("/api/alerts/inbox?limit=50"),
+      ]);
+      const cfg = await cfgRes.json();
+      const inbox = await inboxRes.json();
+      if (cfg?.ok) setAlertsConfig(cfg.config);
+      if (inbox?.ok) setAlertsEvents(Array.isArray(inbox.events) ? inbox.events : []);
+    } catch {
+      // quiet
+    } finally {
+      setAlertsLoading(false);
+    }
+  };
+
+  const patchAlertsConfig = async (patch: any) => {
+    setAlertsSaving(true);
+    try {
+      const res = await fetch("/api/alerts/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json();
+      if (data?.ok) {
+        setAlertsConfig(data.config);
+        fetchAlerts();
+      }
+    } finally {
+      setAlertsSaving(false);
+    }
+  };
+
+  const clearAlerts = async () => {
+    setAlertsLoading(true);
+    try {
+      await fetch("/api/alerts/inbox", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "CLEAR" }),
+      });
+      await fetchAlerts();
+    } finally {
+      setAlertsLoading(false);
+    }
   };
 
   useEffect(() => {
     fetchConfig();
     fetchRuns();
+    fetchPending();
+    fetchSummary();
+    fetchAlerts();
   }, []);
 
   const patchConfig = async (patch: any) => {
@@ -156,6 +251,7 @@ export function AutomationControls() {
       if (!data.ok && res.status >= 400) throw new Error(data.error || 'Tick failed');
       setTickResult(data);
       fetchRuns();
+      fetchSummary();
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
@@ -163,6 +259,28 @@ export function AutomationControls() {
     }
   };
 
+
+
+  const actOnPending = async (id: string, action: 'APPROVE' | 'DECLINE') => {
+    setPendingActionLoading(id + ':' + action);
+    setError('');
+    try {
+      const res = await fetch('/api/automation/pending', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, action }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Action failed');
+      await fetchPending();
+      await fetchRuns();
+      await fetchSummary();
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setPendingActionLoading('');
+    }
+  };
   const runLifecycle = async (dryRun: boolean) => {
     setLifecycleLoading(true);
     setError('');
@@ -172,6 +290,7 @@ export function AutomationControls() {
       if (!data.ok && res.status >= 400) throw new Error(data.error || 'Lifecycle run failed');
       setLifecycleResult(data);
       fetchRuns();
+      fetchSummary();
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
@@ -219,6 +338,12 @@ export function AutomationControls() {
           >
             Runs
           </button>
+          <button
+            onClick={fetchSummary}
+            className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/50 text-sm hover:bg-slate-700/50"
+          >
+            Risk
+          </button>
         </div>
       </div>
 
@@ -254,9 +379,10 @@ export function AutomationControls() {
               <option value="OFF">OFF</option>
               <option value="PAPER">PAPER</option>
               <option value="LIVE">LIVE</option>
+              <option value="LIVE_CONFIRM">LIVE (Confirm)</option>
             </select>
             <div className="text-xs text-slate-500 mt-2">
-              Paper will auto-track signals. Live will place market orders.
+              Paper will auto-track signals. LIVE places market orders. LIVE (Confirm) queues orders for approval.
             </div>
           </div>
 
@@ -493,6 +619,175 @@ export function AutomationControls() {
           {config.autopilot.liveArmExpiresAt ? (
             <div className="text-xs text-slate-500 mt-2">Arm expires: {new Date(config.autopilot.liveArmExpiresAt).toLocaleString()}</div>
           ) : null}
+        </div>
+      </Section>
+
+
+
+      <Section
+        title="Pending approvals"
+        subtitle="Only used in LIVE (Confirm) mode. Approve places a live market order and tracks it."
+      >
+        <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="text-sm text-slate-400">{pendingLoading ? 'Loading…' : `${pendingApprovals.length} pending`}</div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchPending}
+              className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/50 text-sm hover:bg-slate-700/50"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
+        {config.autopilot.mode !== 'LIVE_CONFIRM' ? (
+          <div className="text-sm text-slate-400">
+            Set mode to <span className="text-slate-200">LIVE (Confirm)</span> to queue approvals.
+          </div>
+        ) : null}
+
+        {pendingApprovals.length ? (
+          <div className="space-y-3">
+            {pendingApprovals.map((p: any) => (
+              <div key={p.id} className="p-4 rounded-xl border border-slate-700/70 bg-slate-900/30">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-white">
+                      {p.symbol} <span className="text-slate-400 font-normal">•</span> <span className="text-slate-200">{p.signal?.strategyName || p.strategyId}</span>
+                    </div>
+                    <div className="text-xs text-slate-400 mt-1">
+                      {p.action} {p.quantity} • conf {Number(p.signal?.confidence || 0).toFixed(0)} • est ${Number(p.estimatedNotionalUSD || 0).toFixed(0)}
+                    </div>
+                    <div className="text-xs text-slate-500 mt-2">
+                      {Array.isArray(p.signal?.why) ? p.signal.why.slice(0, 3).join(' • ') : ''}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={pendingActionLoading === p.id + ':DECLINE'}
+                      onClick={() => actOnPending(p.id, 'DECLINE')}
+                      className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-950/40 text-sm hover:bg-slate-800/50 disabled:opacity-60"
+                    >
+                      Decline
+                    </button>
+                    <button
+                      disabled={pendingActionLoading === p.id + ':APPROVE'}
+                      onClick={() => actOnPending(p.id, 'APPROVE')}
+                      className="px-3 py-2 rounded-lg border border-emerald-700 bg-emerald-700/10 text-sm hover:bg-emerald-700/20 disabled:opacity-60"
+                    >
+                      Approve
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-sm text-slate-400">No pending approvals.</div>
+        )}
+      </Section>
+      <Section
+        title="Risk Summary"
+        subtitle="Read-only snapshot (autopilot trades). Use this to monitor exposure and PnL at a glance."
+      >
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          {summaryLoading ? <Badge>Loading…</Badge> : null}
+          {summary?.asOf ? <Badge>As of {new Date(summary.asOf).toLocaleString()}</Badge> : null}
+          {summary?.killSwitch?.enabled ? <Badge>⛔ Halted</Badge> : <Badge>✅ Entries allowed</Badge>}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400">Open positions</div>
+            <div className="text-2xl font-bold text-white mt-1">{summary?.openPositions?.total ?? '—'}</div>
+            <div className="text-xs text-slate-500 mt-1">Autopilot ACTIVE trades</div>
+          </div>
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400">Unrealized PnL</div>
+            <div className="text-2xl font-bold text-white mt-1">
+              {typeof summary?.pnl?.unrealizedUSD === 'number' ? summary.pnl.unrealizedUSD.toFixed(0) : '—'}
+            </div>
+            <div className="text-xs text-slate-500 mt-1">USD (best-effort)</div>
+          </div>
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400">Realized PnL</div>
+            <div className="text-2xl font-bold text-white mt-1">
+              {typeof summary?.pnl?.realizedTodayUSD === 'number' ? summary.pnl.realizedTodayUSD.toFixed(0) : '—'}
+            </div>
+            <div className="text-xs text-slate-500 mt-1">
+              Today · 7d: {typeof summary?.pnl?.realized7dUSD === 'number' ? summary.pnl.realized7dUSD.toFixed(0) : '—'}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/20">
+            <div className="text-sm font-semibold text-white mb-2">Exposure (by symbol)</div>
+            <div className="text-xs text-slate-400">Gross notional: {typeof summary?.exposure?.grossNotionalUSD === 'number' ? summary.exposure.grossNotionalUSD.toFixed(0) : '—'}</div>
+            <div className="mt-2 space-y-1">
+              {summary?.exposure?.bySymbolUSD
+                ? Object.entries(summary.exposure.bySymbolUSD)
+                    .sort((a: any, b: any) => Number(b[1]) - Number(a[1]))
+                    .slice(0, 8)
+                    .map(([sym, val]: any) => (
+                      <div key={sym} className="flex items-center justify-between text-sm">
+                        <span className="text-slate-200">{sym}</span>
+                        <span className="text-slate-400">{Number(val).toFixed(0)}</span>
+                      </div>
+                    ))
+                : <div className="text-sm text-slate-500">No active exposure.</div>}
+            </div>
+          </div>
+
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/20">
+            <div className="text-sm font-semibold text-white mb-2">Open positions (by strategy)</div>
+            <div className="mt-1 space-y-1">
+              {summary?.openPositions?.byStrategy
+                ? Object.entries(summary.openPositions.byStrategy)
+                    .sort((a: any, b: any) => Number(b[1]) - Number(a[1]))
+                    .slice(0, 8)
+                    .map(([k, v]: any) => (
+                      <div key={k} className="flex items-center justify-between text-sm">
+                        <span className="text-slate-200">{String(k)}</span>
+                        <span className="text-slate-400">{Number(v)}</span>
+                      </div>
+                    ))
+                : <div className="text-sm text-slate-500">No active trades.</div>}
+            </div>
+          </div>
+        </div>
+      </Section>
+
+      <Section
+        title="Kill Switch"
+        subtitle="Halts NEW entries immediately. Lifecycle exits can still run (target/stop/time-stop)."
+      >
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <input
+              type="checkbox"
+              checked={Boolean(config.autopilot.haltNewEntries)}
+              onChange={(e) => patchConfig({ autopilot: { haltNewEntries: e.target.checked } })}
+              className="w-4 h-4"
+            />
+            <div>
+              <div className="font-medium">Halt new entries</div>
+              <div className="text-xs text-slate-400">Immediate</div>
+            </div>
+          </label>
+
+          <div className="md:col-span-2 p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400 mb-1">Halt reason (optional)</div>
+            <input
+              value={config.autopilot.haltReason || ''}
+              onChange={(e) => patchConfig({ autopilot: { haltReason: e.target.value } })}
+              placeholder="e.g., volatility spike / news risk / manual pause"
+              className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-sm"
+            />
+            {config.autopilot.haltSetAt ? (
+              <div className="text-xs text-slate-500 mt-2">Set at: {new Date(config.autopilot.haltSetAt).toLocaleString()}</div>
+            ) : null}
+          </div>
         </div>
       </Section>
 
@@ -793,7 +1088,141 @@ export function AutomationControls() {
         ) : null}
       </Section>
 
-      <div className="p-4 rounded-xl border border-slate-700/60 bg-slate-900/20 text-sm text-slate-300">
+      <Section
+        title="Alerts"
+        subtitle="In-app notifications from autopilot ticks (and optional webhooks)."
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+          <div className="flex items-center gap-2">
+            <Badge>{alertsConfig?.enabled ? 'Enabled' : 'Disabled'}</Badge>
+            <Badge>min conf {alertsConfig?.minConfidence ?? '—'}</Badge>
+            {alertsSaving ? <Badge>Saving…</Badge> : null}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={fetchAlerts}
+              className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/50 text-sm hover:bg-slate-700/50"
+            >
+              Refresh
+            </button>
+            <button
+              onClick={clearAlerts}
+              className="px-3 py-2 rounded-lg border border-red-700/40 bg-red-500/5 text-red-200 text-sm hover:bg-red-500/10"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-4 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-sm font-semibold text-white mb-3">Settings</div>
+
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <div>
+                <div className="text-xs text-slate-400 mb-1">Alerts enabled</div>
+                <div className="text-sm text-slate-300">Show in-app alerts when autopilot tracks/queues/places orders.</div>
+              </div>
+              <button
+                onClick={() => patchAlertsConfig({ enabled: !Boolean(alertsConfig?.enabled) })}
+                className={
+                  'px-3 py-2 rounded-lg text-sm border ' +
+                  (alertsConfig?.enabled
+                    ? 'border-emerald-700 bg-emerald-700/10 text-emerald-200 hover:bg-emerald-700/20'
+                    : 'border-slate-700 bg-slate-800/40 text-slate-200 hover:bg-slate-700/50')
+                }
+              >
+                {alertsConfig?.enabled ? 'On' : 'Off'}
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <div className="text-xs text-slate-400 mb-1">Min confidence</div>
+                <input
+                  value={String(alertsConfig?.minConfidence ?? 70)}
+                  onChange={(e) => patchAlertsConfig({ minConfidence: Number(e.target.value || 0) })}
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-slate-100 text-sm"
+                />
+              </div>
+              <div>
+                <div className="text-xs text-slate-400 mb-1">Webhook URL (optional)</div>
+                <input
+                  value={String(alertsConfig?.webhookUrl || '')}
+                  onChange={(e) => patchAlertsConfig({ webhookUrl: e.target.value })}
+                  placeholder="https://..."
+                  className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-slate-100 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={Boolean(alertsConfig?.includePaper)}
+                  onChange={(e) => patchAlertsConfig({ includePaper: e.target.checked })}
+                />
+                Paper
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={Boolean(alertsConfig?.includeLiveConfirm)}
+                  onChange={(e) => patchAlertsConfig({ includeLiveConfirm: e.target.checked })}
+                />
+                Live confirm
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={Boolean(alertsConfig?.includeLiveAuto)}
+                  onChange={(e) => patchAlertsConfig({ includeLiveAuto: e.target.checked })}
+                />
+                Live auto
+              </label>
+            </div>
+
+            <div className="mt-3">
+              <div className="text-xs text-slate-400 mb-1">Symbols allowlist (optional)</div>
+              <input
+                value={Array.isArray(alertsConfig?.symbols) ? alertsConfig.symbols.join(', ') : ''}
+                onChange={(e) => patchAlertsConfig({ symbols: e.target.value })}
+                placeholder="SPY, QQQ, AAPL"
+                className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-slate-100 text-sm"
+              />
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-sm font-semibold text-white">Inbox</div>
+              <div className="text-xs text-slate-400">{alertsEvents.length} events</div>
+            </div>
+
+            {alertsEvents.length ? (
+              <div className="space-y-2 max-h-80 overflow-auto pr-1">
+                {alertsEvents.slice(0, 50).map((ev: any) => (
+                  <div key={ev.id} className="p-3 rounded-lg border border-slate-800 bg-slate-950/20">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-white">{ev.title}</div>
+                        <div className="text-xs text-slate-400 mt-1">{ev.message}</div>
+                        <div className="text-[11px] text-slate-500 mt-2">{ev.createdAt ? new Date(ev.createdAt).toLocaleString() : ''}</div>
+                      </div>
+                      <div className="text-xs text-slate-400">{String(ev.severity || 'info')}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-slate-400">No alerts yet.</div>
+            )}
+          </div>
+        </div>
+      </Section>
+
+<div className="p-4 rounded-xl border border-slate-700/60 bg-slate-900/20 text-sm text-slate-300">
         <div className="font-semibold mb-2">Notes</div>
         <ul className="list-disc pl-5 space-y-1 text-slate-400">
           <li>Autopilot runs when you click “Execute tick now”. You can also schedule it via <code>/api/automation/cron</code> (requires <code>AUTOMATION_CRON_ENABLED=true</code> and a Vercel Cron invocation).</li>

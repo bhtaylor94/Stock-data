@@ -23,7 +23,7 @@ function isPresetId(v: any): v is PresetId {
 }
 
 function isMode(v: any): v is AutopilotMode {
-  return v === 'OFF' || v === 'PAPER' || v === 'LIVE';
+  return v === 'OFF' || v === 'PAPER' || v === 'LIVE' || v === 'LIVE_CONFIRM';
 }
 
 export async function GET() {
@@ -111,6 +111,16 @@ export async function POST(req: NextRequest) {
             : (next.autopilot as any).enableTrailingStop ?? true,
         trailAfterR: clampNum(ap.trailAfterR, 0, 10, Number((next.autopilot as any).trailAfterR ?? 1)),
         trailLockInR: clampNum(ap.trailLockInR, 0, 5, Number((next.autopilot as any).trailLockInR ?? 0.1)),
+
+        // Kill switch
+        haltNewEntries: typeof ap.haltNewEntries === 'boolean' ? ap.haltNewEntries : (next.autopilot as any).haltNewEntries ?? false,
+        haltReason: ap.haltReason !== undefined ? String(ap.haltReason || '').slice(0, 140) : (next.autopilot as any).haltReason ?? '',
+        haltSetAt:
+          ap.haltNewEntries === true
+            ? ((next.autopilot as any).haltSetAt || new Date().toISOString())
+            : ap.haltNewEntries === false
+              ? undefined
+              : (next.autopilot as any).haltSetAt,
       };
     }
 

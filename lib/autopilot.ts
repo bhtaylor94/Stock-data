@@ -6,23 +6,54 @@ import { loadSuggestions, upsertSuggestion, type TrackedSuggestion } from '@/lib
 import { loadAutomationConfig, isLiveArmed } from '@/lib/automationStore';
 import { placeMarketEquityOrder } from '@/lib/liveOrders';
 import { appendAutomationRun } from '@/lib/automationRunsStore';
+import { addPendingApproval, makePendingId, nowIso as nowIsoPA } from '@/lib/pendingApprovalsStore';
 import { detectMarketRegime } from '@/lib/regimeDetector';
 import { makeDedupKey, recordSignalFire, shouldSuppressSignal } from '@/lib/automationDedupStore';
 import { runTradeLifecycleSweep } from '@/lib/tradeLifecycle';
+import { loadAlertsStore, appendAlertEvent, shouldEmitAlert } from '@/lib/alertsStore';
+import { sendWebhookIfConfigured } from '@/lib/alertWebhook';
 
 export type AutopilotAction = {
   symbol: string;
   strategyId: StrategyId;
   presetId: PresetId;
-  action: 'TRACK_PAPER' | 'PLACE_LIVE_ORDER' | 'SKIP';
+  action: 'TRACK_PAPER' | 'PLACE_LIVE_ORDER' | 'QUEUE_LIVE_APPROVAL' | 'SKIP';
   reason: string;
   signal?: Signal;
   orderId?: string;
   trackedId?: string;
+  pendingId?: string;
 };
 
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+async function emitAlert(mode: "PAPER" | "LIVE" | "LIVE_CONFIRM", ev: {
+  type: string;
+  title: string;
+  message: string;
+  severity: "info" | "warn" | "error";
+  symbol?: string;
+  strategyId?: string;
+  confidence?: number;
+  action?: "BUY" | "SELL" | "NO_TRADE";
+  meta?: Record<string, any>;
+}): Promise<void> {
+  try {
+    const store = await loadAlertsStore();
+    const cfg = store.config;
+    if (!shouldEmitAlert(cfg, mode, ev.symbol, ev.strategyId, ev.confidence)) return;
+    const payload = {
+      id: `alert_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+      createdAt: new Date().toISOString(),
+      ...ev,
+    };
+    await appendAlertEvent(payload as any);
+    await sendWebhookIfConfigured(cfg as any, payload as any);
+  } catch {
+    // best-effort
+  }
 }
 
 function nyDateKey(d: Date): string {
@@ -165,6 +196,15 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
   try {
     if (!cfg.autopilot.enabled || cfg.autopilot.mode === 'OFF') {
       meta = { reason: 'autopilot_disabled', config: cfg.autopilot };
+      if (!dryRun) {
+        await emitAlert("PAPER", {
+          type: "AUTOPILOT_HALTED",
+          title: "Autopilot halted (new entries)",
+          message: String((cfg.autopilot as any).haltReason || ""),
+          severity: "warn",
+          meta: { mode: cfg.autopilot.mode, haltSetAt: (cfg.autopilot as any).haltSetAt || null },
+        });
+      }
       return { ok: true, actions, meta };
     }
 
@@ -180,6 +220,29 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
         trailAfterR: Number((cfg.autopilot as any).trailAfterR ?? 1),
         trailLockInR: Number((cfg.autopilot as any).trailLockInR ?? 0.1),
       });
+    }
+
+    // Kill switch: halt NEW entries, but still allow lifecycle exits to run.
+    if (Boolean((cfg.autopilot as any).haltNewEntries)) {
+      meta = {
+        reason: 'halt_new_entries',
+        halt: {
+          enabled: true,
+          setAt: (cfg.autopilot as any).haltSetAt || null,
+          message: (cfg.autopilot as any).haltReason || '',
+        },
+        lifecycle,
+      };
+      if (!dryRun) {
+        await emitAlert("PAPER", {
+          type: "AUTOPILOT_HALTED",
+          title: "Autopilot halted (new entries)",
+          message: String((cfg.autopilot as any).haltReason || ""),
+          severity: "warn",
+          meta: { mode: cfg.autopilot.mode, haltSetAt: (cfg.autopilot as any).haltSetAt || null },
+        });
+      }
+      return { ok: true, actions, meta };
     }
 
     const existing = await loadSuggestions();
@@ -198,15 +261,33 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
 
     if (cfg.autopilot.requireMarketHours && !isMarketHours) {
       meta = { reason: 'time_gate_market_hours', nowNYMin };
+      if (!dryRun) {
+        await emitAlert("PAPER", {
+          type: "AUTOPILOT_HALTED",
+          title: "Autopilot halted (new entries)",
+          message: String((cfg.autopilot as any).haltReason || ""),
+          severity: "warn",
+          meta: { mode: cfg.autopilot.mode, haltSetAt: (cfg.autopilot as any).haltSetAt || null },
+        });
+      }
       return { ok: true, actions, meta };
     }
     if (inNoTrade) {
       meta = { reason: 'time_gate_no_trade_window', nowNYMin };
+      if (!dryRun) {
+        await emitAlert("PAPER", {
+          type: "AUTOPILOT_HALTED",
+          title: "Autopilot halted (new entries)",
+          message: String((cfg.autopilot as any).haltReason || ""),
+          severity: "warn",
+          meta: { mode: cfg.autopilot.mode, haltSetAt: (cfg.autopilot as any).haltSetAt || null },
+        });
+      }
       return { ok: true, actions, meta };
     }
 
-    // Safety gate for LIVE
-    if (cfg.autopilot.mode === 'LIVE') {
+    // Safety gate for LIVE / LIVE_CONFIRM
+    if (cfg.autopilot.mode === 'LIVE' || (cfg.autopilot.mode as any) === 'LIVE_CONFIRM') {
       const envGate = process.env.ALLOW_LIVE_AUTOPILOT === 'true';
       if (!envGate) {
         ok = false;
@@ -214,7 +295,7 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
         meta = { reason: 'live_env_block', allow: false };
         return { ok, actions, meta };
       }
-      if (!isLiveArmed(cfg)) {
+      if (cfg.autopilot.mode === 'LIVE' && !isLiveArmed(cfg)) {
         ok = false;
         actions.push({ symbol: '', strategyId: 'trend_rider' as any, presetId: cfg.autopilot.presetId, action: 'SKIP', reason: 'LIVE blocked: not armed (arm window expired).' });
         meta = { reason: 'live_not_armed' };
@@ -231,12 +312,30 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
     const maxTradesToday = Math.max(0, Number(cfg.autopilot.maxTradesPerDay || 0));
     if (maxTradesToday > 0 && tradesToday >= maxTradesToday) {
       meta = { reason: 'risk_gate_max_trades_day', tradesToday, maxTradesToday };
+      if (!dryRun) {
+        await emitAlert("PAPER", {
+          type: "AUTOPILOT_HALTED",
+          title: "Autopilot halted (new entries)",
+          message: String((cfg.autopilot as any).haltReason || ""),
+          severity: "warn",
+          meta: { mode: cfg.autopilot.mode, haltSetAt: (cfg.autopilot as any).haltSetAt || null },
+        });
+      }
       return { ok: true, actions, meta };
     }
 
     const maxOpenTotal = Math.max(0, Number(cfg.autopilot.maxOpenPositionsTotal || 0));
     if (maxOpenTotal > 0 && openTotal >= maxOpenTotal) {
       meta = { reason: 'risk_gate_max_open_total', openTotal, maxOpenTotal };
+      if (!dryRun) {
+        await emitAlert("PAPER", {
+          type: "AUTOPILOT_HALTED",
+          title: "Autopilot halted (new entries)",
+          message: String((cfg.autopilot as any).haltReason || ""),
+          severity: "warn",
+          meta: { mode: cfg.autopilot.mode, haltSetAt: (cfg.autopilot as any).haltSetAt || null },
+        });
+      }
       return { ok: true, actions, meta };
     }
 
@@ -274,7 +373,7 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
         }
 
         // LIVE allowlist safety
-        if (cfg.autopilot.mode === 'LIVE' && cfg.autopilot.requireLiveAllowlist) {
+        if ((cfg.autopilot.mode === 'LIVE' || (cfg.autopilot.mode as any) === 'LIVE_CONFIRM') && cfg.autopilot.requireLiveAllowlist) {
           const allow = (cfg.autopilot.liveAllowlistSymbols || []).map((s) => String(s).trim().toUpperCase()).filter(Boolean);
           if (allow.length && !allow.includes(symbol)) {
             actions.push({ symbol, strategyId, presetId, action: 'SKIP', reason: 'LIVE allowlist blocked this symbol.' });
@@ -305,7 +404,7 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
             continue;
           }
         }
-        const r = await evaluateStrategySignal({ symbol, strategyId, presetId, mode: cfg.autopilot.mode === 'LIVE' ? 'live' : 'paper' });
+        const r = await evaluateStrategySignal({ symbol, strategyId, presetId, mode: (cfg.autopilot.mode === 'LIVE' || (cfg.autopilot.mode as any) === 'LIVE_CONFIRM') ? 'live' : 'paper' });
         const sig = r.ok ? r.signal : null;
         if (!sig || sig.action === 'NO_TRADE') {
           continue;
@@ -348,7 +447,7 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
 
       // Notional cap
       const entry = Number(sig.tradePlan?.entry);
-      const qty = cfg.autopilot.mode === 'LIVE' ? Math.max(1, Math.min(1000, Number(cfg.autopilot.defaultQuantity || 1))) : 1;
+      const qty = (cfg.autopilot.mode === 'LIVE' || (cfg.autopilot.mode as any) === 'LIVE_CONFIRM') ? Math.max(1, Math.min(1000, Number(cfg.autopilot.defaultQuantity || 1))) : 1;
       const notional = Number.isFinite(entry) ? entry * qty : NaN;
       const maxNotional = Math.max(0, Number(cfg.autopilot.maxNotionalPerTradeUSD || 0));
       if (maxNotional > 0 && Number.isFinite(notional) && notional > maxNotional) {
@@ -366,6 +465,59 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
           await upsertSuggestion(tracked);
         }
         actions.push({ symbol, strategyId, presetId, action: 'TRACK_PAPER', reason: dryRun ? 'dry_run' : 'tracked', signal: sig, trackedId: tracked.id });
+        if (!dryRun) {
+          await emitAlert("PAPER", {
+            type: "SIGNAL_PAPER_TRACKED",
+            title: `${symbol} • Paper tracked`,
+            message: `${sig.strategyName || strategyId} (${presetId}) • conf ${Number(sig.confidence || 0).toFixed(0)} • ${sig.action}`,
+            severity: "info",
+            symbol,
+            strategyId: String(strategyId),
+            confidence: Number(sig.confidence || 0),
+            action: sig.action as any,
+            meta: { trackedId: tracked.id },
+          });
+        }
+
+      } else if ((cfg.autopilot.mode as any) === 'LIVE_CONFIRM') {
+        // Queue a live order for human approval (no order is placed yet)
+        const instruction = sig.action === 'BUY' ? 'BUY' : 'SELL';
+        const entry = Number(sig.tradePlan?.entry);
+        const notional = Number.isFinite(entry) ? entry * qty : undefined;
+        const pendingId = makePendingId(symbol, String(strategyId));
+
+        if (!dryRun) {
+          await addPendingApproval({
+            id: pendingId,
+            createdAt: nowIsoPA(),
+            updatedAt: nowIsoPA(),
+            status: 'PENDING',
+            symbol,
+            strategyId,
+            presetId,
+            action: instruction as any,
+            quantity: qty,
+            estimatedEntry: Number.isFinite(entry) ? entry : undefined,
+            estimatedNotionalUSD: Number.isFinite(notional) ? notional : undefined,
+            signal: sig,
+          });
+        }
+
+        actions.push({ symbol, strategyId, presetId, action: 'QUEUE_LIVE_APPROVAL', reason: dryRun ? 'dry_run' : 'queued', signal: sig, pendingId });
+        if (!dryRun) {
+          await emitAlert("LIVE_CONFIRM", {
+            type: "SIGNAL_LIVE_APPROVAL_QUEUED",
+            title: `${symbol} • Approval queued`,
+            message: `${sig.strategyName || strategyId} (${presetId}) • conf ${Number(sig.confidence || 0).toFixed(0)} • ${sig.action}`,
+            severity: "info",
+            symbol,
+            strategyId: String(strategyId),
+            confidence: Number(sig.confidence || 0),
+            action: sig.action as any,
+            meta: { pendingId },
+          });
+        }
+
       } else if (cfg.autopilot.mode === 'LIVE') {
         // Place order + also track
         const instruction = sig.action === 'BUY' ? 'BUY' : 'SELL';
@@ -383,6 +535,20 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
         }
 
         actions.push({ symbol, strategyId, presetId, action: 'PLACE_LIVE_ORDER', reason: dryRun ? 'dry_run' : 'order_placed', signal: sig, orderId, trackedId: tracked?.id });
+        if (!dryRun) {
+          await emitAlert("LIVE", {
+            type: "SIGNAL_LIVE_ORDER_PLACED",
+            title: `${symbol} • Live order placed`,
+            message: `${sig.strategyName || strategyId} (${presetId}) • conf ${Number(sig.confidence || 0).toFixed(0)} • qty ${qty} • ${sig.action}`,
+            severity: "warn",
+            symbol,
+            strategyId: String(strategyId),
+            confidence: Number(sig.confidence || 0),
+            action: sig.action as any,
+            meta: { orderId, trackedId: tracked?.id },
+          });
+        }
+
       }
 
       // optimistic counters
@@ -395,7 +561,7 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
       evaluatedSymbols: symbols.length,
       evaluatedStrategies: enabledStrategies.length,
       candidates: signals.length,
-      executed: actions.filter((a) => a.action === 'TRACK_PAPER' || a.action === 'PLACE_LIVE_ORDER').length,
+      executed: actions.filter((a) => a.action === 'TRACK_PAPER' || a.action === 'PLACE_LIVE_ORDER' || (a.action as any) === 'QUEUE_LIVE_APPROVAL').length,
       skipped: actions.filter((a) => a.action === 'SKIP').length,
       mode: cfg.autopilot.mode,
       dryRun,
@@ -413,7 +579,16 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
       },
     };
 
-    return { ok: true, actions, meta };
+    if (!dryRun) {
+        await emitAlert("PAPER", {
+          type: "AUTOPILOT_HALTED",
+          title: "Autopilot halted (new entries)",
+          message: String((cfg.autopilot as any).haltReason || ""),
+          severity: "warn",
+          meta: { mode: cfg.autopilot.mode, haltSetAt: (cfg.autopilot as any).haltSetAt || null },
+        });
+      }
+      return { ok: true, actions, meta };
   } catch (e: any) {
     ok = false;
     errorMsg = String(e?.message || e);
