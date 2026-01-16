@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { PnlCalendar } from "./PnlCalendar";
 
 interface Position {
   symbol: string;
@@ -241,7 +242,10 @@ export function RealPortfolio({ onAnalyze, onTrade }: RealPortfolioProps = {}) {
         </div>
       </div>
 
-      {/* Live Orders & Activity (optional) */}
+      {/* Monthly P/L Calendar */}
+      <PnlCalendar scope="live" />
+
+      {/* Live Orders {/* Live Orders & Activity (optional) */} Activity (optional) */}
       <div className="p-6 rounded-2xl border border-slate-700/50 bg-slate-800/30">
         <div className="flex items-center justify-between">
           <div>
