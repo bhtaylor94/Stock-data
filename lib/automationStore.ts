@@ -185,12 +185,11 @@ export function defaultAutomationConfig(): AutomationConfig {
         defaultContracts: 1,
         maxContractsPerTrade: 3,
         maxPremiumNotionalUSD: 600,
-      sizeByBudget: true,
+        sizeByBudget: true,
 
         takeProfitPct: 0.10,
         stopLossPct: 0.10,
         timeStopMinutes: 120,
-        sizeByBudget: true,
         useUnderlyingForStopsTargets: true,
       },
     },
