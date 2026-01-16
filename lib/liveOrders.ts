@@ -1,5 +1,12 @@
 import { getSchwabAccessToken, schwabFetchJson } from '@/lib/schwab';
 
+const TRADER_BASE = 'https://api.schwabapi.com/trader/v1';
+
+function envFlag(name: string): boolean {
+  const v = process.env[name];
+  return Boolean(v && String(v).trim() && String(v).trim() !== '0' && String(v).trim().toLowerCase() !== 'false');
+}
+
 export type PlaceOrderResult = {
   ok: boolean;
   orderId?: string;
@@ -24,7 +31,7 @@ export async function placeMarketEquityOrder(
 
     const accountsResult = await schwabFetchJson<any[]>(
       tokenResult.token,
-      'https://api.schwabapi.com/trader/v1/accounts/accountNumbers',
+      TRADER_BASE + '/accounts/accountNumbers',
       { scope: 'tracker' }
     );
 
@@ -48,17 +55,41 @@ export async function placeMarketEquityOrder(
       ],
     };
 
-    const orderResponse = await fetch(
-      `https://api.schwabapi.com/trader/v1/accounts/${accountHash}/orders`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${tokenResult.token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(orderPayload),
+    // Optional: preview gate before placing a live order.
+    if (envFlag('SCHWAB_USE_PREVIEW_ORDER')) {
+      const previewUrl = TRADER_BASE + '/accounts/' + encodeURIComponent(accountHash) + '/previewOrder';
+      const preview = await schwabFetchJson<any>(
+        tokenResult.token,
+        previewUrl,
+        {
+          method: 'POST',
+          scope: 'tracker',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(orderPayload),
+        }
+      );
+
+      if (!preview.ok) {
+        return { ok: false, status: preview.status, error: preview.text || preview.error || 'Order preview failed' };
       }
-    );
+
+      const status = String((preview.data as any)?.orderStrategy?.status || (preview.data as any)?.status || '').toUpperCase();
+      if (status && status.includes('REJECT')) {
+        return { ok: false, status: 400, error: JSON.stringify(preview.data) };
+      }
+    }
+
+    const placeUrl = TRADER_BASE + '/accounts/' + encodeURIComponent(accountHash) + '/orders';
+    const orderResponse = await fetch(placeUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + tokenResult.token,
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify(orderPayload),
+    });
 
     if (orderResponse.status === 201) {
       const locationHeader = orderResponse.headers.get('location');
