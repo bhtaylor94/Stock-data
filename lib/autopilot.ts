@@ -4,7 +4,8 @@ import { STRATEGY_REGISTRY } from '@/strategies/registry';
 import { evaluateStrategySignal } from '@/strategies/engine';
 import { loadSuggestions, upsertSuggestion, type TrackedSuggestion } from '@/lib/trackerStore';
 import { loadAutomationConfig, isLiveArmed } from '@/lib/automationStore';
-import { placeMarketEquityOrder } from '@/lib/liveOrders';
+import { placeMarketEquityOrder, placeMarketOptionOrder } from '@/lib/liveOrders';
+import { selectOptionContractForSignal } from '@/lib/options/contractSelector';
 import { appendAutomationRun } from '@/lib/automationRunsStore';
 import { addPendingApproval, makePendingId, nowIso as nowIsoPA } from '@/lib/pendingApprovalsStore';
 import { detectMarketRegime } from '@/lib/regimeDetector';
@@ -447,7 +448,22 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
 
       // Notional cap
       const entry = Number(sig.tradePlan?.entry);
-      const qty = (cfg.autopilot.mode === 'LIVE' || (cfg.autopilot.mode as any) === 'LIVE_CONFIRM') ? Math.max(1, Math.min(1000, Number(cfg.autopilot.defaultQuantity || 1))) : 1;
+      const isLiveish = cfg.autopilot.mode === 'LIVE' || (cfg.autopilot.mode as any) === 'LIVE_CONFIRM';
+      const execInstr = (cfg.autopilot as any).executionInstrument || 'STOCK';
+
+      // Quantity means:
+      // - STOCK: shares
+      // - OPTION: contracts
+      let qty = 1;
+      if (isLiveish) {
+        if (execInstr === 'OPTION') {
+          const defC = Number((cfg.autopilot as any).options?.defaultContracts ?? 1);
+          const maxC = Number((cfg.autopilot as any).options?.maxContractsPerTrade ?? 10);
+          qty = Math.max(1, Math.min(maxC, Math.floor(defC || 1)));
+        } else {
+          qty = Math.max(1, Math.min(1000, Number(cfg.autopilot.defaultQuantity || 1)));
+        }
+      }
       const notional = Number.isFinite(entry) ? entry * qty : NaN;
       const maxNotional = Math.max(0, Number(cfg.autopilot.maxNotionalPerTradeUSD || 0));
       if (maxNotional > 0 && Number.isFinite(notional) && notional > maxNotional) {
@@ -483,7 +499,41 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
         // Queue a live order for human approval (no order is placed yet)
         const instruction = sig.action === 'BUY' ? 'BUY' : 'SELL';
         const entry = Number(sig.tradePlan?.entry);
-        const notional = Number.isFinite(entry) ? entry * qty : undefined;
+        const execInstr = (cfg.autopilot as any).executionInstrument || 'STOCK';
+        let selectedOption: any = null;
+
+        // Resolve contract up-front for exact replay in approvals (OPTION execution only)
+        if (execInstr === 'OPTION') {
+          const side = sig.action === 'BUY' ? 'CALL' : 'PUT';
+          const optCfg = (cfg.autopilot as any).options || {};
+          const sel = await selectOptionContractForSignal({
+            symbol,
+            side,
+            targetDteDays: Number(optCfg.targetDteDays ?? 30),
+            targetAbsDelta: Number(optCfg.targetAbsDelta ?? 0.35),
+            minOpenInterest: Number(optCfg.minOpenInterest ?? 1000),
+            minVolume: Number(optCfg.minVolume ?? 100),
+            maxBidAskPct: Number(optCfg.maxBidAskPct ?? 12),
+          });
+          if (!sel.ok) {
+            actions.push({ symbol, strategyId, presetId, action: 'SKIP', reason: `Option selection failed: ${sel.error}`, signal: sig });
+            continue;
+          }
+          selectedOption = sel.contract;
+
+          // Premium cap (options-specific) before we even queue
+          const mid = Number(selectedOption.mid ?? NaN);
+          const premiumNotional = Number.isFinite(mid) ? mid * 100 * qty : NaN;
+          const maxPrem = Number(optCfg.maxPremiumNotionalUSD ?? 0);
+          if (maxPrem > 0 && Number.isFinite(premiumNotional) && premiumNotional > maxPrem) {
+            actions.push({ symbol, strategyId, presetId, action: 'SKIP', reason: 'Max options premium notional exceeded.', signal: sig });
+            continue;
+          }
+        }
+
+        const notional = Number.isFinite(entry)
+          ? (execInstr === 'OPTION' && selectedOption?.mid ? Number(selectedOption.mid) * 100 * qty : entry * qty)
+          : undefined;
         const pendingId = makePendingId(symbol, String(strategyId));
 
         if (!dryRun) {
@@ -500,6 +550,8 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
             estimatedEntry: Number.isFinite(entry) ? entry : undefined,
             estimatedNotionalUSD: Number.isFinite(notional) ? notional : undefined,
             signal: sig,
+            executionInstrument: execInstr,
+            selectedOptionContract: selectedOption || undefined,
           });
         }
 
@@ -520,17 +572,61 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
 
       } else if (cfg.autopilot.mode === 'LIVE') {
         // Place order + also track
+        const execInstr = (cfg.autopilot as any).executionInstrument || 'STOCK';
         const instruction = sig.action === 'BUY' ? 'BUY' : 'SELL';
         let orderId: string | undefined;
+        let selectedOption: any = null;
 
         if (!dryRun) {
-          const placed = await placeMarketEquityOrder(symbol, qty, instruction);
-          orderId = placed.orderId;
+          if (execInstr === 'OPTION') {
+            const side = sig.action === 'BUY' ? 'CALL' : 'PUT';
+            const optCfg = (cfg.autopilot as any).options || {};
+            const sel = await selectOptionContractForSignal({
+              symbol,
+              side,
+              targetDteDays: Number(optCfg.targetDteDays ?? 30),
+              targetAbsDelta: Number(optCfg.targetAbsDelta ?? 0.35),
+              minOpenInterest: Number(optCfg.minOpenInterest ?? 1000),
+              minVolume: Number(optCfg.minVolume ?? 100),
+              maxBidAskPct: Number(optCfg.maxBidAskPct ?? 12),
+            });
+            if (!sel.ok) {
+              actions.push({ symbol, strategyId, presetId, action: 'SKIP', reason: `Option selection failed: ${sel.error}`, signal: sig });
+              continue;
+            }
+            selectedOption = sel.contract;
+            const mid = Number(selectedOption.mid ?? NaN);
+            const premiumNotional = Number.isFinite(mid) ? mid * 100 * qty : NaN;
+            const maxPrem = Number(optCfg.maxPremiumNotionalUSD ?? 0);
+            if (maxPrem > 0 && Number.isFinite(premiumNotional) && premiumNotional > maxPrem) {
+              actions.push({ symbol, strategyId, presetId, action: 'SKIP', reason: 'Max options premium notional exceeded.', signal: sig });
+              continue;
+            }
+            const placed = await placeMarketOptionOrder(String(selectedOption.optionSymbol), qty, 'BUY_TO_OPEN');
+            if (!placed.ok) {
+              actions.push({ symbol, strategyId, presetId, action: 'SKIP', reason: `Option order failed: ${placed.error}`, signal: sig });
+              continue;
+            }
+            orderId = placed.orderId;
+          } else {
+            const placed = await placeMarketEquityOrder(symbol, qty, instruction);
+            orderId = placed.orderId;
+          }
         }
 
         const tracked = signalToTrackedSuggestion(sig, presetId);
         if (tracked && !dryRun) {
           tracked.evidencePacket = { ...(tracked.evidencePacket || {}), orderId } as any;
+          if (execInstr === 'OPTION' && selectedOption) {
+            tracked.type = 'OPTION' as any;
+            tracked.optionContract = {
+              optionSymbol: String(selectedOption.optionSymbol),
+              expiration: String(selectedOption.expiration),
+              strike: Number(selectedOption.strike),
+              optionType: String(selectedOption.optionType),
+              dte: Number(selectedOption.dte),
+            } as any;
+          }
           await upsertSuggestion(tracked);
         }
 

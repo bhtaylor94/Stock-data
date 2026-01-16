@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 
 import { loadPendingApprovals, updatePendingApproval, getPendingApproval } from '@/lib/pendingApprovalsStore';
-import { placeMarketEquityOrder } from '@/lib/liveOrders';
+import { placeMarketEquityOrder, placeMarketOptionOrder } from '@/lib/liveOrders';
 import { loadAutomationConfig, isLiveArmed } from '@/lib/automationStore';
 import { upsertSuggestion } from '@/lib/trackerStore';
 import { STRATEGY_REGISTRY } from '@/strategies/registry';
@@ -60,7 +60,19 @@ export async function POST(request: Request) {
     }
 
     // Place the order
-    const placed = await placeMarketEquityOrder(appr.symbol, appr.quantity, appr.action);
+    const execInstr = (appr as any).executionInstrument || 'STOCK';
+    let placed: any;
+    if (execInstr === 'OPTION') {
+      const opt = (appr as any).selectedOptionContract;
+      const optSym = String(opt?.optionSymbol || '').trim();
+      if (!optSym) {
+        await updatePendingApproval(approvalId, { status: 'ERROR', error: 'Missing selected option contract', executedAt: new Date().toISOString() });
+        return NextResponse.json({ ok: false, error: 'Missing selected option contract' }, { status: 400 });
+      }
+      placed = await placeMarketOptionOrder(optSym, appr.quantity, 'BUY_TO_OPEN');
+    } else {
+      placed = await placeMarketEquityOrder(appr.symbol, appr.quantity, appr.action);
+    }
     if (!placed.ok || !placed.orderId) {
       const updated = await updatePendingApproval(approvalId, {
         status: 'ERROR',
@@ -79,13 +91,30 @@ export async function POST(request: Request) {
       await upsertSuggestion({
         id: trackedId,
         ticker: appr.signal.symbol,
-        type: appr.signal.action === 'BUY' ? 'STOCK_BUY' : appr.signal.action === 'SELL' ? 'STOCK_SELL' : 'NO_TRADE',
+        type:
+          execInstr === 'OPTION'
+            ? 'OPTION'
+            : appr.signal.action === 'BUY'
+              ? 'STOCK_BUY'
+              : appr.signal.action === 'SELL'
+                ? 'STOCK_SELL'
+                : 'NO_TRADE',
         strategy: appr.signal.strategyName,
         setup: appr.signal.strategyId,
         regime: (strat?.marketRegimes || [])[0],
         entryPrice: entry,
         targetPrice: target,
         stopLoss: stop,
+        optionContract:
+          execInstr === 'OPTION'
+            ? {
+                optionSymbol: String((appr as any).selectedOptionContract?.optionSymbol || ''),
+                expiration: String((appr as any).selectedOptionContract?.expiration || ''),
+                strike: Number((appr as any).selectedOptionContract?.strike || 0),
+                optionType: String((appr as any).selectedOptionContract?.optionType || ''),
+                dte: Number((appr as any).selectedOptionContract?.dte || 0),
+              }
+            : undefined,
         confidence: Number(appr.signal.confidence || 0),
         reasoning: Array.isArray(appr.signal.why) ? appr.signal.why.slice(0, 3) : [],
         status: 'ACTIVE',

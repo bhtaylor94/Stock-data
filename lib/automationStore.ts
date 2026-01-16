@@ -4,6 +4,7 @@ import path from 'path';
 import type { PresetId, StrategyId } from '@/strategies/registry';
 
 export type AutopilotMode = 'OFF' | 'PAPER' | 'LIVE' | 'LIVE_CONFIRM';
+export type ExecutionInstrument = 'STOCK' | 'OPTION';
 
 export type StrategyAutomationConfig = {
   enabled: boolean;
@@ -62,6 +63,33 @@ export type AutomationConfig = {
 
     // Safety: LIVE requires explicit arm window.
     liveArmExpiresAt?: string;
+
+    // Execution expression (strategy signals remain STOCK-first)
+    // STOCK: place equity orders
+    // OPTION: resolve a contract and place an options order (long calls/puts)
+    executionInstrument: ExecutionInstrument;
+
+    // Options execution caps + selection defaults (used when executionInstrument=OPTION)
+    options: {
+      // BUY -> CALL, SELL -> PUT (long premium only for v1)
+      mapSignalTo: 'CALL_FOR_BUY_PUT_FOR_SELL';
+      // target days-to-expiration for selection (nearest match)
+      targetDteDays: number;
+      // When greeks are available, prefer this delta (absolute)
+      targetAbsDelta: number;
+      // Liquidity / quality gates
+      minOpenInterest: number;
+      minVolume: number;
+      maxBidAskPct: number; // bid-ask spread % relative to mid
+
+      // Risk caps
+      defaultContracts: number;
+      maxContractsPerTrade: number;
+      maxPremiumNotionalUSD: number;
+
+      // If true, stops/targets are evaluated on the underlying price (recommended)
+      useUnderlyingForStopsTargets: boolean;
+    };
   };
   strategies: Record<string, StrategyAutomationConfig>;
   updatedAt: string;
@@ -135,6 +163,20 @@ export function defaultAutomationConfig(): AutomationConfig {
       haltNewEntries: false,
       haltReason: '',
       haltSetAt: undefined,
+
+      executionInstrument: 'STOCK',
+      options: {
+        mapSignalTo: 'CALL_FOR_BUY_PUT_FOR_SELL',
+        targetDteDays: 30,
+        targetAbsDelta: 0.35,
+        minOpenInterest: 1000,
+        minVolume: 100,
+        maxBidAskPct: 12,
+        defaultContracts: 1,
+        maxContractsPerTrade: 10,
+        maxPremiumNotionalUSD: 2500,
+        useUnderlyingForStopsTargets: true,
+      },
     },
     strategies: {},
     updatedAt: now,
@@ -148,7 +190,11 @@ export async function loadAutomationConfig(): Promise<AutomationConfig> {
   return {
     ...defaults,
     ...cfg,
-    autopilot: { ...defaults.autopilot, ...cfg.autopilot },
+    autopilot: {
+      ...defaults.autopilot,
+      ...cfg.autopilot,
+      options: { ...defaults.autopilot.options, ...((cfg.autopilot as any)?.options || {}) },
+    },
     strategies: cfg.strategies || {},
   };
 }

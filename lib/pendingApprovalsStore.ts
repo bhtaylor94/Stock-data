@@ -24,6 +24,10 @@ export type PendingApproval = {
   // Stored for explainability and exact replay
   signal: Signal;
 
+  // Execution expression (optional, default STOCK)
+  executionInstrument?: 'STOCK' | 'OPTION';
+  selectedOptionContract?: any;
+
   // When executed
   orderId?: string;
   executedAt?: string;

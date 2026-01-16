@@ -8,6 +8,7 @@ import {
   normalizeNoTradeWindows,
   type AutomationConfig,
   type AutopilotMode,
+  type ExecutionInstrument,
 } from '@/lib/automationStore';
 
 export const runtime = 'nodejs';
@@ -24,6 +25,10 @@ function isPresetId(v: any): v is PresetId {
 
 function isMode(v: any): v is AutopilotMode {
   return v === 'OFF' || v === 'PAPER' || v === 'LIVE' || v === 'LIVE_CONFIRM';
+}
+
+function isExecInstrument(v: any): v is ExecutionInstrument {
+  return v === 'STOCK' || v === 'OPTION';
 }
 
 export async function GET() {
@@ -121,6 +126,27 @@ export async function POST(req: NextRequest) {
             : ap.haltNewEntries === false
               ? undefined
               : (next.autopilot as any).haltSetAt,
+
+        // Execution expression
+        executionInstrument: isExecInstrument(ap.executionInstrument)
+          ? ap.executionInstrument
+          : (next.autopilot as any).executionInstrument || 'STOCK',
+        options: {
+          ...((next.autopilot as any).options || {}),
+          mapSignalTo: 'CALL_FOR_BUY_PUT_FOR_SELL',
+          targetDteDays: clampNum(ap.options?.targetDteDays, 1, 365, Number((next.autopilot as any).options?.targetDteDays ?? 30)),
+          targetAbsDelta: clampNum(ap.options?.targetAbsDelta, 0.05, 0.95, Number((next.autopilot as any).options?.targetAbsDelta ?? 0.35)),
+          minOpenInterest: clampNum(ap.options?.minOpenInterest, 0, 10000000, Number((next.autopilot as any).options?.minOpenInterest ?? 1000)),
+          minVolume: clampNum(ap.options?.minVolume, 0, 10000000, Number((next.autopilot as any).options?.minVolume ?? 100)),
+          maxBidAskPct: clampNum(ap.options?.maxBidAskPct, 0, 100, Number((next.autopilot as any).options?.maxBidAskPct ?? 12)),
+          defaultContracts: clampNum(ap.options?.defaultContracts, 1, 1000, Number((next.autopilot as any).options?.defaultContracts ?? 1)),
+          maxContractsPerTrade: clampNum(ap.options?.maxContractsPerTrade, 1, 2000, Number((next.autopilot as any).options?.maxContractsPerTrade ?? 10)),
+          maxPremiumNotionalUSD: clampNum(ap.options?.maxPremiumNotionalUSD, 0, 10000000, Number((next.autopilot as any).options?.maxPremiumNotionalUSD ?? 2500)),
+          useUnderlyingForStopsTargets:
+            typeof ap.options?.useUnderlyingForStopsTargets === 'boolean'
+              ? ap.options.useUnderlyingForStopsTargets
+              : Boolean((next.autopilot as any).options?.useUnderlyingForStopsTargets ?? true),
+        },
       };
     }
 
