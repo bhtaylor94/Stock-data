@@ -5,7 +5,7 @@ import type { PresetId, StrategyId } from '@/strategies/registry';
 import { loadAutomationConfig, isLiveArmed } from '@/lib/automationStore';
 import { placeMarketEquityOrder } from '@/lib/liveOrders';
 import { getPendingApproval, loadPendingApprovals, updatePendingApproval } from '@/lib/pendingApprovalsStore';
-import { upsertSuggestion } from '@/lib/trackerStore';
+import { upsertSuggestion, type TrackedSuggestion } from '@/lib/trackerStore';
 
 export const runtime = 'nodejs';
 
@@ -13,7 +13,7 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function signalToTrackedSuggestion(signal: Signal, presetId: PresetId) {
+function signalToTrackedSuggestion(signal: Signal, presetId: PresetId): TrackedSuggestion | null {
   const entry = Number(signal.tradePlan?.entry);
   const stop = Number(signal.tradePlan?.stop);
   const target = Number(signal.tradePlan?.target);
