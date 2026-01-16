@@ -16,16 +16,20 @@ export type RegimeDetails = {
   nearBreakout: boolean;
 };
 
+// MarketRegime (strategy spec) plus an internal fallback when no clear regime is detected.
+export type DetectedRegime = MarketRegime | 'MIXED';
+
 function safeNum(v: any): number {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
-export async function detectMarketRegime(symbol: string): Promise<{ ok: boolean; regime: MarketRegime; details: RegimeDetails }> {
+export async function detectMarketRegime(symbol: string): Promise<{ ok: boolean; regime: DetectedRegime; details: RegimeDetails }> {
   try {
     // Use a 1M window (fits swing + regime context) and 5m/15m resolution from your existing market fetcher.
-    const candles = await fetchStrategyCandles({ symbol, range: '1M' });
-    if (!Array.isArray(candles) || candles.length < 60) {
+    const r = await fetchStrategyCandles(symbol, '1M');
+    const candles = Array.isArray(r?.candles) ? r.candles : [];
+    if (candles.length < 60) {
       return {
         ok: true,
         regime: 'MIXED',
