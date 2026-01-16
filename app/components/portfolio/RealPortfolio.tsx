@@ -245,7 +245,7 @@ export function RealPortfolio({ onAnalyze, onTrade }: RealPortfolioProps = {}) {
       {/* Monthly P/L Calendar */}
       <PnlCalendar scope="live" />
 
-      {/* Live Orders {/* Live Orders & Activity (optional) */} Activity (optional) */}
+      {/* Live Orders & Activity (optional) */}
       <div className="p-6 rounded-2xl border border-slate-700/50 bg-slate-800/30">
         <div className="flex items-center justify-between">
           <div>
