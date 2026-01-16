@@ -46,8 +46,13 @@ function signalToTrackedSuggestion(
             optionSymbol: String(selectedOption?.optionSymbol || ''),
             expiration: String(selectedOption?.expiration || ''),
             strike: Number(selectedOption?.strike || 0),
-            optionType: String(selectedOption?.optionType || ''),
-            dte: Number(selectedOption?.dte || 0),
+            optionType:
+              String(selectedOption?.optionType || '').toUpperCase() === 'CALL'
+                ? 'CALL'
+                : String(selectedOption?.optionType || '').toUpperCase() === 'PUT'
+                  ? 'PUT'
+                  : undefined,
+            dte: Number(selectedOption?.dte || 0) || undefined,
           }
         : undefined,
     confidence: Number(signal.confidence || 0),
