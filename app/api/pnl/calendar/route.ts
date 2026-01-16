@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { loadSuggestions, type TrackedSuggestion } from '@/lib/trackerStore';
 import { computeRealizedPnlUsd, isClosedStatus } from '@/lib/pnl';
+import { computeBrokerTruthDailyRealizedPnl } from '@/lib/brokerTruth/pnlCalendar';
 
 export const runtime = 'nodejs';
 
@@ -22,9 +23,21 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const monthRaw = String(searchParams.get('month') || '').trim(); // YYYY-MM
     const scope = String(searchParams.get('scope') || 'live').toLowerCase(); // live|paper|all
+    const source = String(searchParams.get('source') || '').toLowerCase(); // broker|tracker
 
     const nowMonth = new Date().toLocaleDateString('en-CA', { timeZone: TZ }).slice(0, 7);
     const month = /^\d{4}-\d{2}$/.test(monthRaw) ? monthRaw : nowMonth;
+
+    // Prefer broker-truth for live/all unless explicitly forced to tracker.
+    const wantsBroker = source === 'broker' || (source !== 'tracker' && scope !== 'paper');
+
+    if (wantsBroker) {
+      const brokerResult = await computeBrokerTruthDailyRealizedPnl({ month, scope, timeZone: TZ });
+      if (brokerResult.ok) {
+        return NextResponse.json(brokerResult);
+      }
+      // Fall back to tracker-based P/L if broker truth fails (auth, rate limit, etc.).
+    }
 
     const all = await loadSuggestions();
     const closed = all.filter(s => isClosedStatus(s.status) && Boolean(s.closedAt) && Boolean(s.closedPrice));
@@ -52,6 +65,7 @@ export async function GET(req: NextRequest) {
       month,
       scope,
       timeZone: TZ,
+      source: 'TRACKER',
       days,
       meta: { asOf: new Date().toISOString(), tradesCount: filtered.length },
     });

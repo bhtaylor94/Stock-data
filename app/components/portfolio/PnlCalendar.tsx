@@ -6,6 +6,7 @@ type CalendarResp = {
   month: string; // YYYY-MM
   scope: string;
   timeZone: string;
+  source?: 'BROKER' | 'TRACKER';
   days: Record<string, { pnlUsd: number; trades: number }>;
   error?: string;
 };
@@ -60,7 +61,10 @@ export function PnlCalendar({ scope = 'live' }: { scope?: 'live' | 'paper' | 'al
       setLoading(true);
       setErr(null);
       try {
-        const resp = await fetch(`/api/pnl/calendar?month=${encodeURIComponent(ym)}&scope=${encodeURIComponent(scope)}`);
+        const src = scope === 'paper' ? 'tracker' : 'broker';
+        const resp = await fetch(
+          `/api/pnl/calendar?month=${encodeURIComponent(ym)}&scope=${encodeURIComponent(scope)}&source=${encodeURIComponent(src)}`
+        );
         const json: CalendarResp = await resp.json();
         if (!alive) return;
         if (!resp.ok || !json.ok) {
@@ -123,7 +127,9 @@ export function PnlCalendar({ scope = 'live' }: { scope?: 'live' | 'paper' | 'al
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-semibold text-white">Monthly P/L Calendar</div>
-          <div className="text-xs text-slate-400">Daily realized P/L from closed trades (scope: {scope}).</div>
+          <div className="text-xs text-slate-400">
+            Daily realized P/L (scope: {scope}) — source: {data?.source || (scope === 'paper' ? 'TRACKER' : 'BROKER')}.
+          </div>
         </div>
         <div className="flex items-center gap-2">
           <button
