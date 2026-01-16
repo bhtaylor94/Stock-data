@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import SignalsFeed from '@/app/components/signals/SignalsFeed';
+import { SignalsFeed } from '@/app/components/signals/SignalsFeed';
 
 type AutomationConfigResponse = { ok: boolean; config?: any; error?: string };
 type ApprovalsResponse = { ok: boolean; approvals?: any[]; error?: string };

@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import RealPortfolio from '@/app/components/portfolio/RealPortfolio';
-import PaperPortfolio from '@/app/components/portfolio/PaperPortfolio';
+import { RealPortfolio } from '@/app/components/portfolio/RealPortfolio';
+import { PaperPortfolio } from '@/app/components/portfolio/PaperPortfolio';
 
 function Tab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
