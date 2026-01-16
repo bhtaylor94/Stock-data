@@ -660,6 +660,14 @@ export function AutomationControls() {
                     <div className="text-xs text-slate-400 mt-1">
                       {p.action} {p.quantity} • conf {Number(p.signal?.confidence || 0).toFixed(0)} • est ${Number(p.estimatedNotionalUSD || 0).toFixed(0)}
                     </div>
+                    {p.executionInstrument === 'OPTION' && p.selectedOptionContract ? (
+                      <div className="text-xs text-slate-500 mt-1">
+                        OPTION • {String(p.selectedOptionContract.expiration || '')} • {Number(p.selectedOptionContract.strike || 0).toFixed(2)}
+                        {String(p.selectedOptionContract.optionType || '').toUpperCase().startsWith('C') ? 'C' : 'P'}
+                        <span className="text-slate-600"> • </span>
+                        {String(p.selectedOptionContract.optionSymbol || '')}
+                      </div>
+                    ) : null}
                     <div className="text-xs text-slate-500 mt-2">
                       {Array.isArray(p.signal?.why) ? p.signal.why.slice(0, 3).join(' • ') : ''}
                     </div>
