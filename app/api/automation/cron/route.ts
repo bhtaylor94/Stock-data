@@ -22,8 +22,10 @@ export async function GET(req: Request) {
       return NextResponse.json({ ok: false, error: 'Forbidden.' }, { status: 403 });
     }
 
-    const result = await runAutopilotTick({ dryRun: false });
-    return NextResponse.json({ ok: true, ...result });
+    const result: any = await runAutopilotTick({ dryRun: false });
+    // Avoid duplicate keys if the tick result already contains `ok`
+    const { ok: _ignored, ...rest } = result || {};
+    return NextResponse.json({ ok: true, ...rest });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 });
   }
