@@ -8,6 +8,7 @@ import { placeMarketEquityOrder } from '@/lib/liveOrders';
 import { appendAutomationRun } from '@/lib/automationRunsStore';
 import { detectMarketRegime } from '@/lib/regimeDetector';
 import { makeDedupKey, recordSignalFire, shouldSuppressSignal } from '@/lib/automationDedupStore';
+import { runTradeLifecycleSweep } from '@/lib/tradeLifecycle';
 
 export type AutopilotAction = {
   symbol: string;
@@ -165,6 +166,20 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
     if (!cfg.autopilot.enabled || cfg.autopilot.mode === 'OFF') {
       meta = { reason: 'autopilot_disabled', config: cfg.autopilot };
       return { ok: true, actions, meta };
+    }
+
+    // Trade lifecycle manager: update ACTIVE tracked trades (target/stop/time-stop/trailing)
+    // This runs before generating new signals so risk caps reflect any closures.
+    let lifecycle: any = null;
+    if ((cfg.autopilot as any).manageOpenTradesEnabled) {
+      lifecycle = await runTradeLifecycleSweep({
+        dryRun,
+        autopilotOnly: true,
+        timeStopDays: Number((cfg.autopilot as any).timeStopDays ?? 10),
+        enableTrailing: Boolean((cfg.autopilot as any).enableTrailingStop ?? true),
+        trailAfterR: Number((cfg.autopilot as any).trailAfterR ?? 1),
+        trailLockInR: Number((cfg.autopilot as any).trailLockInR ?? 0.1),
+      });
     }
 
     const existing = await loadSuggestions();
@@ -376,6 +391,7 @@ export async function runAutopilotTick(opts?: { dryRun?: boolean }): Promise<{ o
     }
 
     meta = {
+      lifecycle,
       evaluatedSymbols: symbols.length,
       evaluatedStrategies: enabledStrategies.length,
       candidates: signals.length,

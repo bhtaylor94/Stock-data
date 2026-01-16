@@ -98,6 +98,19 @@ export async function POST(req: NextRequest) {
         requireLiveAllowlist: typeof ap.requireLiveAllowlist === 'boolean' ? ap.requireLiveAllowlist : next.autopilot.requireLiveAllowlist,
         liveAllowlistSymbols: ap.liveAllowlistSymbols !== undefined ? normalizeSymbolList(ap.liveAllowlistSymbols) : next.autopilot.liveAllowlistSymbols,
         symbols: ap.symbols !== undefined ? normalizeSymbolList(ap.symbols) : next.autopilot.symbols,
+
+        // Trade lifecycle manager
+        manageOpenTradesEnabled:
+          typeof ap.manageOpenTradesEnabled === 'boolean'
+            ? ap.manageOpenTradesEnabled
+            : (next.autopilot as any).manageOpenTradesEnabled ?? true,
+        timeStopDays: clampNum(ap.timeStopDays, 0, 120, Number((next.autopilot as any).timeStopDays ?? 10)),
+        enableTrailingStop:
+          typeof ap.enableTrailingStop === 'boolean'
+            ? ap.enableTrailingStop
+            : (next.autopilot as any).enableTrailingStop ?? true,
+        trailAfterR: clampNum(ap.trailAfterR, 0, 10, Number((next.autopilot as any).trailAfterR ?? 1)),
+        trailLockInR: clampNum(ap.trailLockInR, 0, 5, Number((next.autopilot as any).trailLockInR ?? 0.1)),
       };
     }
 

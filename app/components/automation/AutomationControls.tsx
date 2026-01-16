@@ -32,6 +32,13 @@ type AutomationConfig = {
     requireLiveAllowlist: boolean;
     liveAllowlistSymbols: string[];
 
+    // Trade lifecycle manager
+    manageOpenTradesEnabled: boolean;
+    timeStopDays: number;
+    enableTrailingStop: boolean;
+    trailAfterR: number;
+    trailLockInR: number;
+
     liveArmExpiresAt?: string;
   };
   strategies: Record<string, { enabled: boolean; minConfidence?: number; symbols?: string[] }>;
@@ -69,6 +76,8 @@ export function AutomationControls() {
   const [runs, setRuns] = useState<any[]>([]);
   const [runsLoading, setRunsLoading] = useState(false);
   const [tickLoading, setTickLoading] = useState(false);
+  const [lifecycleLoading, setLifecycleLoading] = useState(false);
+  const [lifecycleResult, setLifecycleResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
 
@@ -151,6 +160,22 @@ export function AutomationControls() {
       setError(String(e?.message || e));
     } finally {
       setTickLoading(false);
+    }
+  };
+
+  const runLifecycle = async (dryRun: boolean) => {
+    setLifecycleLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/automation/lifecycle?dryRun=${dryRun ? 'true' : 'false'}`);
+      const data = await res.json();
+      if (!data.ok && res.status >= 400) throw new Error(data.error || 'Lifecycle run failed');
+      setLifecycleResult(data);
+      fetchRuns();
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setLifecycleLoading(false);
     }
   };
 
@@ -611,6 +636,108 @@ export function AutomationControls() {
             );
           })}
         </div>
+      </Section>
+
+      <Section
+        title="Trade Lifecycle"
+        subtitle="Manages ACTIVE tracked trades (targets, stops, time-stops, and a simple trailing lock-in)."
+      >
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-700/70 bg-slate-900/30 md:col-span-2">
+            <input
+              type="checkbox"
+              checked={Boolean(config.autopilot.manageOpenTradesEnabled)}
+              onChange={(e) => patchConfig({ autopilot: { manageOpenTradesEnabled: e.target.checked } })}
+              className="w-4 h-4"
+            />
+            <div>
+              <div className="font-medium">Enable trade manager</div>
+              <div className="text-xs text-slate-400">Runs automatically at the start of each tick.</div>
+            </div>
+          </label>
+
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400 mb-1">Time stop (days)</div>
+            <input
+              type="number"
+              min={0}
+              max={120}
+              value={config.autopilot.timeStopDays}
+              onChange={(e) => patchConfig({ autopilot: { timeStopDays: Number(e.target.value) } })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-sm"
+            />
+          </div>
+
+          <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <input
+              type="checkbox"
+              checked={Boolean(config.autopilot.enableTrailingStop)}
+              onChange={(e) => patchConfig({ autopilot: { enableTrailingStop: e.target.checked } })}
+              className="w-4 h-4"
+            />
+            <div>
+              <div className="font-medium">Trailing lock-in</div>
+              <div className="text-xs text-slate-400">After +R, tighten stop.</div>
+            </div>
+          </label>
+
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400 mb-1">Trail after (R)</div>
+            <input
+              type="number"
+              min={0}
+              max={10}
+              step={0.1}
+              value={config.autopilot.trailAfterR}
+              onChange={(e) => patchConfig({ autopilot: { trailAfterR: Number(e.target.value) } })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-sm"
+            />
+          </div>
+
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400 mb-1">Lock-in (R)</div>
+            <input
+              type="number"
+              min={0}
+              max={5}
+              step={0.05}
+              value={config.autopilot.trailLockInR}
+              onChange={(e) => patchConfig({ autopilot: { trailLockInR: Number(e.target.value) } })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-sm"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            onClick={() => runLifecycle(true)}
+            disabled={lifecycleLoading}
+            className="px-4 py-2 rounded-lg border border-slate-700 bg-slate-800/50 hover:bg-slate-700/50 text-sm"
+          >
+            {lifecycleLoading ? 'Running…' : 'Preview manager (dry-run)'}
+          </button>
+          <button
+            onClick={() => runLifecycle(false)}
+            disabled={lifecycleLoading}
+            className="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-500 to-sky-500 hover:from-emerald-600 hover:to-sky-600 text-white text-sm"
+          >
+            {lifecycleLoading ? 'Running…' : 'Run manager now'}
+          </button>
+        </div>
+
+        {lifecycleResult ? (
+          <div className="mt-4 p-4 rounded-xl border border-slate-700/70 bg-slate-950/30">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="font-semibold">Last lifecycle run</div>
+              <div className="flex items-center gap-2 text-xs text-slate-400">
+                <Badge>{lifecycleResult.meta?.dryRun ? 'DRY' : 'EXEC'}</Badge>
+                <Badge>closed {lifecycleResult.meta?.closed ?? 0}</Badge>
+                <Badge>stop updates {lifecycleResult.meta?.stopUpdates ?? 0}</Badge>
+              </div>
+            </div>
+            <div className="text-xs text-slate-500 mt-2">{JSON.stringify(lifecycleResult.meta)}</div>
+          </div>
+        ) : null}
       </Section>
 
       <Section

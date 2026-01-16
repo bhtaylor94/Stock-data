@@ -48,6 +48,13 @@ export type AutomationConfig = {
     requireLiveAllowlist: boolean;
     liveAllowlistSymbols: string[];
 
+    // Trade lifecycle manager
+    manageOpenTradesEnabled: boolean;
+    timeStopDays: number;
+    enableTrailingStop: boolean;
+    trailAfterR: number;
+    trailLockInR: number;
+
     // Safety: LIVE requires explicit arm window.
     liveArmExpiresAt?: string;
   };
@@ -113,6 +120,12 @@ export function defaultAutomationConfig(): AutomationConfig {
 
       requireLiveAllowlist: true,
       liveAllowlistSymbols: ['SPY', 'QQQ'],
+
+      manageOpenTradesEnabled: true,
+      timeStopDays: 10,
+      enableTrailingStop: true,
+      trailAfterR: 1,
+      trailLockInR: 0.1,
     },
     strategies: {},
     updatedAt: now,
