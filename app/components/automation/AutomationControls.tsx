@@ -16,6 +16,22 @@ type AutomationConfig = {
     defaultQuantity: number;
     maxNewPositionsPerTick: number;
     cooldownMinutes: number;
+
+    enableRegimeGate: boolean;
+    signalDedupMinutes: number;
+    dedupMinConfidenceDelta: number;
+
+    maxOpenPositionsTotal: number;
+    maxOpenPositionsPerSymbol: number;
+    maxTradesPerDay: number;
+    maxNotionalPerTradeUSD: number;
+
+    requireMarketHours: boolean;
+    noTradeWindows: { startHHMM: string; endHHMM: string; label?: string }[];
+
+    requireLiveAllowlist: boolean;
+    liveAllowlistSymbols: string[];
+
     liveArmExpiresAt?: string;
   };
   strategies: Record<string, { enabled: boolean; minConfidence?: number; symbols?: string[] }>;
@@ -50,6 +66,8 @@ export function AutomationControls() {
   const [config, setConfig] = useState<AutomationConfig | null>(null);
   const [strategies, setStrategies] = useState<StrategySpec[]>([]);
   const [tickResult, setTickResult] = useState<any>(null);
+  const [runs, setRuns] = useState<any[]>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
   const [tickLoading, setTickLoading] = useState(false);
   const [error, setError] = useState<string>('');
   const [success, setSuccess] = useState<string>('');
@@ -75,8 +93,23 @@ export function AutomationControls() {
     }
   };
 
+  const fetchRuns = async () => {
+    setRunsLoading(true);
+    try {
+      const res = await fetch('/api/automation/runs?limit=25');
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Failed to load runs');
+      setRuns(Array.isArray(data.runs) ? data.runs : []);
+    } catch {
+      // do not spam global error for runs
+    } finally {
+      setRunsLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchConfig();
+    fetchRuns();
   }, []);
 
   const patchConfig = async (patch: any) => {
@@ -113,6 +146,7 @@ export function AutomationControls() {
       const data = await res.json();
       if (!data.ok && res.status >= 400) throw new Error(data.error || 'Tick failed');
       setTickResult(data);
+      fetchRuns();
     } catch (e: any) {
       setError(String(e?.message || e));
     } finally {
@@ -153,6 +187,12 @@ export function AutomationControls() {
             className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/50 text-sm hover:bg-slate-700/50"
           >
             Refresh
+          </button>
+          <button
+            onClick={fetchRuns}
+            className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/50 text-sm hover:bg-slate-700/50"
+          >
+            Runs
           </button>
         </div>
       </div>
@@ -259,12 +299,154 @@ export function AutomationControls() {
           </div>
         </div>
 
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <input
+              type="checkbox"
+              checked={Boolean(config.autopilot.enableRegimeGate)}
+              onChange={(e) => patchConfig({ autopilot: { enableRegimeGate: e.target.checked } })}
+              className="w-4 h-4"
+            />
+            <div>
+              <div className="font-medium">Regime gating</div>
+              <div className="text-xs text-slate-400">Only run a strategy when its allowed market regime is detected.</div>
+            </div>
+          </label>
+
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400 mb-1">Signal dedup minutes</div>
+            <input
+              type="number"
+              min={0}
+              max={10080}
+              value={config.autopilot.signalDedupMinutes}
+              onChange={(e) => patchConfig({ autopilot: { signalDedupMinutes: Number(e.target.value) } })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-sm"
+            />
+            <div className="text-xs text-slate-500 mt-2">Suppress repeat signals within this window unless confidence improves.</div>
+          </div>
+
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400 mb-1">Dedup confidence delta</div>
+            <input
+              type="number"
+              min={0}
+              max={50}
+              value={config.autopilot.dedupMinConfidenceDelta}
+              onChange={(e) => patchConfig({ autopilot: { dedupMinConfidenceDelta: Number(e.target.value) } })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-sm"
+            />
+            <div className="text-xs text-slate-500 mt-2">Example: 5 = only re-alert if confidence rises by 5+.</div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400 mb-1">Max open positions (total)</div>
+            <input
+              type="number"
+              min={0}
+              max={250}
+              value={config.autopilot.maxOpenPositionsTotal}
+              onChange={(e) => patchConfig({ autopilot: { maxOpenPositionsTotal: Number(e.target.value) } })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-sm"
+            />
+          </div>
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400 mb-1">Max open positions (per symbol)</div>
+            <input
+              type="number"
+              min={0}
+              max={50}
+              value={config.autopilot.maxOpenPositionsPerSymbol}
+              onChange={(e) => patchConfig({ autopilot: { maxOpenPositionsPerSymbol: Number(e.target.value) } })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-sm"
+            />
+          </div>
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400 mb-1">Max trades / day</div>
+            <input
+              type="number"
+              min={0}
+              max={500}
+              value={config.autopilot.maxTradesPerDay}
+              onChange={(e) => patchConfig({ autopilot: { maxTradesPerDay: Number(e.target.value) } })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-sm"
+            />
+          </div>
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <div className="text-xs text-slate-400 mb-1">Max notional / trade (USD)</div>
+            <input
+              type="number"
+              min={0}
+              max={10000000}
+              value={config.autopilot.maxNotionalPerTradeUSD}
+              onChange={(e) => patchConfig({ autopilot: { maxNotionalPerTradeUSD: Number(e.target.value) } })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-sm"
+            />
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <input
+              type="checkbox"
+              checked={Boolean(config.autopilot.requireMarketHours)}
+              onChange={(e) => patchConfig({ autopilot: { requireMarketHours: e.target.checked } })}
+              className="w-4 h-4"
+            />
+            <div>
+              <div className="font-medium">Market hours only</div>
+              <div className="text-xs text-slate-400">Blocks ticks outside 9:30–16:00 ET</div>
+            </div>
+          </label>
+
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30 md:col-span-2">
+            <div className="text-xs text-slate-400 mb-1">No-trade windows (ET)</div>
+            <input
+              type="text"
+              value={(config.autopilot.noTradeWindows || []).map((w) => `${w.startHHMM}-${w.endHHMM}`).join(', ')}
+              onChange={(e) => patchConfig({ autopilot: { noTradeWindows: e.target.value } })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-sm"
+              placeholder="09:30-09:35, 15:55-16:00"
+            />
+            <div className="text-xs text-slate-500 mt-1">Comma-separated time ranges</div>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <label className="flex items-center gap-3 p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
+            <input
+              type="checkbox"
+              checked={Boolean(config.autopilot.requireLiveAllowlist)}
+              onChange={(e) => patchConfig({ autopilot: { requireLiveAllowlist: e.target.checked } })}
+              className="w-4 h-4"
+            />
+            <div>
+              <div className="font-medium">LIVE allowlist required</div>
+              <div className="text-xs text-slate-400">Blocks LIVE execution unless the symbol is allowlisted</div>
+            </div>
+          </label>
+
+          <div className="p-3 rounded-xl border border-slate-700/70 bg-slate-900/30 md:col-span-2">
+            <div className="text-xs text-slate-400 mb-1">LIVE allowlist symbols</div>
+            <input
+              type="text"
+              value={(config.autopilot.liveAllowlistSymbols || []).join(', ')}
+              onChange={(e) => patchConfig({ autopilot: { liveAllowlistSymbols: e.target.value } })}
+              className="w-full px-3 py-2 rounded-lg bg-slate-950/40 border border-slate-700 text-sm"
+              placeholder="SPY, QQQ"
+            />
+            <div className="text-xs text-slate-500 mt-1">Comma-separated tickers</div>
+          </div>
+        </div>
+
         <div className="mt-4 p-3 rounded-xl border border-slate-700/70 bg-slate-900/30">
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="font-medium">LIVE Safety</div>
               <div className="text-xs text-slate-400 mt-1">
-                LIVE requires <code className="text-slate-200">ALLOW_LIVE_AUTOPILOT=true</code> and an active arm window.
+                LIVE requires <code className="text-slate-200">ALLOW_LIVE_AUTOPILOT=true</code>, an active arm window, and passes risk gates (market-hours, caps, allowlist).
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -287,6 +469,74 @@ export function AutomationControls() {
             <div className="text-xs text-slate-500 mt-2">Arm expires: {new Date(config.autopilot.liveArmExpiresAt).toLocaleString()}</div>
           ) : null}
         </div>
+      </Section>
+
+      <Section
+        title="Recent runs"
+        subtitle="Audit log of the most recent autopilot ticks (best-effort; stored locally in this deployment)."
+      >
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div className="text-xs text-slate-500">
+            {runsLoading ? 'Loading…' : `Showing ${runs.length} / 25`}
+          </div>
+          <button
+            onClick={fetchRuns}
+            className="px-3 py-2 rounded-lg border border-slate-700 bg-slate-800/50 text-sm hover:bg-slate-700/50"
+          >
+            Refresh runs
+          </button>
+        </div>
+
+        {runs.length === 0 ? (
+          <div className="text-sm text-slate-400">No runs yet. Use “Preview” or “Execute tick now”.</div>
+        ) : (
+          <div className="space-y-2">
+            {runs.map((r: any) => {
+              const ok = Boolean(r.ok);
+              const started = r.startedAt ? new Date(r.startedAt).toLocaleString() : '';
+              const executed = r.meta?.executed ?? 0;
+              const candidates = r.meta?.candidates ?? 0;
+              return (
+                <details key={r.id} className="group p-3 rounded-xl border border-slate-700/70 bg-slate-950/20">
+                  <summary className="cursor-pointer list-none flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <span className={`text-xs px-2 py-0.5 rounded-full border ${ok ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200' : 'border-red-500/40 bg-red-500/10 text-red-200'}`}> 
+                        {ok ? 'OK' : 'ERROR'}
+                      </span>
+                      <span className="text-sm font-semibold text-slate-100">{r.mode}</span>
+                      <span className="text-xs text-slate-400">{r.dryRun ? 'DRY' : 'EXEC'}</span>
+                      <span className="text-xs text-slate-500">{started}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-slate-400">
+                      <Badge>candidates {candidates}</Badge>
+                      <Badge>executed {executed}</Badge>
+                    </div>
+                  </summary>
+
+                  {r.error ? <div className="mt-2 text-sm text-red-300">{r.error}</div> : null}
+
+                  <div className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {(r.actions || []).slice(0, 12).map((a: any, idx: number) => (
+                      <div key={idx} className="p-2 rounded-lg border border-slate-800 bg-slate-900/40">
+                        <div className="text-sm">
+                          <span className="font-semibold">{a.symbol || '—'}</span>
+                          <span className="text-slate-500"> · {a.strategyId}</span>
+                          {a.signal?.confidence !== undefined ? (
+                            <span className="text-slate-400"> · {Math.round(Number(a.signal.confidence))}%</span>
+                          ) : null}
+                        </div>
+                        <div className="text-xs text-slate-400 mt-1">{a.action} — {a.reason}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {(r.actions || []).length > 12 ? (
+                    <div className="text-xs text-slate-500 mt-2">Showing first 12 actions…</div>
+                  ) : null}
+                </details>
+              );
+            })}
+          </div>
+        )}
       </Section>
 
       <Section
@@ -419,7 +669,7 @@ export function AutomationControls() {
       <div className="p-4 rounded-xl border border-slate-700/60 bg-slate-900/20 text-sm text-slate-300">
         <div className="font-semibold mb-2">Notes</div>
         <ul className="list-disc pl-5 space-y-1 text-slate-400">
-          <li>Autopilot runs only when you click “Execute tick now” (for now). Later you can trigger <code>/api/automation/tick</code> via Vercel Cron or your Optiplex runner.</li>
+          <li>Autopilot runs when you click “Execute tick now”. You can also schedule it via <code>/api/automation/cron</code> (requires <code>AUTOMATION_CRON_ENABLED=true</code> and a Vercel Cron invocation).</li>
           <li>Paper mode writes tracked suggestions into the Portfolio tab (Tracker store).</li>
           <li>Live mode places a simple market order and also tracks the signal for auditability.</li>
         </ul>

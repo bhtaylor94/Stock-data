@@ -11,6 +11,12 @@ export type StrategyAutomationConfig = {
   symbols?: string[]; // optional override
 };
 
+export type NoTradeWindow = {
+  startHHMM: string; // e.g. "09:30" (America/New_York)
+  endHHMM: string; // e.g. "09:45" (America/New_York)
+  label?: string;
+};
+
 export type AutomationConfig = {
   version: 1;
   autopilot: {
@@ -22,6 +28,26 @@ export type AutomationConfig = {
     defaultQuantity: number;
     maxNewPositionsPerTick: number;
     cooldownMinutes: number;
+
+    // Signal quality controls
+    enableRegimeGate: boolean;
+    signalDedupMinutes: number;
+    dedupMinConfidenceDelta: number;
+
+    // Risk controls
+    maxOpenPositionsTotal: number;
+    maxOpenPositionsPerSymbol: number;
+    maxTradesPerDay: number;
+    maxNotionalPerTradeUSD: number;
+
+    // Time gates
+    requireMarketHours: boolean;
+    noTradeWindows: NoTradeWindow[];
+
+    // LIVE safety
+    requireLiveAllowlist: boolean;
+    liveAllowlistSymbols: string[];
+
     // Safety: LIVE requires explicit arm window.
     liveArmExpiresAt?: string;
   };
@@ -69,6 +95,24 @@ export function defaultAutomationConfig(): AutomationConfig {
       defaultQuantity: 1,
       maxNewPositionsPerTick: 2,
       cooldownMinutes: 60,
+
+      enableRegimeGate: true,
+      signalDedupMinutes: 120,
+      dedupMinConfidenceDelta: 5,
+
+      maxOpenPositionsTotal: 6,
+      maxOpenPositionsPerSymbol: 1,
+      maxTradesPerDay: 10,
+      maxNotionalPerTradeUSD: 5000,
+
+      requireMarketHours: true,
+      noTradeWindows: [
+        { startHHMM: '09:30', endHHMM: '09:35', label: 'Open buffer' },
+        { startHHMM: '15:55', endHHMM: '16:00', label: 'Close buffer' },
+      ],
+
+      requireLiveAllowlist: true,
+      liveAllowlistSymbols: ['SPY', 'QQQ'],
     },
     strategies: {},
     updatedAt: now,
@@ -76,11 +120,15 @@ export function defaultAutomationConfig(): AutomationConfig {
 }
 
 export async function loadAutomationConfig(): Promise<AutomationConfig> {
-  const cfg = await readJsonFile<AutomationConfig>(storePath(), defaultAutomationConfig());
-  // minimal normalization
-  if (!cfg.version) return defaultAutomationConfig();
-  if (!cfg.autopilot) return defaultAutomationConfig();
-  return cfg;
+  const defaults = defaultAutomationConfig();
+  const cfg = await readJsonFile<AutomationConfig>(storePath(), defaults);
+  if (!cfg || !cfg.version || !cfg.autopilot) return defaults;
+  return {
+    ...defaults,
+    ...cfg,
+    autopilot: { ...defaults.autopilot, ...cfg.autopilot },
+    strategies: cfg.strategies || {},
+  };
 }
 
 export async function saveAutomationConfig(cfg: AutomationConfig): Promise<void> {
@@ -94,6 +142,36 @@ export function normalizeSymbolList(input: any): string[] {
     .map((s) => String(s || '').trim().toUpperCase())
     .filter(Boolean)
     .slice(0, 200);
+}
+
+function normalizeHHMM(v: any): string | null {
+  const s = String(v || '').trim();
+  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(s);
+  if (!m) return null;
+  return `${m[1]}:${m[2]}`;
+}
+
+export function normalizeNoTradeWindows(input: any): NoTradeWindow[] {
+  const arr = Array.isArray(input) ? input : typeof input === 'string' ? input.split(',') : [];
+  const out: NoTradeWindow[] = [];
+  for (const item of arr) {
+    if (!item) continue;
+    if (typeof item === 'string') {
+      // format: "HH:MM-HH:MM"
+      const parts = item.split('-').map((x) => x.trim());
+      if (parts.length === 2) {
+        const a = normalizeHHMM(parts[0]);
+        const b = normalizeHHMM(parts[1]);
+        if (a && b) out.push({ startHHMM: a, endHHMM: b });
+      }
+      continue;
+    }
+    const a = normalizeHHMM((item as any).startHHMM);
+    const b = normalizeHHMM((item as any).endHHMM);
+    const label = String((item as any).label || '').trim();
+    if (a && b) out.push({ startHHMM: a, endHHMM: b, label: label || undefined });
+  }
+  return out.slice(0, 20);
 }
 
 export function isLiveArmed(cfg: AutomationConfig): boolean {

@@ -5,6 +5,7 @@ import {
   saveAutomationConfig,
   defaultAutomationConfig,
   normalizeSymbolList,
+  normalizeNoTradeWindows,
   type AutomationConfig,
   type AutopilotMode,
 } from '@/lib/automationStore';
@@ -83,6 +84,19 @@ export async function POST(req: NextRequest) {
         defaultQuantity: clampNum(ap.defaultQuantity, 1, 10000, next.autopilot.defaultQuantity),
         maxNewPositionsPerTick: clampNum(ap.maxNewPositionsPerTick, 0, 25, next.autopilot.maxNewPositionsPerTick),
         cooldownMinutes: clampNum(ap.cooldownMinutes, 0, 7 * 24 * 60, next.autopilot.cooldownMinutes),
+
+        enableRegimeGate:
+          typeof ap.enableRegimeGate === 'boolean' ? ap.enableRegimeGate : (next.autopilot as any).enableRegimeGate ?? true,
+        signalDedupMinutes: clampNum(ap.signalDedupMinutes, 0, 7 * 24 * 60, (next.autopilot as any).signalDedupMinutes ?? 120),
+        dedupMinConfidenceDelta: clampNum(ap.dedupMinConfidenceDelta, 0, 50, (next.autopilot as any).dedupMinConfidenceDelta ?? 5),
+        maxOpenPositionsTotal: clampNum(ap.maxOpenPositionsTotal, 0, 250, next.autopilot.maxOpenPositionsTotal),
+        maxOpenPositionsPerSymbol: clampNum(ap.maxOpenPositionsPerSymbol, 0, 50, next.autopilot.maxOpenPositionsPerSymbol),
+        maxTradesPerDay: clampNum(ap.maxTradesPerDay, 0, 500, next.autopilot.maxTradesPerDay),
+        maxNotionalPerTradeUSD: clampNum(ap.maxNotionalPerTradeUSD, 0, 10000000, next.autopilot.maxNotionalPerTradeUSD),
+        requireMarketHours: typeof ap.requireMarketHours === 'boolean' ? ap.requireMarketHours : next.autopilot.requireMarketHours,
+        noTradeWindows: ap.noTradeWindows !== undefined ? normalizeNoTradeWindows(ap.noTradeWindows) : next.autopilot.noTradeWindows,
+        requireLiveAllowlist: typeof ap.requireLiveAllowlist === 'boolean' ? ap.requireLiveAllowlist : next.autopilot.requireLiveAllowlist,
+        liveAllowlistSymbols: ap.liveAllowlistSymbols !== undefined ? normalizeSymbolList(ap.liveAllowlistSymbols) : next.autopilot.liveAllowlistSymbols,
         symbols: ap.symbols !== undefined ? normalizeSymbolList(ap.symbols) : next.autopilot.symbols,
       };
     }
