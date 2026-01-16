@@ -131,6 +131,8 @@ export function AutomationControls() {
       setRunsLoading(false);
     }
 
+  };
+
 
   const fetchPending = async () => {
     setPendingLoading(true);
