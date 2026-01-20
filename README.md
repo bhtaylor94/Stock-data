@@ -1,517 +1,253 @@
-# Schwab Automated Trading System
+# AI Hedge Fund v2.0 🧠📈
 
-[![Python Version](https://img.shields.io/badge/python-3.8%2B-blue)](https://www.python.org/downloads/)
-[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Code Style](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Trading](https://img.shields.io/badge/trading-automated-brightgreen)](https://github.com)
-[![Status](https://img.shields.io/badge/status-active-success)](https://github.com)
+Professional-grade stock analysis platform with institutional trading playbooks, evidence verification, and continuous calibration.
 
-A professional-grade automated trading system for stocks and options using Charles Schwab's APIs, inspired by QuantVue's proven automated trading methodologies.
+## 🚀 What's New in v2.0
 
-**⭐ Star this repo if you find it useful!**
+- ✨ **15+ Professional Trading Playbooks** - Trend Continuation, Mean Reversion, Breakouts, etc.
+- ✨ **Evidence Verification** - Cryptographic hashing for tamper-proof decisions
+- ✨ **Historical Snapshots** - JSONL-based tracking for long-term calibration
+- ✨ **Calibration APIs** - Measure forecast accuracy by confidence & setup
+- ✨ **Outcomes Tracking** - Forward returns at 1d, 3d, 5d, 10d, 14d horizons
+- ✨ **Market Regime Detection** - Adaptive strategies for TREND/RANGE/HIGH_VOL
 
----
+## 📚 Documentation
 
-## ⚠️ **CRITICAL DISCLAIMER**
+- **[Deployment Guide](./DEPLOYMENT_GUIDE.md)** - Fix build errors & deploy to Vercel
+- **[Application Overview](./APPLICATION_OVERVIEW.md)** - Complete feature guide (v2.0)
+- **[Decision Logic](./DECISION_LOGIC_EXPLAINED.md)** - Deep dive into AI scoring
 
-**THIS SOFTWARE IS PROVIDED FOR EDUCATIONAL PURPOSES ONLY. AUTOMATED TRADING INVOLVES SIGNIFICANT FINANCIAL RISK AND MAY NOT BE SUITABLE FOR ALL INVESTORS. YOU COULD LOSE ALL OF YOUR INVESTED CAPITAL.**
+## ✨ Core Features
 
-- Past performance is not indicative of future results
-- No strategy guarantees profits
-- Only trade with capital you can afford to lose
-- Test extensively in paper trading mode before going live
-- The authors assume no liability for any financial losses
+### Professional Trading Playbooks
 
-## 🚀 Features
+15+ institutional-quality setups with explicit rules:
 
-### Intelligent Market Scanner
+**Bullish**: Trend Continuation, Mean Reversion Bounce, Breakout Momentum, Bull Flag, Bollinger Squeeze  
+**Bearish**: Trend Continuation, Mean Reversion Fade, Breakdown, Bear Flag, Distribution Failure  
+**Adaptive**: Range Rotation, Volatility Spike, Dead Zone (NO_TRADE)
 
-**Automatically scans the top 100 S&P 500 stocks + 25 ETFs** to find the best trading opportunities!
+Each includes: Entry criteria, ATR stops, targets, invalidation levels, evidence logging
 
-- ✅ Dynamic symbol selection (not a static watchlist)
-- ✅ Ranks by liquidity, volatility, and momentum
-- ✅ Filters for quality execution (volume, spread, price)
-- ✅ Re-scans every 5 minutes
-- ✅ Always trading the most active stocks
-- ✅ See [MARKET_SCANNER.md](MARKET_SCANNER.md) for details
+### Evidence Verification
 
-### Trading Strategies (QuantVue-Inspired)
+Every recommendation includes a **cryptographic hash** of all inputs:
+- Tamper-proof decision trail
+- Full auditability
+- Transparent datapoints
+- Accountable predictions
 
-1. **Momentum Scalper** (Similar to Qscalper)
-   - Short-term momentum entries
-   - Volume-confirmed breakouts
-   - Quick profit taking
-   - RSI and EMA-based signals
+### Multi-Factor Analysis
 
-2. **Trend Follower** (Similar to Qzeus)
-   - Multiple timeframe trend confirmation
-   - EMA crossover entries
-   - MACD confirmation
-   - Longer hold times for trend continuation
+- **18-point scoring**: 9 technical + 9 fundamental
+- **Chart patterns**: Cup & Handle, H&S, Double Tops/Bottoms
+- **News sentiment**: Real-time scoring
+- **Analyst consensus**: Ratings + price targets
+- **Insider activity**: Net buying/selling
+- **Options analysis**: UOA, Greeks, chains
 
-3. **Volatility Breakout** (Similar to Qkronos_EVO)
-   - Bollinger Band breakouts
-   - ATR-based position sizing
-   - Dynamic profit targets
-   - Volume confirmation
+### Position Tracker
 
-### Risk Management
+- Real-time P&L tracking
+- Auto-status updates (HIT_TARGET, STOPPED_OUT)
+- Win rate by confidence bucket
+- Win rate by setup type
+- Forward return measurement
 
-- **Position Sizing Methods**:
-  - Fixed fractional
-  - Kelly Criterion
-  - Volatility-adjusted (ATR-based)
+### New APIs
 
-- **Stop Loss Options**:
-  - Static percentage stops
-  - Dynamic ATR-based stops
-  - Trailing stops
+**GET /api/calibration** - Performance metrics by bucket & setup  
+**GET /api/outcomes?ticker=AAPL** - Historical outcomes for ticker  
+**POST /api/outcomes** - Record closed position with P&L
 
-- **Take Profit Strategies**:
-  - Static targets
-  - Dynamic ATR-based targets
-  - Tiered exits (partial profit taking)
+## 🚀 Quick Start
 
-- **Portfolio Controls**:
-  - Maximum position size limits
-  - Total exposure limits
-  - Daily loss limits
-  - Maximum daily trades
-  - Martingale option (use with caution)
-
-### Execution Features
-
-- Fast order execution (modeled after QuantVue's <40ms execution)
-- Bracket orders (entry + stop + target in one order)
-- Trailing stop management
-- Real-time position monitoring
-- Automatic risk limit enforcement
-
-### Trading Modes
-
-1. **Paper Trading**: Simulate trades without real money
-2. **Live Trading**: Execute real trades with actual capital
-3. **Backtesting**: Test strategies on historical data (coming soon)
-
-## 📋 Prerequisites
-
-1. **Charles Schwab Account**
-   - Active brokerage account
-   - Account approved for API access
-
-2. **Schwab Developer Account**
-   - Register at [Schwab Developer Portal](https://developer.schwab.com)
-   - Create an application
-   - Get API Key and Secret
-
-3. **Python 3.8+**
-
-## 🛠️ Installation
-
-### 1. Clone or Download
-
+### Install
 ```bash
-git clone <your-repo-url>
-cd schwab_trading_app
+npm install
 ```
 
-### 2. Install Dependencies
+### Configure Environment
+Create `.env.local`:
+```env
+SCHWAB_APP_KEY=your_schwab_app_key
+SCHWAB_APP_SECRET=your_schwab_secret
+SCHWAB_REFRESH_TOKEN=your_refresh_token
+FINNHUB_API_KEY=your_finnhub_key
+```
 
+Get API keys:
+- **Schwab**: [developer.schwab.com](https://developer.schwab.com) (requires brokerage account)
+- **Finnhub**: [finnhub.io](https://finnhub.io) (free tier: 60 calls/min)
+
+### Run
 ```bash
-pip install -r requirements.txt
+npm run dev
 ```
 
-### 3. Configure Environment Variables
+Visit [http://localhost:3000](http://localhost:3000)
 
-Create a `.env` file in the project root:
+### Deploy to Vercel
 
-```bash
-# Schwab API Credentials
-SCHWAB_APP_KEY=your_app_key_here
-SCHWAB_APP_SECRET=your_app_secret_here
-SCHWAB_CALLBACK_URL=https://127.0.0.1:8182
-SCHWAB_ACCOUNT_NUMBER=your_account_number
+See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for step-by-step instructions.
 
-# Optional: Custom token storage path
-# SCHWAB_TOKEN_PATH=./data/token.json
-```
+## 📊 API Endpoints
 
-**Important**: Never commit your `.env` file to version control!
+### Stock Analysis
+**GET /api/stock/[ticker]**  
+Returns comprehensive analysis with:
+- Real-time quote
+- Technical indicators (18 factors)
+- Fundamental metrics (9 factors)
+- Chart patterns
+- News sentiment
+- Analyst ratings
+- Setup recommendation
+- Evidence packet (with hash)
 
-### 4. Initial Authentication
+### Options Analysis
+**GET /api/options/[ticker]**  
+Returns options intelligence with:
+- Options chains
+- Greeks (Delta, Gamma, Theta, Vega)
+- Unusual options activity
+- Specific contract recommendations
 
-Run the authentication setup (one-time process):
+### Position Tracker
+**GET /api/tracker**  
+All tracked positions with real-time P&L
 
-```bash
-python main.py --auth
-```
+**POST /api/tracker**  
+Track a new position
 
-This will:
-1. Generate an authorization URL
-2. Open it in your browser
-3. Prompt you to log in to Schwab
-4. Save authentication tokens for future use
+**PUT /api/tracker**  
+Update position status
 
-**Note**: Tokens expire after 7 days. The system auto-refreshes access tokens every 25 minutes while running. If offline for more than 7 days, re-run authentication.
+**DELETE /api/tracker?id=[id]**  
+Remove tracked position
 
-## 🎯 Usage
+### Calibration & Outcomes (NEW!)
+**GET /api/calibration**  
+Performance metrics by confidence bucket and setup type
 
-### Paper Trading (Recommended to Start)
+**GET /api/outcomes?ticker=AAPL**  
+Historical outcomes for a ticker
 
-```bash
-python main.py --mode paper
-```
+**POST /api/outcomes**  
+Record closed position with realized P&L
 
-Test strategies without risking real money. All trades are simulated but follow real market data.
+## 🎓 How It Works
 
-### Live Trading
+### Setup Selection Process
 
-```bash
-python main.py --mode live
-```
+1. **Market Data** - Fetch from Schwab + Finnhub
+2. **Indicators** - Calculate technical + fundamental metrics
+3. **Regime Detection** - Classify as TREND / RANGE / HIGH_VOL
+4. **Setup Evaluation** - Score all 15+ playbooks
+5. **Best Setup** - Select highest-scoring non-conflicting setup
+6. **Confidence** - Calibrate based on evidence strength
+7. **Evidence** - Generate packet with SHA-256 hash
+8. **Snapshot** - Save to JSONL for calibration
+9. **Display** - Show recommendation to user
 
-**⚠️ WARNING**: This uses real money! Make sure you've thoroughly tested in paper mode first.
-
-### Check Status
-
-```bash
-python main.py --status
-```
-
-Shows:
-- Account information
-- Active positions
-- Daily P&L
-- Strategy performance
-- Win rates
-
-### Stop Trading
-
-Press `Ctrl+C` to gracefully shut down the trading engine. All positions will remain open but monitoring will stop.
-
-## ⚙️ Configuration
-
-Edit `config/config.py` to customize:
-
-### Risk Management
-
-```python
-@dataclass
-class RiskManagementConfig:
-    risk_profile: RiskProfile = RiskProfile.MODERATE  # CONSERVATIVE, MODERATE, AGGRESSIVE
-    
-    # Position sizing
-    max_position_size_pct: float = 0.10  # Max 10% per position
-    max_total_exposure_pct: float = 0.50  # Max 50% total
-    
-    # Stop loss
-    enable_stop_loss: bool = True
-    stop_loss_type: str = "dynamic"  # "dynamic" or "static"
-    static_stop_loss_pct: float = 0.02  # 2%
-    dynamic_stop_loss_atr_multiplier: float = 2.0
-    
-    # Take profit
-    take_profit_type: str = "tiered"  # "tiered", "static", "dynamic"
-    
-    # Limits
-    max_daily_loss_pct: float = 0.05  # Stop if down 5%
-    max_daily_trades: int = 20
-```
-
-### Active Strategies
-
-```python
-@dataclass
-class StrategyConfig:
-    active_strategies: List[StrategyType] = [
-        StrategyType.MOMENTUM_SCALPER,
-        StrategyType.TREND_FOLLOWER,
-        StrategyType.VOLATILITY_BREAKOUT
-    ]
-```
-
-### Watchlist
-
-```python
-@dataclass
-class DataConfig:
-    stream_symbols: List[str] = [
-        'SPY', 'QQQ', 'IWM',
-        'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA',
-        'TSLA', 'AMD', 'META'
-    ]
-```
-
-## 📊 Architecture
+### Confidence Calibration
 
 ```
-schwab_trading_app/
-├── main.py                 # Main entry point
-├── config/
-│   └── config.py          # Configuration classes
-├── core/
-│   ├── schwab_client.py   # Schwab API client
-│   ├── order_builder.py   # Order construction
-│   ├── risk_manager.py    # Risk management
-│   └── trading_engine.py  # Main trading engine
-├── strategies/
-│   └── strategies.py      # Trading strategies
-├── data/                  # Token and data storage
-└── logs/                  # Log files
+Base Confidence (from combined score 0-18)
+    + News sentiment (±5%)
+    + Analyst consensus (±5%)
+    + Insider activity (±3%)
+    + Price target upside (±5%)
+    + Chart patterns (±10-15%)
+    + Regime adjustments (±4%)
+    + Completeness check (±4-12%)
+    + Agreement threshold (±6-10%)
+    = Final Confidence (capped 25-95%)
 ```
 
-## 🔧 API Details
+### Example
 
-### Schwab API Endpoints Used
+**AAPL at $180**:
+- Technical: 8/9
+- Fundamental: 8/9
+- Combined: 16/18 → Base 85%
+- Bullish news → +5%
+- Analysts 85% buy → +5%
+- Insider buying → +3%
+- Cup & Handle → +12%
+- **Final: 95% (capped)**
+- **Setup: Trend Continuation Bull**
 
-**Accounts & Trading Production:**
-- `/accounts/accountNumbers` - Get account hashes
-- `/accounts/{hash}` - Get account details
-- `/accounts/{hash}/orders` - Place/manage orders
-- `/accounts/{hash}/orders/{id}` - Get order status
-
-**Market Data Production:**
-- `/quotes/{symbol}` - Real-time quotes
-- `/quotes` - Multiple quotes
-- `/pricehistory` - Historical data
-- `/chains` - Option chains
-
-### Rate Limits
-
-- Market data: ~120 requests/minute
-- Order placement: 2-4 requests/second
-- The system implements automatic rate limiting
-
-## 📈 Strategy Details
-
-### Momentum Scalper
-
-**Entry Conditions:**
-- RSI < 30 (oversold) OR RSI > 70 (overbought)
-- EMA8 > EMA21 (uptrend) OR EMA8 < EMA21 (downtrend)
-- Volume > 1.5x average
-
-**Exit Conditions:**
-- Stop: 1.5x ATR from entry
-- Target: 3.0x ATR from entry (2:1 R:R)
-
-**Typical Hold Time:** 15-30 minutes
-
-### Trend Follower
-
-**Entry Conditions:**
-- EMA8 > EMA21 > EMA50 (strong uptrend)
-- MACD > Signal (bullish momentum)
-- Price above EMA8
-
-**Exit Conditions:**
-- Stop: 2% below EMA21
-- Target: 4x ATR from entry
-
-**Typical Hold Time:** Hours to days
-
-### Volatility Breakout
-
-**Entry Conditions:**
-- Price breaks above/below Bollinger Bands
-- Volume > 1.5x average
-- Momentum confirmation
-
-**Exit Conditions:**
-- Stop: Bollinger midline
-- Target: 2.5x ATR from entry
-
-**Typical Hold Time:** 30 minutes to 2 hours
-
-## 🛡️ Risk Management Best Practices
-
-1. **Start with Paper Trading**
-   - Test for at least 2 weeks
-   - Verify strategy performance
-   - Check risk controls are working
-
-2. **Use Conservative Settings Initially**
-   - Start with `RiskProfile.CONSERVATIVE`
-   - Keep position sizes small (5% or less)
-   - Use tight stop losses
-
-3. **Monitor Daily Limits**
-   - Set `max_daily_loss_pct` to 2-5%
-   - Limit `max_daily_trades` to 10-20
-   - The system will auto-stop if limits hit
-
-4. **Diversify**
-   - Trade multiple symbols
-   - Use multiple strategies
-   - Don't concentrate in one sector
-
-5. **Regular Review**
-   - Check daily performance
-   - Review trade logs
-   - Adjust parameters as needed
-
-## 🔍 Monitoring & Logging
-
-### Log Files
-
-- Location: `./logs/trading.log`
-- Includes:
-  - All trades executed
-  - Signals generated
-  - Errors and warnings
-  - Risk limit violations
-
-### Real-time Status
-
-```bash
-# Check status while running
-python main.py --status
-```
-
-### Example Log Output
+## 🏗️ Architecture
 
 ```
-2026-01-20 10:30:15 - MomentumScalper - INFO - Signal generated for AAPL: LONG
-2026-01-20 10:30:16 - RiskManager - INFO - Position size calculated: 100 shares
-2026-01-20 10:30:17 - TradingEngine - INFO - [PAPER] BUY 100 AAPL @ $150.25
-2026-01-20 10:30:17 - TradingEngine - INFO - [PAPER] Stop: $147.50, Target: $156.75
+Next.js 14 (App Router) + TypeScript
+    ├── Schwab API (real-time quotes, options)
+    ├── Finnhub API (fundamentals, news, analysts)
+    ├── Setup Registry (15+ playbooks)
+    ├── Evidence Verification (SHA-256 hashing)
+    ├── Snapshot Store (JSONL persistence)
+    └── Calibration Engine (outcomes measurement)
 ```
 
-## 🐛 Troubleshooting
+**Storage**:
+- File-based JSON (tracker positions)
+- JSONL (historical snapshots)
+- TTL caches (API responses)
 
-### Authentication Errors
+## 🔧 Customization
 
-**Problem**: "No valid tokens found"
+### Adjust Setup Criteria
+Edit `/lib/setupRegistry.ts`:
+- Modify entry/exit rules
+- Change ATR multipliers
+- Add custom playbooks
 
-**Solution**: 
-```bash
-python main.py --auth
-```
+### Change Confidence Thresholds
+Edit `/app/api/stock/[ticker]/route.ts`:
+- Lines 60-84: Confidence calibration
+- Lines 1095-1303: Recommendation generation
 
-**Problem**: "Refresh token expired"
+### Configure Storage
+Set environment variables:
+- `TRACKER_STORE_PATH` - Custom tracker storage path
+- `AIHF_SNAPSHOT_PATH` - Custom snapshot storage path
 
-**Solution**: Re-authenticate (tokens expire after 7 days of inactivity)
+## ⚠️ Deployment Fix
 
-### API Rate Limiting
+**Problem**: Original v1.0 failed with ES5 strict mode error
 
-**Problem**: "Rate limit reached"
+**Solution**: Added `"target": "ES2017"` to `tsconfig.json`
 
-**Solution**: The system auto-handles this. If you see frequent rate limit warnings, reduce:
-- Number of symbols in watchlist
-- Frequency of data requests
-- Number of active strategies
+See [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) for details.
 
-### Order Rejections
+## 📈 Performance Metrics
 
-**Problem**: Orders being rejected
+Track and measure:
+- Win rate by confidence bucket (HIGH/MED/LOW)
+- Win rate by setup type
+- Average P&L by strategy
+- Forward returns at multiple horizons
+- Forecast accuracy over time
 
-**Check**:
-1. Sufficient buying power
-2. Symbol is tradable
-3. Market hours (extended hours if enabled)
-4. Order size within limits
+## ⚠️ Disclaimers
 
-### No Signals Generated
+**For educational purposes only. Not financial advice.**
 
-**Problem**: System running but no trades
+This application provides analysis based on publicly available data and technical indicators. It does not constitute investment advice, financial advice, trading advice, or any other sort of advice.
 
-**Possible Reasons**:
-1. Market conditions don't meet strategy criteria
-2. Already holding maximum positions
-3. Daily loss limit reached
-4. Risk limits preventing new trades
-
-**Solution**: Check logs and reduce strategy entry filters
-
-## 📚 Additional Resources
-
-- [Schwab API Documentation](https://developer.schwab.com)
-- [QuantVue Documentation](https://docs.quantvue.io)
-- [Risk Management Principles](https://www.investopedia.com/terms/r/riskmanagement.asp)
-
-## 🤝 Contributing
-
-This is a personal trading system. Modify and adapt to your needs. Share improvements with proper risk disclaimers.
+Always conduct your own research and consult with qualified financial advisors before making investment decisions.
 
 ## 📄 License
 
-Use at your own risk. No warranty provided. Not financial advice.
+MIT License - See LICENSE file for details
 
-## 💬 Support
+## 🆘 Support
 
-For Schwab API issues: traderapi@schwab.com
-
-For trading questions: Consult a licensed financial advisor
-
----
-
-## 🎓 Learning & Development
-
-### Recommended Learning Path
-
-1. **Week 1-2**: Paper trading with conservative settings
-2. **Week 3-4**: Test different strategies and risk profiles
-3. **Week 5-6**: Optimize parameters based on results
-4. **Week 7+**: Consider live trading with minimal capital
-
-### Performance Metrics to Track
-
-- Win rate (target: 55%+)
-- Average R:R ratio (target: 2:1 or better)
-- Maximum drawdown
-- Sharpe ratio
-- Daily/weekly P&L
-
-### Strategy Optimization
-
-Modify strategy parameters in `strategies/strategies.py`:
-
-```python
-class MomentumScalper(BaseStrategy):
-    def __init__(self, config, risk_manager):
-        super().__init__("MomentumScalper", config, risk_manager)
-        # Customize these
-        self.min_rsi = 30
-        self.max_rsi = 70
-        self.min_volume_ratio = 1.5
-```
-
-## 🔐 Security Best Practices
-
-1. **Never** share your API keys or tokens
-2. **Never** commit `.env` file to version control
-3. Store tokens securely
-4. Use strong passwords for Schwab account
-5. Enable two-factor authentication
-6. Regularly rotate API keys
-7. Monitor account activity daily
-
-## 📞 Emergency Procedures
-
-### If System Malfunctions
-
-1. Press `Ctrl+C` to stop the engine
-2. Log in to Schwab website
-3. Manually close positions if needed
-4. Review logs to identify issue
-
-### If Unable to Stop
-
-1. Kill the process: `pkill -f main.py`
-2. Access Schwab website directly
-3. Use mobile app as backup
-
-### Position Management
-
-Even with the system stopped, positions remain open. Manage them via:
-- Schwab website
-- Schwab mobile app
-- Schwab customer service
+- **Build errors?** → [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md)
+- **Feature questions?** → [APPLICATION_OVERVIEW.md](./APPLICATION_OVERVIEW.md)
+- **Algorithm questions?** → [DECISION_LOGIC_EXPLAINED.md](./DECISION_LOGIC_EXPLAINED.md)
 
 ---
 
-**Remember**: This is a powerful tool that can make or lose money quickly. Always practice proper risk management and never trade more than you can afford to lose.
-
-**Questions?** Review the code, check logs, and test thoroughly in paper mode before going live.
-
-Happy Trading! 🚀
+**v2.0** - Professional trading playbooks + Evidence verification + Continuous calibration 🚀
