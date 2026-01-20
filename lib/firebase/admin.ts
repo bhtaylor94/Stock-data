@@ -1,22 +1,23 @@
 import { cert, getApps, initializeApp } from 'firebase-admin/app';
-import { getFirestore as _getFirestore } from 'firebase-admin/firestore';
+import { getFirestore } from 'firebase-admin/firestore';
 
-function required(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env var: ${name}`);
+function mustEnv(name: string): string {
+  const v = (process.env[name] || '').toString();
+  if (!v) throw new Error(['Missing env var: ', name].join(''));
   return v;
 }
 
-export function getFirestore() {
+export function getAdminDb() {
   if (!getApps().length) {
-    const projectId = required('FIREBASE_PROJECT_ID');
-    const clientEmail = required('FIREBASE_CLIENT_EMAIL');
-    const privateKeyRaw = required('FIREBASE_PRIVATE_KEY');
+    const projectId = mustEnv('FIREBASE_PROJECT_ID');
+    const clientEmail = mustEnv('FIREBASE_CLIENT_EMAIL');
+    const privateKeyRaw = mustEnv('FIREBASE_PRIVATE_KEY');
     const privateKey = privateKeyRaw.replace(/\\n/g, '\n');
 
     initializeApp({
       credential: cert({ projectId, clientEmail, privateKey }),
     });
   }
-  return _getFirestore();
+
+  return getFirestore();
 }
