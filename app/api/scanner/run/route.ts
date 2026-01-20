@@ -6,13 +6,19 @@ import { saveSignal } from '@/lib/storage/signals';
 export const dynamic = 'force-dynamic';
 
 export async function POST() {
-  const results = [];
+  let signals = 0;
+
   for (const symbol of UNIVERSE) {
     const signal = await runStrategiesForSymbol(symbol);
     if (signal) {
       await saveSignal(signal);
-      results.push(signal);
+      signals++;
     }
   }
-  return NextResponse.json({ ok: true, scanned: UNIVERSE.length, signals: results.length });
+
+  return NextResponse.json({
+    ok: true,
+    scanned: UNIVERSE.length,
+    signals
+  });
 }

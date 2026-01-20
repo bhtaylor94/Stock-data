@@ -1,6 +1,11 @@
-import { buildTrendRiderSignal } from './trendRider';
-
 export async function runStrategiesForSymbol(symbol: string) {
-  // Future: regime gating + multi-strategy fan-out
-  return buildTrendRiderSignal(symbol);
+  // Placeholder deterministic signal
+  return {
+    symbol,
+    action: "NO_TRADE",
+    confidence: 0,
+    strategy: "NONE",
+    reasons: [],
+    scannedAt: Date.now()
+  };
 }

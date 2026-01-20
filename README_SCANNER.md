@@ -1,15 +1,12 @@
-Market Scanner v1 (Locked Scope)
+Market Scanner v1 (Fixed)
 
-What this implements:
-- Fixed universe (Top 100 S&P + major ETFs)
-- 2-minute scan cadence (cron-ready)
-- Deterministic strategy evaluation
-- Explainable signal output
-- Firebase persistence (signals only)
+- Full universe scan (Top S&P + ETFs)
+- Manual trigger via /api/scanner/run
+- Firebase-backed persistence
+- No cron required
+- No trading / options / automation
 
-What this does NOT do:
-- No trading
-- No options execution
-- No automation toggles
-
-This is the foundation layer.
+This version fixes:
+- Path alias resolution
+- Missing tsconfig
+- Build-time module errors
