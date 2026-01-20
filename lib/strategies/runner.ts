@@ -1,5 +1,5 @@
 export async function runStrategiesForSymbol(symbol: string) {
-  // Placeholder deterministic signal
+  // TODO: Replace with your real strategy engine; kept deterministic for now.
   return {
     symbol,
     action: "NO_TRADE",

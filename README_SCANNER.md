@@ -1,12 +1,12 @@
-Market Scanner v1 (Fixed)
+Market Scanner v1 (Fixed2)
 
-- Full universe scan (Top S&P + ETFs)
-- Manual trigger via /api/scanner/run
-- Firebase-backed persistence
-- No cron required
-- No trading / options / automation
+Fixes:
+- Adds lib/firebase/admin.ts used by lib/storage/signals.ts
+- Keeps tsconfig path alias @/* working on Vercel
+- Scanner endpoint runs in Node runtime (firebase-admin required)
 
-This version fixes:
-- Path alias resolution
-- Missing tsconfig
-- Build-time module errors
+Endpoint:
+POST /api/scanner/run
+
+Free Vercel compatible:
+- No cron required; trigger manually for now.

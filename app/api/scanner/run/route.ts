@@ -4,6 +4,7 @@ import { runStrategiesForSymbol } from '@/lib/strategies/runner';
 import { saveSignal } from '@/lib/storage/signals';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
 export async function POST() {
   let signals = 0;
@@ -16,9 +17,5 @@ export async function POST() {
     }
   }
 
-  return NextResponse.json({
-    ok: true,
-    scanned: UNIVERSE.length,
-    signals
-  });
+  return NextResponse.json({ ok: true, scanned: UNIVERSE.length, signals });
 }
