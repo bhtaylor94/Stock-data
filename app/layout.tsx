@@ -1,11 +1,10 @@
 import type { Metadata } from 'next'
 import './globals.css'
 import { StreamProvider } from './contexts/StreamContext'
-import AppShell from './components/shell/AppShell'
 
 export const metadata: Metadata = {
-  title: 'Strategy Automation Trading Platform',
-  description: 'Strategy-first signal → gate → execute → manage → reconcile platform (broker-truth aligned).',
+  title: 'AI Hedge Fund - Stock & Options Analysis',
+  description: 'Real-time stock analysis with fundamentals, technical indicators, and options intelligence',
 }
 
 export default function RootLayout({
@@ -17,7 +16,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="bg-slate-950 text-slate-100">
         <StreamProvider>
-          <AppShell>{children}</AppShell>
+          {children}
         </StreamProvider>
       </body>
     </html>

@@ -1,6 +1,5 @@
 import { getSchwabAccessToken, schwabFetchJson } from '@/lib/schwab';
 import { placeMarketEquityOrder, placeMarketOptionOrder } from '@/lib/liveOrders';
-import { loadAutomationConfig } from '@/lib/automationStore';
 import { loadSuggestions, updateSuggestion, type TrackedSuggestion } from '@/lib/trackerStore';
 import { TTLCache } from '@/lib/cache';
 
@@ -89,25 +88,6 @@ function getOptionOrderSymbol(s: TrackedSuggestion): string {
   return String((s as any)?.optionContract?.optionSymbol || (s as any)?.evidencePacket?.selectedOptionContract?.optionSymbol || '').trim();
 }
 
-function getOptionEntryPremium(s: TrackedSuggestion): number {
-  const brokerAvg = asNumber((s as any)?.broker?.averageFillPrice, NaN);
-  if (Number.isFinite(brokerAvg) && brokerAvg > 0) return brokerAvg;
-  const ask = asNumber((s as any)?.optionContract?.entryAsk, NaN);
-  if (Number.isFinite(ask) && ask > 0) return ask;
-  const selAsk = asNumber((s as any)?.evidencePacket?.selectedOptionContract?.ask, NaN);
-  if (Number.isFinite(selAsk) && selAsk > 0) return selAsk;
-  const selMid = asNumber((s as any)?.evidencePacket?.selectedOptionContract?.mid, NaN);
-  if (Number.isFinite(selMid) && selMid > 0) return selMid;
-  return NaN;
-}
-
-function minutesInTrade(s: TrackedSuggestion): number {
-  const iso = String((s as any)?.broker?.enteredTime || (s as any)?.createdAt || '').trim();
-  const t = iso ? Date.parse(iso) : NaN;
-  if (!Number.isFinite(t)) return NaN;
-  return Math.max(0, Math.floor((Date.now() - t) / 60000));
-}
-
 function hasExitOrder(s: TrackedSuggestion): boolean {
   return Boolean(String((s as any)?.broker?.exitOrderId || '').trim());
 }
@@ -145,25 +125,8 @@ export async function runTradeLifecycleSweep(opts?: {
   const active = all.filter((s) => String((s as any)?.status || '') === 'ACTIVE');
   const rows = autopilotOnly ? active.filter(isAutopilotRow) : active;
 
-  // Options exit policy (broker truth aware)
-  const cfg = await loadAutomationConfig();
-  const optPolicy = (cfg.autopilot as any)?.options || {};
-  const optTakeProfitPct = Math.max(0, Number(optPolicy.takeProfitPct ?? 0.1));
-  const optStopLossPct = Math.max(0, Number(optPolicy.stopLossPct ?? 0.1));
-  const optTimeStopMinutes = Math.max(0, Number(optPolicy.timeStopMinutes ?? 0));
-  const optUsePremiumStops = optTakeProfitPct > 0 || optStopLossPct > 0 || optTimeStopMinutes > 0;
-
   const tickers = rows.map((s) => String((s as any)?.ticker || '').toUpperCase()).filter(Boolean);
   const prices = await fetchQuotePrices(tickers);
-
-  const optionSymbols = optUsePremiumStops
-    ? rows
-        .filter(isOptionTrade)
-        .map((s) => getOptionOrderSymbol(s))
-        .map((s) => String(s || '').trim())
-        .filter(Boolean)
-    : [];
-  const optionPrices = optionSymbols.length ? await fetchQuotePrices(optionSymbols) : {};
 
   const actions: TradeLifecycleAction[] = [];
   let closed = 0;
@@ -223,75 +186,6 @@ export async function runTradeLifecycleSweep(opts?: {
     if (!Number.isFinite(px)) {
       actions.push({ type: 'SKIP', id, ticker, reason: 'No quote price available' });
       continue;
-    }
-
-    // Options: premium-based exits (TP/SL/Time-stop) based on the actual option price.
-    if (optUsePremiumStops && isOptionTrade(s)) {
-      const optSym = getOptionOrderSymbol(s);
-      const optPx = optSym ? asNumber(optionPrices[optSym], NaN) : NaN;
-      const entryPrem = getOptionEntryPremium(s);
-      const mins = minutesInTrade(s);
-
-      // Time stop (minutes)
-      if (optTimeStopMinutes > 0 && Number.isFinite(mins) && mins >= optTimeStopMinutes) {
-        if (executeLiveExits && isLiveBrokerTrade(s)) {
-          const r = await submitExitIfLive(s, ticker, 'time_stop_minutes');
-          if (r.ok && r.orderId && r.orderId !== 'dry_run') {
-            actions.push({ type: 'EXIT_SUBMITTED', id, ticker, orderId: r.orderId, reason: `Options time-stop (${optTimeStopMinutes}m)` });
-            continue;
-          }
-          if (r.error === 'exit_already_submitted') {
-            actions.push({ type: 'SKIP', id, ticker, reason: 'Exit already submitted' });
-            continue;
-          }
-          if (r.error === 'env_block') {
-            actions.push({ type: 'SKIP', id, ticker, reason: 'LIVE exits blocked: set ALLOW_LIVE_AUTOPILOT=true' });
-            continue;
-          }
-        }
-
-        closed += 1;
-        if (!dryRun) {
-          await updateSuggestion(id, { status: 'CLOSED', closedAt: nowIso(), closedPrice: px } as any);
-        }
-        actions.push({ type: 'CLOSED', id, ticker, status: 'CLOSED', closePrice: px, reason: `Options time-stop (${optTimeStopMinutes}m)` });
-        continue;
-      }
-
-      // Premium TP/SL
-      if (Number.isFinite(optPx) && optPx > 0 && Number.isFinite(entryPrem) && entryPrem > 0) {
-        const ret = (optPx - entryPrem) / entryPrem; // long premium
-        const hitTp = optTakeProfitPct > 0 && ret >= optTakeProfitPct;
-        const hitSl = optStopLossPct > 0 && ret <= -optStopLossPct;
-
-        if (hitTp || hitSl) {
-          const why = hitTp ? `Options +${Math.round(optTakeProfitPct * 100)}%` : `Options -${Math.round(optStopLossPct * 100)}%`;
-          const reasonKey = hitTp ? 'option_take_profit' : 'option_stop_loss';
-
-          if (executeLiveExits && isLiveBrokerTrade(s)) {
-            const r = await submitExitIfLive(s, ticker, reasonKey);
-            if (r.ok && r.orderId && r.orderId !== 'dry_run') {
-              actions.push({ type: 'EXIT_SUBMITTED', id, ticker, orderId: r.orderId, reason: why });
-              continue;
-            }
-            if (r.error === 'exit_already_submitted') {
-              actions.push({ type: 'SKIP', id, ticker, reason: 'Exit already submitted' });
-              continue;
-            }
-            if (r.error === 'env_block') {
-              actions.push({ type: 'SKIP', id, ticker, reason: 'LIVE exits blocked: set ALLOW_LIVE_AUTOPILOT=true' });
-              continue;
-            }
-          }
-
-          closed += 1;
-          if (!dryRun) {
-            await updateSuggestion(id, { status: hitTp ? 'HIT_TARGET' : 'STOPPED_OUT', closedAt: nowIso(), closedPrice: px } as any);
-          }
-          actions.push({ type: 'CLOSED', id, ticker, status: hitTp ? 'HIT_TARGET' : 'STOPPED_OUT', closePrice: px, reason: why });
-          continue;
-        }
-      }
     }
 
     const entry = asNumber((s as any)?.entryPrice, NaN);

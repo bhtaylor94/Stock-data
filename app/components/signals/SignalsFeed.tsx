@@ -54,6 +54,7 @@ export function SignalsFeed() {
   const [presetId, setPresetId] = useState<PresetId>('balanced');
   const [minConfidence, setMinConfidence] = useState(60);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [useMarketFeed, setUseMarketFeed] = useState(true);
 
   const [loadingSignals, setLoadingSignals] = useState(false);
   const [signals, setSignals] = useState<Signal[]>([]);
@@ -114,21 +115,36 @@ export function SignalsFeed() {
     try {
       setLoadingSignals(true);
       setError('');
-      const qs = new URLSearchParams({
-        symbols: symbols.join(','),
-        presetId,
-        minConfidence: String(minConfidence),
-      });
-      const res = await fetch(`/api/signals?${qs.toString()}`);
-      const data = await res.json();
-      if (!res.ok || !data?.ok) {
-        setSignals([]);
-        setError(data?.error || 'Failed to load signals');
+
+      if (useMarketFeed) {
+        const res = await fetch('/api/signals/feed');
+        const data = await res.json();
+        if (!res.ok || !data?.ok) {
+          setSignals([]);
+          setError(data?.error || 'Failed to load market feed');
+        } else {
+          const rows: Signal[] = Array.isArray(data?.signals) ? data.signals : [];
+          rows.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+          setSignals(rows);
+          setLastUpdate(Date.now());
+        }
       } else {
-        const rows: Signal[] = Array.isArray(data?.signals) ? data.signals : [];
-        rows.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
-        setSignals(rows);
-        setLastUpdate(Date.now());
+        const qs = new URLSearchParams({
+          symbols: symbols.join(','),
+          presetId,
+          minConfidence: String(minConfidence),
+        });
+        const res = await fetch(`/api/signals?${qs.toString()}`);
+        const data = await res.json();
+        if (!res.ok || !data?.ok) {
+          setSignals([]);
+          setError(data?.error || 'Failed to load signals');
+        } else {
+          const rows: Signal[] = Array.isArray(data?.signals) ? data.signals : [];
+          rows.sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+          setSignals(rows);
+          setLastUpdate(Date.now());
+        }
       }
     } catch {
       setSignals([]);
@@ -144,7 +160,7 @@ export function SignalsFeed() {
     const t = setInterval(fetchSignals, 60000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presetId, minConfidence, symbolsInput, autoRefresh]);
+  }, [presetId, minConfidence, symbolsInput, autoRefresh, useMarketFeed]);
 
   const openPlan = (sig: Signal) => {
     setDrawerTitle(`${sig.symbol} • ${sig.strategyName} • ${sig.action}`);
@@ -201,14 +217,26 @@ export function SignalsFeed() {
         <div className="p-4 rounded-xl bg-slate-800/40 border border-slate-700 space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Symbols (comma separated)</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-slate-400">Symbols (comma separated)</label>
+                <label className="flex items-center gap-2 text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={useMarketFeed}
+                    onChange={(e) => setUseMarketFeed(e.target.checked)}
+                  />
+                  Market feed
+                </label>
+              </div>
               <input
                 value={symbolsInput}
                 onChange={(e) => setSymbolsInput(e.target.value)}
+                disabled={useMarketFeed}
                 placeholder="SPY,QQQ,AAPL"
                 className="w-full px-3 py-2 rounded-lg bg-slate-900/40 border border-slate-700 text-slate-100 text-sm outline-none focus:border-blue-500/60"
               />
-              <div className="mt-2 flex flex-wrap gap-2">
+              {!useMarketFeed && (
+                <div className="mt-2 flex flex-wrap gap-2">
                 {DEFAULT_SYMBOLS.slice(0, 6).map((s) => (
                   <button
                     key={s}
@@ -229,6 +257,7 @@ export function SignalsFeed() {
                   Reset
                 </button>
               </div>
+              )}
             </div>
 
             <div>
@@ -326,7 +355,8 @@ export function SignalsFeed() {
                               <span className="font-semibold">{Math.round(sig.confidence || 0)}%</span>
                             </div>
                           </div>
-                          <div className="mt-2 flex flex-wrap gap-2">
+                          {!useMarketFeed && (
+                <div className="mt-2 flex flex-wrap gap-2">
                             {(sig.why || []).slice(0, 3).map((w, i) => (
                               <span
                                 key={i}

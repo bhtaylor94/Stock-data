@@ -111,12 +111,7 @@ export async function POST(request: Request) {
                 optionSymbol: String((appr as any).selectedOptionContract?.optionSymbol || ''),
                 expiration: String((appr as any).selectedOptionContract?.expiration || ''),
                 strike: Number((appr as any).selectedOptionContract?.strike || 0),
-                optionType:
-                  String((appr as any).selectedOptionContract?.optionType || '').toUpperCase() === 'PUT'
-                    ? 'PUT'
-                    : String((appr as any).selectedOptionContract?.optionType || '').toUpperCase() === 'CALL'
-                      ? 'CALL'
-                      : undefined,
+                optionType: String((appr as any).selectedOptionContract?.optionType || ''),
                 dte: Number((appr as any).selectedOptionContract?.dte || 0),
               }
             : undefined,
