@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { PnlCalendar } from "./PnlCalendar";
-import { PnlSummaryCard } from "./PnlSummaryCard";
 
 interface Position {
   symbol: string;
@@ -43,30 +41,11 @@ interface RealPortfolioProps {
   onTrade?: (symbol: string, price: number, action: 'BUY' | 'SELL', quantity: number) => void;
 }
 
-type OrdersResponse = {
-  success: boolean;
-  orders?: any[];
-  error?: string;
-};
-
-type TransactionsResponse = {
-  success: boolean;
-  transactions?: any[];
-  error?: string;
-};
-
 export function RealPortfolio({ onAnalyze, onTrade }: RealPortfolioProps = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<AccountData | null>(null);
   const [showSetup, setShowSetup] = useState(false);
-
-  const [showLiveDetails, setShowLiveDetails] = useState(false);
-  const [ordersLoading, setOrdersLoading] = useState(false);
-  const [txnsLoading, setTxnsLoading] = useState(false);
-  const [orders, setOrders] = useState<any[]>([]);
-  const [transactions, setTransactions] = useState<any[]>([]);
-  const [liveDetailsError, setLiveDetailsError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchAccountData();
@@ -96,43 +75,6 @@ export function RealPortfolio({ onAnalyze, onTrade }: RealPortfolioProps = {}) {
     } catch (err: any) {
       setError(err.message || 'Network error');
       setLoading(false);
-    }
-  };
-
-  const fetchLiveDetails = async () => {
-    setLiveDetailsError(null);
-    try {
-      setOrdersLoading(true);
-      const oResp = await fetch('/api/schwab/orders?maxResults=50');
-      const oJson: OrdersResponse = await oResp.json();
-      if (oResp.ok && oJson.success) {
-        setOrders(Array.isArray(oJson.orders) ? oJson.orders : []);
-      } else {
-        setOrders([]);
-        setLiveDetailsError(oJson.error || 'Failed to load orders');
-      }
-    } catch (e: any) {
-      setOrders([]);
-      setLiveDetailsError(String(e?.message || e));
-    } finally {
-      setOrdersLoading(false);
-    }
-
-    try {
-      setTxnsLoading(true);
-      const tResp = await fetch('/api/schwab/transactions?days=7');
-      const tJson: TransactionsResponse = await tResp.json();
-      if (tResp.ok && tJson.success) {
-        setTransactions(Array.isArray(tJson.transactions) ? tJson.transactions : []);
-      } else {
-        setTransactions([]);
-        setLiveDetailsError(prev => prev || tJson.error || 'Failed to load transactions');
-      }
-    } catch (e: any) {
-      setTransactions([]);
-      setLiveDetailsError(prev => prev || String(e?.message || e));
-    } finally {
-      setTxnsLoading(false);
     }
   };
 
@@ -241,107 +183,6 @@ export function RealPortfolio({ onAnalyze, onTrade }: RealPortfolioProps = {}) {
             {account.isDayTrader ? `⚠️ PDT: ${account.roundTrips}/3` : 'Standard account'}
           </p>
         </div>
-      </div>
-
-      {/* Monthly P/L Calendar */}
-      <PnlCalendar scope="live" />
-
-      <div className="mt-6" />
-      <PnlSummaryCard scope="live" />
-
-      {/* Live Orders & Activity (optional) */}
-      <div className="p-6 rounded-2xl border border-slate-700/50 bg-slate-800/30">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="text-lg font-semibold text-white">Broker Activity</h3>
-            <p className="text-xs text-slate-400 mt-1">Open orders + recent transactions from Schwab</p>
-          </div>
-          <button
-            onClick={async () => {
-              const next = !showLiveDetails;
-              setShowLiveDetails(next);
-              if (next) await fetchLiveDetails();
-            }}
-            className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm transition"
-          >
-            {showLiveDetails ? 'Hide' : 'Show'}
-          </button>
-        </div>
-
-        {showLiveDetails && (
-          <div className="mt-4 space-y-4">
-            {liveDetailsError && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-sm text-red-300">
-                {liveDetailsError}
-              </div>
-            )}
-
-            <div className="flex gap-2">
-              <button
-                onClick={fetchLiveDetails}
-                className="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm transition"
-              >
-                Refresh activity
-              </button>
-              {(ordersLoading || txnsLoading) && (
-                <div className="text-sm text-slate-400 flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                  Loading…
-                </div>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="p-4 rounded-xl border border-slate-700/50 bg-slate-900/30">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="font-semibold text-white">Open Orders</h4>
-                  <span className="text-xs text-slate-400">{orders.length}</span>
-                </div>
-                {orders.length === 0 ? (
-                  <p className="text-sm text-slate-400">No recent orders found.</p>
-                ) : (
-                  <div className="space-y-2 max-h-72 overflow-auto pr-1">
-                    {orders.slice(0, 25).map((o, i) => (
-                      <div key={i} className="text-xs p-2 rounded-lg bg-slate-800/40 border border-slate-700/50">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-slate-200">{String(o?.orderLegCollection?.[0]?.instrument?.symbol || o?.symbol || '—')}</span>
-                          <span className="text-slate-400">{String(o?.status || '—')}</span>
-                        </div>
-                        <div className="mt-1 text-slate-400">
-                          {String(o?.orderType || '—')} · {String(o?.orderLegCollection?.[0]?.instruction || '—')} · Qty {String(o?.quantity || o?.orderLegCollection?.[0]?.quantity || '—')}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="p-4 rounded-xl border border-slate-700/50 bg-slate-900/30">
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="font-semibold text-white">Recent Transactions</h4>
-                  <span className="text-xs text-slate-400">{transactions.length}</span>
-                </div>
-                {transactions.length === 0 ? (
-                  <p className="text-sm text-slate-400">No recent transactions found.</p>
-                ) : (
-                  <div className="space-y-2 max-h-72 overflow-auto pr-1">
-                    {transactions.slice(0, 25).map((t, i) => (
-                      <div key={i} className="text-xs p-2 rounded-lg bg-slate-800/40 border border-slate-700/50">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-slate-200">{String(t?.transferItems?.[0]?.instrument?.symbol || t?.symbol || t?.type || '—')}</span>
-                          <span className="text-slate-400">{String(t?.tradeDate || t?.transactionDate || t?.transactionTime || '—')}</span>
-                        </div>
-                        <div className="mt-1 text-slate-400">
-                          {String(t?.type || '—')} · Amount {String(t?.netAmount ?? t?.amount ?? '—')}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Positions Table */}

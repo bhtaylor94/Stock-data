@@ -2,7 +2,6 @@
 import React, { useState, useEffect } from 'react';
 import { SuggestionCard } from './SuggestionCard';
 import { ExecutionModal } from './ExecutionModal';
-import { addPaperTrade } from '../../../lib/paperTrades';
 
 interface Suggestion {
   id: string;
@@ -31,37 +30,16 @@ export function SuggestionFeed() {
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedSuggestion, setSelectedSuggestion] = useState<Suggestion | null>(null);
-  const [showAvoid, setShowAvoid] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(Date.now());
   const [now, setNow] = useState(Date.now());
-  const [liveReady, setLiveReady] = useState(false);
-  const [liveError, setLiveError] = useState<string | null>(null);
   const [filters, setFilters] = useState({
     minConfidence: 75,
     types: ['STOCK', 'OPTIONS'],
     priorities: ['URGENT', 'HIGH', 'MEDIUM'],
   });
 
-    // Check Schwab live trading readiness (token + account)
-useEffect(() => {
-  let mounted = true;
-  fetch('/api/schwab/status')
-    .then((r) => r.json())
-    .then((d) => {
-      if (!mounted) return;
-      setLiveReady(!!d?.canTrade);
-      setLiveError(d?.ok ? null : (d?.error || 'Live trading not ready'));
-    })
-    .catch(() => {
-      if (!mounted) return;
-      setLiveReady(false);
-      setLiveError('Live trading not ready');
-    });
-  return () => { mounted = false; };
-}, []);
-
-// Update "now" every second for relative time display
+  // Update "now" every second for relative time display
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
@@ -86,7 +64,7 @@ useEffect(() => {
       const data = await res.json();
       
       if (data.success) {
-        setSuggestions((data.suggestions || []).slice().sort((a:any,b:any)=> (b.confidence||0)-(a.confidence||0)));
+        setSuggestions(data.suggestions || []);
         setLastUpdate(Date.now());
       }
     } catch (error) {
@@ -234,35 +212,7 @@ useEffect(() => {
 
                 <SuggestionCard
                   suggestion={suggestion}
-                  onTrack={() => {
-                    const isOpt = suggestion.type === 'OPTIONS';
-                    addPaperTrade({
-                      symbol: suggestion.symbol,
-                      companyName: suggestion.companyName || suggestion.symbol,
-                      instrument: isOpt ? 'OPTION' : 'STOCK',
-                      side: 'BUY',
-                      quantity: 1,
-                      // For options, use the per-contract premium when available.
-                      // (The backend suggestion shape does not expose `markPrice`.)
-                      entryPrice: (suggestion.details?.premium ?? suggestion.currentPrice ?? 0),
-                      confidence: suggestion.confidence,
-                      reasons: suggestion.reason ? [suggestion.reason] : [],
-                      // The suggestion.details shape is option-focused and does not include invalidation.
-                      // Some endpoints may provide invalidation at the top-level; fall back safely.
-                      invalidation: ((suggestion as any).invalidation ?? ''),
-                      optionType: isOpt ? (suggestion.details?.optionType || 'CALL') : undefined,
-                      strike: isOpt ? suggestion.details?.strike : undefined,
-                      expiration: isOpt ? suggestion.details?.expiration : undefined,
-                    });
-                    handleDismiss(suggestion.id);
-                  }}
-                  onTrade={() => {
-                    if (!liveReady) {
-                      alert(liveError || 'Live trading not ready. Check Schwab auth and account access.');
-                      return;
-                    }
-                    setSelectedSuggestion(suggestion);
-                  }}
+                  onExecute={() => setSelectedSuggestion(suggestion)}
                   onDismiss={() => handleDismiss(suggestion.id)}
                 />
               </div>

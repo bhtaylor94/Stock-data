@@ -3,12 +3,11 @@ import React from 'react';
 
 interface SuggestionCardProps {
   suggestion: any;
-  onTrade: () => void;   // Live trade flow
-  onTrack: () => void;   // Paper trade
+  onExecute: () => void;
   onDismiss: () => void;
 }
 
-export function SuggestionCard({ suggestion, onTrade, onTrack, onDismiss }: SuggestionCardProps) {
+export function SuggestionCard({ suggestion, onExecute, onDismiss }: SuggestionCardProps) {
   const getChangeColor = (change: number) => {
     if (change > 0) return 'text-emerald-400';
     if (change < 0) return 'text-red-400';
@@ -139,18 +138,10 @@ export function SuggestionCard({ suggestion, onTrade, onTrack, onDismiss }: Sugg
       {/* Actions */}
       <div className="flex gap-2">
         <button
-          onClick={onTrack}
-          className="flex-1 py-3 rounded-xl bg-slate-800/60 border border-slate-700 hover:bg-slate-800 text-slate-100 font-bold text-sm transition-all"
-          title="Track this as a paper trade"
+          onClick={onExecute}
+          className="flex-1 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-emerald-500 hover:from-blue-600 hover:to-emerald-600 text-white font-bold text-sm transition-all shadow-lg shadow-blue-500/20"
         >
-          📌 Track (Paper)
-        </button>
-        <button
-          onClick={onTrade}
-          className="flex-1 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-500 hover:to-emerald-400 text-white font-bold text-sm transition-all shadow-lg shadow-blue-500/20"
-          title="Place a live trade (requires broker auth)"
-        >
-          ⚡ Make Trade (Live)
+          🎯 View & Execute
         </button>
         <button
           onClick={onDismiss}
@@ -161,7 +152,7 @@ export function SuggestionCard({ suggestion, onTrade, onTrack, onDismiss }: Sugg
         </button>
       </div>
 
-{/* Timestamp */}
+      {/* Timestamp */}
       <div className="mt-2 text-xs text-slate-500 text-center">
         Detected {new Date(suggestion.timestamp).toLocaleTimeString()}
       </div>

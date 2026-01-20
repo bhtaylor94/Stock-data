@@ -52,30 +52,7 @@ export type TrackedSuggestion = {
   evidence?: any;
   // Optional: full evidence packet (structured + hashed) captured at entry time.
   evidencePacket?: any;
-
-  // Broker reconciliation fields for live trading
-  broker?: {
-    provider?: 'SCHWAB';
-    accountHash?: string;
-    orderId?: string;
-    status?: string;
-    enteredTime?: string;
-    closeTime?: string;
-    filledQuantity?: number;
-    remainingQuantity?: number;
-    averageFillPrice?: number;
-    lastUpdate?: string;
-
-    // Exit order bookkeeping (for lifecycle exits)
-    exitOrderId?: string;
-    exitStatus?: string;
-    exitSubmittedAt?: string;
-    exitFilledQuantity?: number;
-    exitAverageFillPrice?: number;
-    exitCloseTime?: string;
-  };
   optionContract?: {
-    optionSymbol?: string;
     strike: number;
     expiration: string; // ISO date
     dte?: number;
