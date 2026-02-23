@@ -1,8 +1,8 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Sparkles, BarChart2, Layers, Briefcase, Bell,
-  FlaskConical, Target, CheckCircle2, AlertCircle, AlertTriangle,
+  Sparkles, BarChart2, Layers, Bell,
+  CheckCircle2, AlertCircle, AlertTriangle,
   Search, ChevronDown,
 } from 'lucide-react';
 
@@ -16,15 +16,12 @@ import { UnusualActivitySection } from './components/options/UnusualActivitySect
 import { OptionsSetupCard } from './components/options/OptionsSetupCard';
 import { FlowSetupCard } from './components/options/FlowSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
-import { RealPortfolio } from './components/portfolio/RealPortfolio';
 import { PortfolioContextAlert } from './components/portfolio/PortfolioContextAlert';
 import { OrderModal } from './components/trading/OrderModal';
 import { COMPANY_NAMES } from '@/lib/companyNames';
 
-// Phase 6-9: New features
+// Alerts tab
 import { AlertManager } from './components/alerts/AlertManager';
-import { BacktestRunner } from './components/backtest/BacktestRunner';
-import { PortfolioGreeksDashboard } from './components/portfolio/PortfolioGreeksDashboard';
 
 // NEW: AI Suggestions Feed
 import { SuggestionFeed } from './components/ai-suggestions/SuggestionFeed';
@@ -214,305 +211,17 @@ function TrackButton({
 }
 
 // ============================================================
-// TRACKER TAB WITH EVIDENCE
+// STOCK TAB
 // ============================================================
-function TrackerTab({ 
-  onViewEvidence,
-  onSymbolSelect,
-  onTrade
-}: { 
-  onViewEvidence?: (data: any) => void;
-  onSymbolSelect?: (symbol: string) => void;
-  onTrade?: (symbol: string, price: number, action: 'BUY' | 'SELL' | 'HOLD', quantity: number) => void;
-}) {
-  const [trackerData, setTrackerData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [showOvernightInfo, setShowOvernightInfo] = useState(false);
-  const [showRealPortfolio, setShowRealPortfolio] = useState(false);
-  
-  const fetchTrackerData = async () => {
-    try {
-      const res = await fetch('/api/tracker');
-      const data = await res.json();
-      setTrackerData(data);
-    } catch (err) {
-      console.error('Tracker fetch error:', err);
-    }
-    setLoading(false);
-  };
-  
-  useEffect(() => {
-    fetchTrackerData();
-    const interval = setInterval(fetchTrackerData, 15000);
-    return () => clearInterval(interval);
-  }, []);
-  
-  const handleUpdateStatus = async (id: string, status: string) => {
-    try {
-      const res = await fetch('/api/tracker', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id, status }),
-      });
-      if (res.ok) {
-        fetchTrackerData();
-      }
-    } catch (err) {
-      console.error('Update error:', err);
-    }
-  };
-  
-  if (loading) return <LoadingSpinner />;
-  if (!trackerData) return <p className="text-slate-500 text-center py-12">Error loading tracker</p>;
-  
-  // Show real portfolio if toggled
-  if (showRealPortfolio) {
-    return (
-      <div className="space-y-6 animate-fade-in">
-        {/* Toggle Switch */}
-        <div className="flex items-center justify-between p-4 rounded-xl border border-slate-700/50 bg-slate-800/30">
-          <div>
-            <h3 className="text-lg font-semibold text-white">Portfolio View</h3>
-            <p className="text-sm text-slate-400">Switch between paper trading and live Schwab account</p>
-          </div>
-          <button
-            onClick={() => setShowRealPortfolio(false)}
-            className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition flex items-center gap-2"
-          >
-            Switch to Paper Trading
-          </button>
-        </div>
-        
-        <RealPortfolio 
-          onAnalyze={(symbol) => {
-            // Switch to Stock Analysis tab and load symbol
-            if (onSymbolSelect) {
-              onSymbolSelect(symbol);
-            }
-          }}
-          onTrade={(symbol, price, action, quantity) => {
-            // Open order modal with position details
-            if (onTrade) {
-              onTrade(symbol, price, action, quantity);
-            }
-          }}
-        />
-      </div>
-    );
-  }
-  
-  const suggestions = trackerData.suggestions || [];
-  const stats = trackerData.stats || {};
-  const active = suggestions.filter((s: any) => s.status === 'ACTIVE');
-  const closed = suggestions.filter((s: any) => s.status !== 'ACTIVE');
-  
-  return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Toggle Switch */}
-      <div className="flex items-center justify-between p-4 rounded-xl border border-blue-500/30 bg-blue-500/10">
-        <div>
-          <h3 className="text-lg font-semibold text-white">Portfolio View</h3>
-          <p className="text-sm text-slate-400">Currently showing paper trading portfolio</p>
-        </div>
-        <button
-          onClick={() => setShowRealPortfolio(true)}
-          className="px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 transition flex items-center gap-2"
-        >
-          View Live Schwab Account
-        </button>
-      </div>
-      
-      {/* Portfolio Summary */}
-      <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-slate-700/50">
-        <h2 className="text-lg font-semibold text-white mb-4">Portfolio Summary</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="p-3 rounded-xl bg-slate-800/50">
-            <p className="text-xs text-slate-400 mb-1">Total Tracked</p>
-            <p className="text-2xl font-bold text-white">{stats.totalTracked || 0}</p>
-          </div>
-          <div className="p-3 rounded-xl bg-slate-800/50">
-            <p className="text-xs text-slate-400 mb-1">Active</p>
-            <p className="text-2xl font-bold text-blue-400">{stats.activeCount || 0}</p>
-          </div>
-          <div className="p-3 rounded-xl bg-slate-800/50">
-            <p className="text-xs text-slate-400 mb-1">Total P/L</p>
-            <p className={`text-2xl font-bold ${(stats.totalPnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              ${(stats.totalPnl || 0).toFixed(0)}
-            </p>
-          </div>
-          <div className="p-3 rounded-xl bg-slate-800/50">
-            <p className="text-xs text-slate-400 mb-1">Avg Return</p>
-            <p className={`text-2xl font-bold ${(stats.avgPnlPct || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-              {(stats.avgPnlPct || 0).toFixed(1)}%
-            </p>
-          </div>
-        </div>
-      </div>
-
-      {/* Overnight Support */}
-      <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
-        <button
-          type="button"
-          onClick={() => setShowOvernightInfo(!showOvernightInfo)}
-          className="w-full flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-white">🌙 Overnight Support</span>
-            <span className="text-xs text-slate-400">(positions persist + P/L updates when markets move)</span>
-          </div>
-          <span className="text-slate-400">{showOvernightInfo ? '▼' : '▶'}</span>
-        </button>
-
-        {showOvernightInfo && (
-          <div className="mt-3 text-sm text-slate-300 space-y-2">
-            <p><span className="text-white font-semibold">Yes</span> — tracked positions persist overnight and across weekends. Your portfolio keeps the position and updates P/L as soon as fresh prices are available.</p>
-            <ul className="list-disc pl-5 space-y-1 text-slate-300">
-              <li><span className="text-white font-semibold">Stocks extended hours:</span> pre‑market 4:00 AM–9:30 AM ET, after‑hours 4:00 PM–8:00 PM ET.</li>
-              <li><span className="text-white font-semibold">Options data:</span> typically only reliable during regular hours (9:30 AM–4:00 PM ET). This is a market data limitation, not the app.</li>
-              <li><span className="text-white font-semibold">Weekends:</span> positions remain visible; prices generally freeze at Friday close and resume updating on Monday pre‑market.</li>
-            </ul>
-            <p className="text-xs text-slate-400">Tip: add a trade via “Track This Setup” or “Track UOA” and check back later — it will still be in your Portfolio tab.</p>
-          </div>
-        )}
-      </div>
-      
-      {/* Active Positions */}
-      {active.length > 0 && (
-        <div className="p-6 rounded-2xl border border-blue-500/30 bg-blue-500/5">
-          <h3 className="text-lg font-semibold text-white mb-4">🔵 Active Positions</h3>
-          <div className="space-y-3">
-            {active.map((s: any) => (
-              <div key={s.id} className="p-4 rounded-xl bg-slate-800/50 border border-slate-700/50 hover:border-slate-600/50 transition-all duration-200">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-3">
-                    <span className="font-bold text-white">{s.ticker}</span>
-                    <span className="text-sm text-slate-400">{s.strategy}</span>
-                    {s.optionContract && (
-                      <span className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">
-                        ${s.optionContract.strike} {s.optionContract.optionType} • {s.optionContract.dte}d
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {onViewEvidence && s.evidencePacket && (
-                      <button
-                        onClick={() => onViewEvidence(s.evidencePacket)}
-                        className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-blue-400 transition-colors"
-                        title="View evidence for this trade"
-                      >
-                        Evidence
-                      </button>
-                    )}
-                    <span className={`text-lg font-bold ${(s.pnlPct || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {(s.pnlPct || 0) >= 0 ? '+' : ''}{(s.pnlPct || 0).toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-3 gap-2 text-xs mb-3">
-                  <div>
-                    <span className="text-slate-400">Entry: </span>
-                    <span className="text-white">${(s.entryPrice || 0).toFixed(2)}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400">Current: </span>
-                    <span className="text-white">${(s.currentPrice || 0).toFixed(2)}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400">P/L: </span>
-                    <span className={`font-bold ${(s.pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      ${(s.pnl || 0).toFixed(0)}
-                    </span>
-                  </div>
-                </div>
-                
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleUpdateStatus(s.id, 'HIT_TARGET')}
-                    className="flex-1 px-3 py-1.5 rounded-lg bg-emerald-500/20 text-emerald-400 text-xs hover:bg-emerald-500/30 transition-all"
-                  >
-                    ✓ Hit Target
-                  </button>
-                  <button
-                    onClick={() => handleUpdateStatus(s.id, 'MISSED_TARGET')}
-                    className="flex-1 px-3 py-1.5 rounded-lg bg-red-500/20 text-red-400 text-xs hover:bg-red-500/30 transition-all"
-                  >
-                    ✗ Missed Target
-                  </button>
-                  <button
-                    onClick={() => handleUpdateStatus(s.id, 'CANCELED')}
-                    className="flex-1 px-3 py-1.5 rounded-lg bg-slate-600/20 text-slate-400 text-xs hover:bg-slate-600/30 transition-all"
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      
-      {/* Closed Positions */}
-      {closed.length > 0 && (
-        <div className="p-6 rounded-2xl border border-slate-700/50 bg-slate-800/30">
-          <h3 className="text-lg font-semibold text-white mb-4">📋 Closed Positions</h3>
-          <div className="space-y-2">
-            {closed.slice(0, 10).map((s: any) => (
-              <div key={s.id} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50 hover:border-slate-600/50 transition-all duration-200">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-white">{s.ticker}</span>
-                    <span className="text-xs text-slate-400">{s.strategy}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded ${
-                      s.status === 'HIT_TARGET' ? 'bg-emerald-500/20 text-emerald-400' :
-                      s.status === 'STOPPED_OUT' || s.status === 'MISSED_TARGET' ? 'bg-red-500/20 text-red-400' :
-                      'bg-slate-600/20 text-slate-400'
-                    }`}>
-                      {s.status.replace('_', ' ')}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {onViewEvidence && s.evidencePacket && (
-                      <button
-                        onClick={() => onViewEvidence(s.evidencePacket)}
-                        className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-blue-400 transition-colors"
-                      >
-                        Ev
-                      </button>
-                    )}
-                    <span className={`font-bold ${(s.pnlPct || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {(s.pnlPct || 0) >= 0 ? '+' : ''}{(s.pnlPct || 0).toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      
-      {suggestions.length === 0 && (
-        <div className="text-center py-12">
-          <p className="text-slate-400 text-lg mb-2">No tracked positions yet</p>
-          <p className="text-slate-500 text-sm">Track a position from the Stock or Options tab</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================================
-// STOCK TAB - REFACTORED with Decision-First Layout
-// ============================================================
-function StockTab({ 
-  data, 
-  loading, 
+function StockTab({
+  data,
+  loading,
   ticker,
   onTrack,
   onViewEvidence,
   onTrade
-}: { 
-  data: any; 
+}: {
+  data: any;
   loading: boolean;
   ticker: string;
   onTrack?: (success: boolean, message: string) => void;
@@ -536,8 +245,7 @@ function StockTab({
 
   return (
     <div className="space-y-4 animate-fade-in">
-      {/* Decision Hero - Sticky at top */}
-      <StockDecisionHero 
+      <StockDecisionHero
         ticker={ticker}
         price={data.price || data.quote?.c || 0}
         analysis={{ ...analysis, changePercent: data.changePercent }}
@@ -552,9 +260,8 @@ function StockTab({
               entryPrice: data.price || data.quote?.c,
               confidence: sug.confidence || 0,
               reasoning: sug.reasoning || [],
-              evidencePacket: data, // Store full evidence
+              evidencePacket: data,
             };
-            
             fetch('/api/tracker', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -566,99 +273,84 @@ function StockTab({
         }}
         onViewEvidence={onViewEvidence}
         onTrade={onTrade ? () => onTrade(
-          ticker, 
+          ticker,
           data.price || data.quote?.c || 0,
           data.meta?.tradeDecision?.action || 'BUY',
           1
         ) : undefined}
       />
-      
-      {/* Portfolio Context Alert */}
+
       {data.portfolioContext && (
         <PortfolioContextAlert portfolioContext={data.portfolioContext} />
       )}
-      
-      {/* Score Breakdown */}
+
       <StockScoreBreakdown analysis={analysis} />
 
-{/* Data quality (candles) */}
-{data?.meta?.warnings?.technicals && (
-  <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
-    <h3 className="text-sm font-semibold text-amber-300 mb-1">Limited technical data</h3>
-    <p className="text-xs text-slate-300">{data.meta.warnings.technicals}</p>
-    {data?.meta?.priceHistory && (
-      <p className="text-[11px] text-slate-400 mt-1">
-        Candles: <span className="font-mono">{data.meta.priceHistory.candles}</span> • Source: <span className="font-mono">{data.meta.priceHistory.source}</span>
-      </p>
-    )}
-  </div>
-)}
+      {data?.meta?.warnings?.technicals && (
+        <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
+          <h3 className="text-sm font-semibold text-amber-300 mb-1">Limited technical data</h3>
+          <p className="text-xs text-slate-300">{data.meta.warnings.technicals}</p>
+          {data?.meta?.priceHistory && (
+            <p className="text-[11px] text-slate-400 mt-1">
+              Candles: <span className="font-mono">{data.meta.priceHistory.candles}</span> · Source: <span className="font-mono">{data.meta.priceHistory.source}</span>
+            </p>
+          )}
+        </div>
+      )}
 
-      {/* News warning (usually missing FINNHUB_API_KEY) */}
       {(!news?.headlines || news.headlines.length === 0) && data?.meta?.warnings?.news && (
         <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-amber-300 mb-1">📰 News unavailable</h3>
-              <p className="text-xs text-slate-300">{data.meta.warnings.news}</p>
-              <p className="text-xs text-slate-400 mt-1">Set <span className="font-mono">FINNHUB_API_KEY</span> in Vercel (Production env) and redeploy.</p>
-            </div>
+          <h3 className="text-sm font-semibold text-amber-300 mb-1">News unavailable</h3>
+          <p className="text-xs text-slate-300">{data.meta.warnings.news}</p>
+          <p className="text-xs text-slate-400 mt-1">Set <span className="font-mono">FINNHUB_API_KEY</span> in Vercel and redeploy.</p>
+        </div>
+      )}
+
+      {news?.headlines?.length > 0 && (
+        <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-white">Recent News</h3>
+            <button onClick={onViewEvidence} className="text-xs text-slate-300 hover:text-white underline underline-offset-2">
+              View in Evidence
+            </button>
+          </div>
+          <div className="space-y-2">
+            {news.headlines.slice(0, 8).map((item: any, i: number) => (
+              <div key={i} className="p-3 rounded-xl bg-slate-900/40 border border-slate-700/40">
+                <div className="text-sm text-white">{item.headline || item.title || 'Headline'}</div>
+                <div className="mt-1 text-xs text-slate-400 flex items-center gap-2">
+                  <span>{item.source || ''}</span>
+                  <span className="opacity-50">·</span>
+                  <span>{(() => {
+                    const dt = item.datetime;
+                    if (!dt) return '';
+                    if (typeof dt === 'number') return new Date(dt * 1000).toLocaleDateString();
+                    const d = new Date(dt);
+                    return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+                  })()}</span>
+                  {item.url && (
+                    <>
+                      <span className="opacity-50">·</span>
+                      <a className="underline underline-offset-2 hover:text-white" href={item.url} target="_blank" rel="noreferrer">Open</a>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
-      
-{/* News (on Stock page) */}
-{news?.headlines?.length > 0 && (
-  <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
-    <div className="flex items-center justify-between mb-3">
-      <h3 className="text-sm font-semibold text-white">📰 Recent News</h3>
-      <button
-        onClick={onViewEvidence}
-        className="text-xs text-slate-300 hover:text-white underline underline-offset-2"
-      >
-        View in Evidence Packet
-      </button>
-    </div>
-    <div className="space-y-2">
-      {news.headlines.slice(0, 8).map((item: any, i: number) => (
-        <div key={i} className="p-3 rounded-xl bg-slate-900/40 border border-slate-700/40">
-          <div className="text-sm text-white">{item.headline || item.title || 'Headline'}</div>
-          <div className="mt-1 text-xs text-slate-400 flex items-center gap-2">
-            <span>{item.source || ''}</span>
-            <span className="opacity-50">•</span>
-            <span>{(() => {
-              const dt = item.datetime;
-              if (!dt) return '';
-              if (typeof dt === 'number') return new Date(dt * 1000).toLocaleDateString();
-              const d = new Date(dt);
-              return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
-            })()}</span>
-            {item.url && (
-              <>
-                <span className="opacity-50">•</span>
-                <a className="underline underline-offset-2 hover:text-white" href={item.url} target="_blank" rel="noreferrer">Open</a>
-              </>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  </div>
-)}
 
-      {/* Consensus Sources - Collapsible */}
-      <ConsensusSourcesList 
+      <ConsensusSourcesList
         fundamentals={fundamentals}
         technicals={technicals}
         news={news}
         analysts={analysts}
         chartPatterns={chartPatterns}
       />
-      
-      {/* Chart Pattern Card */}
+
       <ChartPatternCard chartPatterns={chartPatterns} />
-      
-      {/* Suggestions (keep compact version) */}
+
       {suggestions && suggestions.length > 0 && (
         <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
           <h3 className="text-sm font-semibold text-white mb-3">Recommendations</h3>
@@ -668,7 +360,7 @@ function StockTab({
                 sug.type === 'BUY' ? 'border-emerald-500/30 bg-emerald-500/5' :
                 sug.type === 'SELL' ? 'border-red-500/30 bg-red-500/5' :
                 'border-amber-500/30 bg-amber-500/5'
-              } transition-all duration-200 hover:border-opacity-50`}>
+              } transition-all duration-200`}>
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-medium text-white">{sug.strategy}</span>
                   {sug.confidence && (
@@ -958,20 +650,17 @@ export default function TradingDashboard() {
   };
   
   const TABS = [
-    { id: 'feed',     label: 'AI Feed',   Icon: Sparkles     },
-    { id: 'stock',    label: 'Stocks',    Icon: BarChart2    },
-    { id: 'options',  label: 'Options',   Icon: Layers       },
-    { id: 'tracker',  label: 'Portfolio', Icon: Briefcase    },
-    { id: 'alerts',   label: 'Alerts',    Icon: Bell         },
-    { id: 'backtest', label: 'Backtest',  Icon: FlaskConical },
-    { id: 'greeks',   label: 'Greeks',    Icon: Target       },
+    { id: 'feed',    label: 'AI Feed',  Icon: Sparkles  },
+    { id: 'stock',   label: 'Stocks',   Icon: BarChart2 },
+    { id: 'options', label: 'Options',  Icon: Layers    },
+    { id: 'alerts',  label: 'Alerts',   Icon: Bell      },
   ] as const;
 
   const searchRef = useRef<HTMLInputElement>(null);
 
   const [ticker, setTicker] = useState('');
   const [showMoreTickers, setShowMoreTickers] = useState(false);
-  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'tracker' | 'alerts' | 'backtest' | 'greeks'>('feed');
+  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'alerts'>('feed');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
   const [stockLoading, setStockLoading] = useState(false);
@@ -1254,28 +943,8 @@ export default function TradingDashboard() {
               />
             )}
             
-            {activeTab === 'tracker' && (
-              <TrackerTab 
-                onViewEvidence={handleViewEvidence}
-                onSymbolSelect={(symbol) => {
-                  setTicker(symbol);
-                  setActiveTab('stock');
-                  handleSearch(symbol);
-                }}
-                onTrade={handleTrade}
-              />
-            )}
-            
             {activeTab === 'alerts' && (
               <AlertManager />
-            )}
-            
-            {activeTab === 'backtest' && (
-              <BacktestRunner />
-            )}
-            
-            {activeTab === 'greeks' && (
-              <PortfolioGreeksDashboard />
             )}
           </ErrorBoundary>
         </div>
