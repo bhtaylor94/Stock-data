@@ -1026,6 +1026,9 @@ function calculateHV20(priceHistory: { close: number }[]): number {
 // ============================================================
 export async function GET(request: NextRequest, { params }: { params: { ticker: string } }) {
   const ticker = params.ticker.toUpperCase();
+  if (!/^[A-Z0-9.\-]{1,10}$/.test(ticker)) {
+    return NextResponse.json({ error: 'Invalid ticker symbol', ticker }, { status: 400 });
+  }
   const startTime = Date.now();
 
   const { token, error: tokenError, status: errorCode } = await getSchwabAccessToken('options');

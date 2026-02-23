@@ -1598,6 +1598,9 @@ export async function GET(
   { params }: { params: { ticker: string } }
 ) {
   const ticker = params.ticker.toUpperCase();
+  if (!/^[A-Z0-9.\-]{1,10}$/.test(ticker)) {
+    return NextResponse.json({ error: 'Invalid ticker symbol', ticker }, { status: 400 });
+  }
   const startTime = Date.now();
   
   let dataSource = 'none';

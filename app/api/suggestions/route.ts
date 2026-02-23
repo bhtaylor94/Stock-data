@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSchwabAccessToken, schwabFetchJson } from '@/lib/schwab';
 import { detectUnusualActivity } from '@/lib/unusualActivityDetector';
+import { getRedis, isRedisAvailable } from '@/lib/redis';
 
 export const runtime = 'nodejs';
 
-// Cache for suggestions (refreshed every 30 seconds)
+const CACHE_DURATION = 30000; // 30 seconds
+const REDIS_CACHE_KEY = 'cache:suggestions';
+
+// In-process fallback cache (used when Redis is unavailable)
 let cachedSuggestions: any[] = [];
 let lastFetchTime = 0;
-const CACHE_DURATION = 30000; // 30 seconds
 
 // Top liquid stocks and ETFs to scan
 const MARKET_UNIVERSE = [
@@ -36,23 +39,50 @@ export async function GET(req: NextRequest) {
     const types = searchParams.get('types')?.split(',') || ['STOCK', 'OPTIONS'];
     const priorities = searchParams.get('priorities')?.split(',') || ['URGENT', 'HIGH', 'MEDIUM'];
 
-    // Check cache
     const now = Date.now();
-    if (now - lastFetchTime < CACHE_DURATION && cachedSuggestions.length > 0) {
-      const filtered = filterSuggestions(cachedSuggestions, minConfidence, types, priorities);
-      return NextResponse.json({
-        success: true,
-        suggestions: filtered,
-        cached: true,
-        nextUpdate: CACHE_DURATION - (now - lastFetchTime),
-      });
+
+    // ── Redis cache check ──────────────────────────────────────────────────
+    if (isRedisAvailable()) {
+      try {
+        const cached = await getRedis().get<Suggestion[]>(REDIS_CACHE_KEY);
+        if (cached && Array.isArray(cached)) {
+          const filtered = filterSuggestions(cached, minConfidence, types, priorities);
+          return NextResponse.json({
+            success: true,
+            suggestions: filtered,
+            cached: true,
+            nextUpdate: CACHE_DURATION,
+          });
+        }
+      } catch (err) {
+        console.error('[Suggestions] Redis cache read error:', err);
+      }
+    } else {
+      // In-process fallback
+      if (now - lastFetchTime < CACHE_DURATION && cachedSuggestions.length > 0) {
+        const filtered = filterSuggestions(cachedSuggestions, minConfidence, types, priorities);
+        return NextResponse.json({
+          success: true,
+          suggestions: filtered,
+          cached: true,
+          nextUpdate: CACHE_DURATION - (now - lastFetchTime),
+        });
+      }
     }
 
-    // Fetch fresh suggestions
+    // ── Fetch fresh suggestions ────────────────────────────────────────────
     const suggestions = await scanMarketForSuggestions();
 
-    cachedSuggestions = suggestions;
-    lastFetchTime = now;
+    if (isRedisAvailable()) {
+      try {
+        await getRedis().set(REDIS_CACHE_KEY, JSON.stringify(suggestions), { ex: 30 });
+      } catch (err) {
+        console.error('[Suggestions] Redis cache write error:', err);
+      }
+    } else {
+      cachedSuggestions = suggestions;
+      lastFetchTime = now;
+    }
 
     const filtered = filterSuggestions(suggestions, minConfidence, types, priorities);
 

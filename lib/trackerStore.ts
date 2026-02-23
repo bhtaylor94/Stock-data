@@ -1,5 +1,6 @@
 import { promises as fs } from 'fs';
 import path from 'path';
+import { getRedis, isRedisAvailable } from './redis';
 
 export type TrackedSuggestionStatus = 'ACTIVE' | 'HIT_TARGET' | 'MISSED_TARGET' | 'CANCELED' | 'STOPPED_OUT' | 'CLOSED' | 'EXPIRED';
 
@@ -62,6 +63,10 @@ export type TrackedSuggestion = {
   };
 };
 
+const REDIS_KEY = 'tracker:suggestions';
+
+// ── File-based fallback (local dev) ──────────────────────────────────────────
+
 function storePath(): string {
   const custom = process.env.TRACKER_STORE_PATH;
   if (custom && custom.trim()) return custom.trim();
@@ -91,14 +96,30 @@ async function atomicWrite(filePath: string, content: string): Promise<void> {
   await fs.rename(tmp, filePath);
 }
 
+// ── Public API ────────────────────────────────────────────────────────────────
+
 export async function loadSuggestions(): Promise<TrackedSuggestion[]> {
-  const p = storePath();
-  return readJsonFile<TrackedSuggestion[]>(p, []);
+  if (isRedisAvailable()) {
+    try {
+      const data = await getRedis().get<TrackedSuggestion[]>(REDIS_KEY);
+      return data ?? [];
+    } catch (err) {
+      console.error('[trackerStore] Redis read error, falling back to file:', err);
+    }
+  }
+  return readJsonFile<TrackedSuggestion[]>(storePath(), []);
 }
 
 export async function saveSuggestions(items: TrackedSuggestion[]): Promise<void> {
-  const p = storePath();
-  await atomicWrite(p, JSON.stringify(items, null, 2));
+  if (isRedisAvailable()) {
+    try {
+      await getRedis().set(REDIS_KEY, JSON.stringify(items));
+      return;
+    } catch (err) {
+      console.error('[trackerStore] Redis write error, falling back to file:', err);
+    }
+  }
+  await atomicWrite(storePath(), JSON.stringify(items, null, 2));
 }
 
 export async function upsertSuggestion(s: TrackedSuggestion): Promise<void> {

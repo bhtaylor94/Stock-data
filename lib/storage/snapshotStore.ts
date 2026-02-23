@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { getRedis, isRedisAvailable } from '../redis';
 
 export type SuggestionSnapshot = {
   id: string;
@@ -19,6 +20,55 @@ export interface SnapshotStore {
   getSnapshotsByTicker(ticker: string, limit?: number): Promise<SuggestionSnapshot[]>;
   getRecentSnapshots(limit?: number): Promise<SuggestionSnapshot[]>;
 }
+
+// ── Redis-backed store ────────────────────────────────────────────────────────
+
+const REDIS_KEY_ALL = 'snapshots:all';
+const REDIS_CAP_ALL = 500;
+const REDIS_CAP_TICKER = 100;
+
+function tickerKey(ticker: string): string {
+  return `snapshots:ticker:${ticker.toUpperCase()}`;
+}
+
+class RedisSnapshotStore implements SnapshotStore {
+  async saveSnapshot(snapshot: SuggestionSnapshot): Promise<void> {
+    try {
+      const redis = getRedis();
+      const value = JSON.stringify(snapshot);
+      await Promise.all([
+        redis.lpush(REDIS_KEY_ALL, value).then(() => redis.ltrim(REDIS_KEY_ALL, 0, REDIS_CAP_ALL - 1)),
+        redis.lpush(tickerKey(snapshot.ticker), value).then(() =>
+          redis.ltrim(tickerKey(snapshot.ticker), 0, REDIS_CAP_TICKER - 1)
+        ),
+      ]);
+    } catch {
+      // storage failures must never propagate to callers
+    }
+  }
+
+  async getRecentSnapshots(limit: number = 50): Promise<SuggestionSnapshot[]> {
+    try {
+      const redis = getRedis();
+      const raw = await redis.lrange(REDIS_KEY_ALL, 0, Math.max(0, limit) - 1);
+      return raw.map(item => (typeof item === 'string' ? safeJsonParse(item) : item)).filter(Boolean) as SuggestionSnapshot[];
+    } catch {
+      return [];
+    }
+  }
+
+  async getSnapshotsByTicker(ticker: string, limit: number = 50): Promise<SuggestionSnapshot[]> {
+    try {
+      const redis = getRedis();
+      const raw = await redis.lrange(tickerKey(ticker), 0, Math.max(0, limit) - 1);
+      return raw.map(item => (typeof item === 'string' ? safeJsonParse(item) : item)).filter(Boolean) as SuggestionSnapshot[];
+    } catch {
+      return [];
+    }
+  }
+}
+
+// ── File-based fallback (local dev / no Redis) ────────────────────────────────
 
 // Vercel serverless filesystems are ephemeral. /tmp is writable per instance.
 // On Optiplex/local, set AIHF_DB_PATH or AIHF_SNAPSHOT_PATH to persist.
@@ -86,13 +136,19 @@ class JsonlSnapshotStore implements SnapshotStore {
   }
 }
 
+// ── Singleton factory ─────────────────────────────────────────────────────────
+
 let _store: SnapshotStore | null = null;
 
 export async function getSnapshotStore(): Promise<SnapshotStore> {
   if (_store) return _store;
-  _store = new JsonlSnapshotStore(resolveSnapshotPath());
+  _store = isRedisAvailable()
+    ? new RedisSnapshotStore()
+    : new JsonlSnapshotStore(resolveSnapshotPath());
   return _store;
 }
+
+// ── Helper utilities ──────────────────────────────────────────────────────────
 
 function newId(): string {
   return 'snap_' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
