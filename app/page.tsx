@@ -1,5 +1,10 @@
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  Sparkles, BarChart2, Layers, Briefcase, Bell,
+  FlaskConical, Target, CheckCircle2, AlertCircle, AlertTriangle,
+  Search, ChevronDown,
+} from 'lucide-react';
 
 // New refactored components
 import { StockDecisionHero } from './components/stock/StockDecisionHero';
@@ -44,7 +49,7 @@ function SuccessToast({ message, onClose }: { message: string; onClose: () => vo
   return (
     <div className="fixed top-4 right-4 z-50 animate-slide-in-right">
       <div className="px-4 py-3 rounded-lg bg-emerald-500 border border-emerald-400 text-white shadow-lg flex items-center gap-2">
-        <span className="text-lg">✓</span>
+        <CheckCircle2 size={16} />
         <span className="font-medium">{message}</span>
         <button onClick={onClose} className="ml-2 hover:bg-emerald-600 rounded px-2">✕</button>
       </div>
@@ -61,7 +66,7 @@ function ErrorToast({ message, onClose }: { message: string; onClose: () => void
   return (
     <div className="fixed top-4 right-4 z-50 animate-slide-in-right">
       <div className="px-4 py-3 rounded-lg bg-red-500 border border-red-400 text-white shadow-lg flex items-center gap-2">
-        <span className="text-lg">⚠️</span>
+        <AlertCircle size={16} />
         <span className="font-medium">{message}</span>
         <button onClick={onClose} className="ml-2 hover:bg-red-600 rounded px-2">✕</button>
       </div>
@@ -94,7 +99,7 @@ class ErrorBoundary extends React.Component<
       return (
         <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-4 flex items-center justify-center">
           <div className="max-w-2xl w-full p-6 rounded-2xl border border-red-500/30 bg-red-500/5">
-            <h2 className="text-2xl font-bold text-red-400 mb-4">⚠️ Something went wrong</h2>
+            <h2 className="text-2xl font-bold text-red-400 mb-4 flex items-center gap-2"><AlertTriangle size={22} /> Something went wrong</h2>
             <p className="text-slate-300 mb-4">
               The app encountered an unexpected error. This has been logged and won't affect your other tabs.
             </p>
@@ -201,7 +206,7 @@ function TrackButton({
           Tracking...
         </>
       ) : (
-        <>📌 Track</>
+        <>Track</>
       )}
     </button>
   );
@@ -273,7 +278,6 @@ function TrackerTab({
             onClick={() => setShowRealPortfolio(false)}
             className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 transition flex items-center gap-2"
           >
-            <span>📊</span>
             Switch to Paper Trading
           </button>
         </div>
@@ -313,14 +317,13 @@ function TrackerTab({
           onClick={() => setShowRealPortfolio(true)}
           className="px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 transition flex items-center gap-2"
         >
-          <span>💰</span>
           View Live Schwab Account
         </button>
       </div>
       
       {/* Portfolio Summary */}
       <div className="p-6 rounded-2xl bg-gradient-to-br from-slate-800/80 to-slate-900/80 border border-slate-700/50">
-        <h2 className="text-lg font-semibold text-white mb-4">📊 Portfolio Summary</h2>
+        <h2 className="text-lg font-semibold text-white mb-4">Portfolio Summary</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="p-3 rounded-xl bg-slate-800/50">
             <p className="text-xs text-slate-400 mb-1">Total Tracked</p>
@@ -396,7 +399,7 @@ function TrackerTab({
                         className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-blue-400 transition-colors"
                         title="View evidence for this trade"
                       >
-                        📊 Evidence
+                        Evidence
                       </button>
                     )}
                     <span className={`text-lg font-bold ${(s.pnlPct || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -473,7 +476,7 @@ function TrackerTab({
                         onClick={() => onViewEvidence(s.evidencePacket)}
                         className="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-blue-400 transition-colors"
                       >
-                        📊
+                        Ev
                       </button>
                     )}
                     <span className={`font-bold ${(s.pnlPct || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -520,7 +523,7 @@ function StockTab({
   if (data.error) {
     return (
       <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5 animate-fade-in">
-        <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ {data.error}</h3>
+        <h3 className="text-lg font-semibold text-red-400 mb-3 flex items-center gap-1.5"><AlertTriangle size={16} /> {data.error}</h3>
         {(Array.isArray(data.instructions) ? data.instructions : (data.instructions ? [String(data.instructions)] : [])).map((i: string, idx: number) => (
             <p key={idx} className="text-xs text-slate-400">• {i}</p>
           ))}
@@ -580,7 +583,7 @@ function StockTab({
 {/* Data quality (candles) */}
 {data?.meta?.warnings?.technicals && (
   <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
-    <h3 className="text-sm font-semibold text-amber-300 mb-1">📈 Limited technical data</h3>
+    <h3 className="text-sm font-semibold text-amber-300 mb-1">Limited technical data</h3>
     <p className="text-xs text-slate-300">{data.meta.warnings.technicals}</p>
     {data?.meta?.priceHistory && (
       <p className="text-[11px] text-slate-400 mt-1">
@@ -714,7 +717,7 @@ function OptionsTab({
   if (data.error) {
     return (
       <div className="p-6 rounded-2xl border border-red-500/30 bg-red-500/5 animate-fade-in">
-        <h3 className="text-lg font-semibold text-red-400 mb-3">⚠️ {data.error}</h3>
+        <h3 className="text-lg font-semibold text-red-400 mb-3 flex items-center gap-1.5"><AlertTriangle size={16} /> {data.error}</h3>
         {data.details && <p className="text-sm text-red-300 mb-3 whitespace-pre-wrap">{data.details}</p>}
         {(Array.isArray(data.instructions) ? data.instructions : (data.instructions ? [String(data.instructions)] : [])).map((i: string, idx: number) => (
             <p key={idx} className="text-xs text-slate-400">• {i}</p>
@@ -910,6 +913,18 @@ export default function TradingDashboard() {
     ]
   };
   
+  const TABS = [
+    { id: 'feed',     label: 'AI Feed',   Icon: Sparkles     },
+    { id: 'stock',    label: 'Stocks',    Icon: BarChart2    },
+    { id: 'options',  label: 'Options',   Icon: Layers       },
+    { id: 'tracker',  label: 'Portfolio', Icon: Briefcase    },
+    { id: 'alerts',   label: 'Alerts',    Icon: Bell         },
+    { id: 'backtest', label: 'Backtest',  Icon: FlaskConical },
+    { id: 'greeks',   label: 'Greeks',    Icon: Target       },
+  ] as const;
+
+  const searchRef = useRef<HTMLInputElement>(null);
+
   const [ticker, setTicker] = useState('');
   const [showMoreTickers, setShowMoreTickers] = useState(false);
   const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'tracker' | 'alerts' | 'backtest' | 'greeks'>('feed');
@@ -932,6 +947,18 @@ export default function TradingDashboard() {
   // Toast messages
   const [toast, setToast] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   
+  // ⌘K / Ctrl+K → focus search
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        searchRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   const handleSearch = async (symbol?: string) => {
     const sym = (symbol || ticker || '').trim().toUpperCase();
     if (!sym) return;
@@ -1007,7 +1034,7 @@ export default function TradingDashboard() {
   };
   
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-4">
+    <div className="min-h-screen text-white">
       {/* Order Modal */}
       <OrderModal
         isOpen={orderModalOpen}
@@ -1018,14 +1045,14 @@ export default function TradingDashboard() {
         initialQuantity={orderQuantity}
         assetType="EQUITY"
       />
-      
+
       {/* Evidence Drawer */}
-      <EvidenceDrawer 
+      <EvidenceDrawer
         isOpen={evidenceDrawerOpen}
         onClose={() => setEvidenceDrawerOpen(false)}
         data={evidenceData}
       />
-      
+
       {/* Toast Notifications */}
       {toast?.type === 'success' && (
         <SuccessToast message={toast.message} onClose={() => setToast(null)} />
@@ -1033,123 +1060,126 @@ export default function TradingDashboard() {
       {toast?.type === 'error' && (
         <ErrorToast message={toast.message} onClose={() => setToast(null)} />
       )}
-      
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="mb-8 text-center">
-          <h1 className="text-4xl font-bold bg-gradient-to-r from-blue-400 to-emerald-400 bg-clip-text text-transparent mb-2">
-            AI Hedge Fund
-          </h1>
-          <p className="text-slate-400 text-sm">
-            Professional-grade stock & options analysis
-          </p>
-        </div>
-        
-        {/* Search Bar */}
-        <div className="mb-6">
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={ticker}
-              onChange={(e) => setTicker(e.target.value.toUpperCase())}
-              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-              placeholder="Enter ticker symbol (e.g., AAPL, TSLA, NVDA)..."
-              className="flex-1 px-4 py-3 bg-slate-800/50 border border-slate-700 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-            />
+
+      {/* ── Sticky Top Bar ──────────────────────────────────── */}
+      <header className="sticky top-0 z-40 border-b backdrop-blur-xl bg-surface-1/80"
+              style={{ borderColor: 'var(--border)' }}>
+        <div className="max-w-6xl mx-auto px-4">
+          {/* Brand + Search row */}
+          <div className="flex items-center gap-4 h-14">
+            {/* Logo mark */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center">
+                <Sparkles size={14} className="text-white" />
+              </div>
+              <span className="font-semibold text-sm text-slate-100 hidden sm:block">AI Hedge Fund</span>
+            </div>
+
+            {/* Search */}
+            <div className="flex-1 max-w-md relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+              <input
+                ref={searchRef}
+                type="text"
+                value={ticker}
+                onChange={(e) => setTicker(e.target.value.toUpperCase())}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                placeholder="Search ticker…"
+                className="w-full pl-8 pr-16 py-1.5 rounded-lg text-sm bg-surface-2/60 border text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                style={{ borderColor: 'var(--border)' }}
+              />
+              <kbd className="absolute right-3 top-1/2 -translate-y-1/2 hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono text-slate-500 bg-surface-3/40 border pointer-events-none"
+                  style={{ borderColor: 'var(--border-subtle)' }}>
+                ⌘K
+              </kbd>
+            </div>
+
+            {/* Analyze button */}
             <button
               onClick={() => handleSearch()}
               disabled={!ticker}
-              className="px-6 py-3 bg-gradient-to-r from-blue-500 to-emerald-500 hover:from-blue-600 hover:to-emerald-600 rounded-xl font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-200 hover:scale-105 active:scale-95"
+              className="btn-primary flex-shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Analyze
             </button>
           </div>
 
-          {/* Quick Select - Top 10 Most Liquid */}
-          <div className="mt-3">
-            {/* Top 10 Liquid Tickers - Always Visible */}
-            <div className="flex flex-wrap gap-2">
-              {TOP_LIQUID_TICKERS.map((t) => (
-                <button
-                  key={t}
-                  onClick={() => {
-                    setTicker(t);
-                    handleSearch(t);
-                    setShowMoreTickers(false); // Auto-collapse after selection
-                  }}
-                  className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:bg-slate-700/40 hover:text-white transition font-medium"
-                >
-                  {t}
-                </button>
-              ))}
-              
-              {/* Show More Button */}
+          {/* Tab nav row */}
+          <nav className="flex gap-1 overflow-x-auto scrollbar-none -mb-px">
+            {TABS.map(({ id, label, Icon }) => (
               <button
-                onClick={() => setShowMoreTickers(!showMoreTickers)}
-                className="px-3 py-1.5 rounded-lg border border-blue-500/30 bg-blue-500/10 text-xs text-blue-400 hover:bg-blue-500/20 transition font-medium flex items-center gap-1"
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className={`nav-pill ${activeTab === id ? 'nav-pill-active' : ''}`}
               >
-                {showMoreTickers ? '− Show Less' : '+ More Tickers'}
+                <Icon size={13} />
+                {label}
               </button>
-            </div>
-            
-            {/* Additional Tickers - Organized by Industry */}
-            {showMoreTickers && (
-              <div className="mt-3 space-y-3 animate-fade-in">
-                {Object.entries(INDUSTRY_TICKERS).map(([industry, tickers]) => (
-                  <div 
-                    key={industry}
-                    className="p-3 rounded-lg border border-slate-700/50 bg-slate-800/20"
-                  >
-                    {/* Industry Header */}
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-semibold text-blue-400">{industry}</span>
-                      <span className="text-xs text-slate-500">({tickers.length} stocks)</span>
-                    </div>
-                    
-                    {/* Ticker Buttons */}
-                    <div className="flex flex-wrap gap-2">
-                      {tickers.map((t) => (
-                        <button
-                          key={`${industry}-${t}`}
-                          onClick={() => {
-                            setTicker(t);
-                            handleSearch(t);
-                            setShowMoreTickers(false); // Auto-collapse after selection
-                          }}
-                          className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-200 hover:bg-slate-700/40 hover:text-white transition"
-                        >
-                          {t}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+            ))}
+          </nav>
         </div>
-        
-        {/* Tabs */}
-        <div className="flex gap-2 mb-6 p-1 bg-slate-800/50 rounded-xl border border-slate-700 overflow-x-auto">
-          {(['feed', 'stock', 'options', 'tracker', 'alerts', 'backtest', 'greeks'] as const).map((tab) => (
+      </header>
+
+      <div className="max-w-6xl mx-auto px-4 py-6">
+        {/* ── Ticker Chip Row ──────────────────────────────── */}
+        <div className="mb-6">
+          <div className="flex flex-wrap gap-1.5 items-center">
+            {TOP_LIQUID_TICKERS.map((t) => (
+              <button
+                key={t}
+                onClick={() => {
+                  setTicker(t);
+                  handleSearch(t);
+                  setShowMoreTickers(false);
+                }}
+                className="px-2.5 py-1 rounded-md text-xs font-mono font-medium text-slate-300 bg-surface-2/60 border hover:border-slate-500 hover:text-white hover:bg-surface-2 transition-all"
+                style={{ borderColor: 'var(--border)' }}
+              >
+                {t}
+              </button>
+            ))}
             <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`flex-1 px-4 py-2 rounded-lg font-medium transition-all duration-200 whitespace-nowrap ${
-                activeTab === tab
-                  ? 'bg-gradient-to-r from-blue-500 to-emerald-500 text-white shadow-lg'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-              }`}
+              onClick={() => setShowMoreTickers(!showMoreTickers)}
+              className="px-2.5 py-1 rounded-md text-xs font-medium text-blue-400 bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 transition-all flex items-center gap-1"
             >
-              {tab === 'feed' && '🤖 AI Feed'}
-              {tab === 'stock' && '📊 Stocks'}
-              {tab === 'options' && '📈 Options'}
-              {tab === 'tracker' && '💼 Portfolio'}
-              {tab === 'alerts' && '🔔 Alerts'}
-              {tab === 'backtest' && '📈 Backtest'}
-              {tab === 'greeks' && '🎯 Greeks'}
+              {showMoreTickers ? 'Less' : 'More'}
+              <ChevronDown size={11} className={`transition-transform ${showMoreTickers ? 'rotate-180' : ''}`} />
             </button>
-          ))}
+          </div>
+
+          {/* Industry ticker groups */}
+          {showMoreTickers && (
+            <div className="mt-3 space-y-3 animate-fade-in">
+              {Object.entries(INDUSTRY_TICKERS).map(([industry, tickers]) => (
+                <div
+                  key={industry}
+                  className="p-3 rounded-xl border bg-surface-1/40"
+                  style={{ borderColor: 'var(--border-subtle)' }}
+                >
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-xs font-semibold text-blue-400">{industry}</span>
+                    <span className="text-xs text-slate-600">({tickers.length})</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {tickers.map((t) => (
+                      <button
+                        key={`${industry}-${t}`}
+                        onClick={() => {
+                          setTicker(t);
+                          handleSearch(t);
+                          setShowMoreTickers(false);
+                        }}
+                        className="px-2.5 py-1 rounded-md text-xs font-mono font-medium text-slate-300 bg-surface-2/60 border hover:border-slate-500 hover:text-white hover:bg-surface-2 transition-all"
+                        style={{ borderColor: 'var(--border)' }}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
         
         {/* Tab Content */}
@@ -1207,9 +1237,12 @@ export default function TradingDashboard() {
         </div>
         
         {/* Footer */}
-        <div className="mt-12 pt-6 border-t border-slate-800 text-center text-slate-500 text-sm">
-          <p>⚠️ Not financial advice • Markets are risky • Do your own research</p>
-          <p className="mt-1">Data provided by Schwab Market Data API • Real-time quotes & options chains</p>
+        <div className="mt-12 pt-6 border-t text-center text-sm" style={{ borderColor: 'var(--border-subtle)' }}>
+          <p className="flex items-center justify-center gap-1.5 text-slate-500">
+            <AlertTriangle size={13} />
+            Not financial advice · Markets are risky · Do your own research
+          </p>
+          <p className="mt-1 text-slate-600">Data provided by Schwab Market Data API · Real-time quotes & options chains</p>
         </div>
       </div>
     </div>

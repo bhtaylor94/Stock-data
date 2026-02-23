@@ -20,9 +20,9 @@ export function StockScoreBreakdown({ analysis }: { analysis: any }) {
               fundScore >= 5 ? 'text-blue-400' : 'text-amber-400'
             }`}>{fundScore}/{fundMax}</span>
           </div>
-          <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-            <div 
-              className={`h-full ${
+          <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className={`h-full transition-all duration-700 ease-out ${
                 fundScore >= 7 ? 'bg-emerald-400' :
                 fundScore >= 5 ? 'bg-blue-400' : 'bg-amber-400'
               }`}
@@ -30,7 +30,7 @@ export function StockScoreBreakdown({ analysis }: { analysis: any }) {
             />
           </div>
         </div>
-        
+
         {/* Technical */}
         <div>
           <div className="flex items-center justify-between mb-1">
@@ -40,9 +40,9 @@ export function StockScoreBreakdown({ analysis }: { analysis: any }) {
               techScore >= 5 ? 'text-blue-400' : 'text-amber-400'
             }`}>{techScore}/{techMax}</span>
           </div>
-          <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-            <div 
-              className={`h-full ${
+          <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className={`h-full transition-all duration-700 ease-out ${
                 techScore >= 7 ? 'bg-emerald-400' :
                 techScore >= 5 ? 'bg-blue-400' : 'bg-amber-400'
               }`}
