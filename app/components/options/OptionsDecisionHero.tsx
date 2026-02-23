@@ -1,4 +1,5 @@
 import React from 'react';
+import { Bookmark, BarChart2 } from 'lucide-react';
 import { COMPANY_NAMES } from '@/lib/companyNames';
 
 export function OptionsDecisionHero({ 
@@ -103,15 +104,12 @@ export function OptionsDecisionHero({
       {/* Actions */}
       {action !== 'NO_TRADE' && topSuggestion && (
         <div className="mt-3 flex gap-2">
-          <button className="flex-1 px-4 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-medium transition">
-            📌 Track Setup
+          <button className="btn-primary flex-1 justify-center gap-1.5">
+            <Bookmark size={13} />Track Setup
           </button>
           {onViewEvidence && (
-            <button 
-              onClick={onViewEvidence}
-              className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-white transition"
-            >
-              📊 View Evidence
+            <button onClick={onViewEvidence} className="btn-ghost gap-1.5">
+              <BarChart2 size={13} />Evidence
             </button>
           )}
         </div>

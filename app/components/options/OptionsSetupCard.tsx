@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Bookmark, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { TipLabel } from '../core/Tooltip';
 
 export function OptionsSetupCard({ 
@@ -34,7 +35,7 @@ export function OptionsSetupCard({
             {scoreValue}/{maxScore}
           </span>
         </div>
-        <span className="text-slate-400">{expanded ? '▼' : '▶'}</span>
+        {expanded ? <ChevronDown size={13} className="text-slate-400" /> : <ChevronRight size={13} className="text-slate-400" />}
       </button>
 
       {/* Quick Stats */}
@@ -100,11 +101,8 @@ export function OptionsSetupCard({
 
           {/* Track Button */}
           {onTrack && (
-            <button
-              onClick={onTrack}
-              className="w-full px-3 py-2 rounded-lg bg-blue-500/20 text-blue-400 text-sm font-medium hover:bg-blue-500/30 transition"
-            >
-              📌 Track This Setup
+            <button onClick={onTrack} className="btn-primary w-full justify-center gap-1.5">
+              <Bookmark size={12} />Track This Setup
             </button>
           )}
         </div>
@@ -112,7 +110,9 @@ export function OptionsSetupCard({
 
       {/* Liquidity Warning */}
       {contract.bidAskSpread > 0.2 && (
-        <p className="mt-2 text-xs text-amber-400">⚠️ Wide bid-ask spread - low liquidity</p>
+        <p className="mt-2 text-xs text-amber-400 flex items-center gap-1">
+          <AlertTriangle size={10} />Wide bid-ask spread — low liquidity
+        </p>
       )}
     </div>
   );

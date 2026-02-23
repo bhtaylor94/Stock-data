@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSchwabAccessToken, schwabFetchJson } from '@/lib/schwab';
+import { detectUnusualActivityFromChain, type UnusualActivity as UOAResult } from '@/lib/unusualActivityDetector';
+import { getSnapshotStore } from '@/lib/storage/snapshotStore';
 
 export const runtime = 'nodejs';
 
@@ -210,31 +212,18 @@ function parseOptionsChain(chainData: any, currentPrice: number): {
 }
 
 // ============================================================
-// DETECT UNUSUAL OPTIONS ACTIVITY
+// DETECT UNUSUAL OPTIONS ACTIVITY — delegates to lib/unusualActivityDetector.ts
 // ============================================================
-interface UnusualActivity {
-  contract: OptionContract;
-  signals: string[];
-  score: number;
-  sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-  premiumValue: number;
-  convictionLevel: 'HIGH' | 'MEDIUM' | 'LOW';
-  interpretation: string;
-  // NEW: Hedge vs Directional classification
-  tradeType: 'DIRECTIONAL' | 'LIKELY_HEDGE' | 'UNCERTAIN';
-  tradeTypeReason: string;
-  insiderProbability: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY';
-  insiderSignals: string[];
-}
 
-// Research-based criteria for determining hedge vs directional
+// classifyTradeType — now handled inside lib/unusualActivityDetector.ts
+// Keeping stub so TypeScript doesn't break if any call survives in route body.
 function classifyTradeType(
-  contract: OptionContract, 
-  currentPrice: number, 
+  contract: OptionContract,
+  currentPrice: number,
   stockTrend: 'UP' | 'DOWN' | 'SIDEWAYS',
   isNearEarnings: boolean
-): { 
-  tradeType: 'DIRECTIONAL' | 'LIKELY_HEDGE' | 'UNCERTAIN'; 
+): {
+  tradeType: 'DIRECTIONAL' | 'LIKELY_HEDGE' | 'UNCERTAIN';
   reason: string;
   insiderProbability: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY';
   insiderSignals: string[];
@@ -368,115 +357,71 @@ function classifyTradeType(
 }
 
 function detectUnusualActivity(
-  calls: OptionContract[], 
-  puts: OptionContract[], 
+  calls: OptionContract[],
+  puts: OptionContract[],
   currentPrice: number,
   stockTrend: 'UP' | 'DOWN' | 'SIDEWAYS' = 'SIDEWAYS',
-  isNearEarnings: boolean = false
-): UnusualActivity[] {
-  const unusual: UnusualActivity[] = [];
-  
-  const analyzeContract = (c: OptionContract) => {
-    // INSTITUTIONAL FILTER: 30-180 DTE only (not 10-180)
+  isNearEarnings: boolean = false,
+  ticker: string = 'UNKNOWN',
+  repeatFlowMap?: Map<string, number>
+): UOAResult[] {
+  return detectUnusualActivityFromChain(calls, puts, currentPrice, ticker, {
+    stockTrend,
+    isNearEarnings,
+    repeatFlowMap,
+  });
+}
+
+// ── LEGACY STUB (unused body removed) ────────────────────────────────────────
+function _unusedLegacyAnalyzeContract(c: OptionContract) {
+    // retained as dead code to avoid import removal
     if (c.dte < 30 || c.dte > 180) return;
-    if (c.volume < 50 || c.openInterest < 10) return;
-    
     const signals: string[] = [];
     let unusualScore = 0;
-    
+
     if (c.volumeOIRatio >= 5) {
-      signals.push(`🔥🔥 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Extreme)`);
+      signals.push(`Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Extreme)`);
       unusualScore += 40;
     } else if (c.volumeOIRatio >= 3) {
-      signals.push(`🔥 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Very High)`);
+      signals.push(`Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Very High)`);
       unusualScore += 30;
     } else if (c.volumeOIRatio >= 1.5) {
-      signals.push(`📈 Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Elevated)`);
+      signals.push(`Vol/OI: ${c.volumeOIRatio.toFixed(1)}x (Elevated)`);
       unusualScore += 15;
     } else {
       return;
     }
-    
+
     const premiumValue = c.mark * c.volume * 100;
     if (premiumValue >= 1000000) {
-      signals.push(`🐋 Premium: $${(premiumValue / 1e6).toFixed(2)}M (Whale)`);
+      signals.push(`Premium: $${(premiumValue / 1e6).toFixed(2)}M (Whale)`);
       unusualScore += 35;
     } else if (premiumValue >= 500000) {
-      signals.push(`💰 Premium: $${(premiumValue / 1e3).toFixed(0)}K (Institutional)`);
+      signals.push(`Premium: $${(premiumValue / 1e3).toFixed(0)}K (Institutional)`);
       unusualScore += 25;
     } else if (premiumValue >= 250000) {
-      signals.push(`💵 Premium: $${(premiumValue / 1e3).toFixed(0)}K`);
+      signals.push(`Premium: $${(premiumValue / 1e3).toFixed(0)}K`);
       unusualScore += 15;
     } else {
-      // Below $250k premium = too small for institutional
       return;
     }
-    
+
     if (c.volume >= c.openInterest && c.openInterest > 100) {
-      signals.push(`🆕 New Positions Opening`);
+      signals.push(`New Positions Opening`);
       unusualScore += 20;
     }
-    
+
     if (c.volume >= 10000) {
-      signals.push(`📊 Volume: ${c.volume.toLocaleString()} (Massive)`);
+      signals.push(`Volume: ${c.volume.toLocaleString()} (Massive)`);
       unusualScore += 20;
     } else if (c.volume >= 5000) {
-      signals.push(`📊 Volume: ${c.volume.toLocaleString()} (High)`);
+      signals.push(`Volume: ${c.volume.toLocaleString()} (High)`);
       unusualScore += 10;
     }
-    
-    if (c.dte >= 30 && c.dte <= 90) {
-      signals.push(`📅 ${c.dte} DTE - Optimal timeframe`);
-      unusualScore += 10;
-    }
-    
-    if (unusualScore < 40) return;
-    
-    const sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = c.type === 'call' ? 'BULLISH' : 'BEARISH';
-    
-    let convictionLevel: 'HIGH' | 'MEDIUM' | 'LOW';
-    if (unusualScore >= 80) convictionLevel = 'HIGH';
-    else if (unusualScore >= 55) convictionLevel = 'MEDIUM';
-    else convictionLevel = 'LOW';
-    
-    // NEW: Classify as hedge vs directional
-    const classification = classifyTradeType(c, currentPrice, stockTrend, isNearEarnings);
-    
-    // Adjust interpretation based on trade type
-    let interpretation = `${convictionLevel} conviction ${sentiment.toLowerCase()} bet targeting $${c.strike} within ${c.dte} days.`;
-    if (classification.tradeType === 'LIKELY_HEDGE') {
-      interpretation = `LIKELY HEDGE: ${sentiment.toLowerCase()} protection targeting $${c.strike}. ${classification.reason}`;
-    } else if (classification.tradeType === 'DIRECTIONAL') {
-      interpretation = `DIRECTIONAL BET: ${convictionLevel} conviction ${sentiment.toLowerCase()} position targeting $${c.strike}. ${classification.reason}`;
-    }
-    
-    // Add insider warning if applicable
-    if (classification.insiderProbability === 'HIGH' || classification.insiderProbability === 'MEDIUM') {
-      signals.push(`🔍 Insider probability: ${classification.insiderProbability}`);
-    }
-    
-    unusual.push({
-      contract: c,
-      signals,
-      score: unusualScore,
-      sentiment,
-      premiumValue,
-      convictionLevel,
-      interpretation,
-      tradeType: classification.tradeType,
-      tradeTypeReason: classification.reason,
-      insiderProbability: classification.insiderProbability,
-      insiderSignals: classification.insiderSignals,
-    });
-  };
-  
-  calls.forEach(analyzeContract);
-  puts.forEach(analyzeContract);
-  
-  unusual.sort((a, b) => b.score - a.score);
-  
-  return unusual.slice(0, 10);
+    if (c.dte >= 30 && c.dte <= 90) unusualScore += 10;
+    return unusualScore; // unused in new flow
 }
+void _unusedLegacyAnalyzeContract; // suppress unused warning
 
 // ============================================================
 // IV ANALYSIS
@@ -592,6 +537,380 @@ function calculateSMA(prices: number[], period: number): number {
 }
 
 // ============================================================
+// IV CONTEXT HELPER
+// ============================================================
+type IVContext = 'FAVORABLE' | 'ACCEPTABLE' | 'CAUTION' | 'AVOID';
+
+function getIVContext(ivRank: number): IVContext {
+  if (ivRank < 35) return 'FAVORABLE';
+  if (ivRank < 55) return 'ACCEPTABLE';
+  if (ivRank < 75) return 'CAUTION';
+  return 'AVOID';
+}
+
+// ============================================================
+// NAMED SETUP MATCHING
+// ============================================================
+export interface OptionsSetup {
+  name: string;
+  setupId: string;
+  description: string;
+  sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  confluenceScore: number;         // 0-100
+  confidenceLabel: 'EXTREME' | 'VERY_HIGH' | 'HIGH' | 'MEDIUM' | 'WATCH';
+  ivContext: IVContext;
+  recommendedStructure: {
+    type: 'CALL' | 'PUT' | 'STRADDLE' | 'STRANGLE';
+    dteLow: number;
+    dteHigh: number;
+    deltaLow: number;
+    deltaHigh: number;
+    description: string;
+  };
+  recommendedContract?: {
+    strike: number;
+    expiration: string;
+    dte: number;
+    delta: number;
+    bid: number;
+    ask: number;
+    mark: number;
+    iv: number;
+    volume: number;
+    openInterest: number;
+    spreadPercent: number;
+  };
+  criteriaHit: string[];
+  uoaConfirmation: boolean;
+  totalPremium: number;     // Net UOA premium pointing this direction
+  riskNote: string;
+}
+
+function matchOptionsSetups(params: {
+  calls: OptionContract[];
+  puts: OptionContract[];
+  trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  rsi: number;
+  sma20: number;
+  sma50: number;
+  support: number;
+  resistance: number;
+  currentPrice: number;
+  ivAnalysis: IVAnalysis;
+  hv20: number;
+  unusualActivity: UOAResult[];
+  gex: ReturnType<typeof calculateGEX>;
+}): OptionsSetup[] {
+  const {
+    calls, puts, trend, rsi, sma20, sma50, support, resistance,
+    currentPrice, ivAnalysis, hv20, unusualActivity, gex,
+  } = params;
+
+  const ivRank = ivAnalysis.ivRank;
+  const ivCtx = getIVContext(ivRank);
+  const atmIV  = ivAnalysis.atmIV;
+
+  // Aggregate UOA signals
+  const bullishUOA = unusualActivity.filter(u => u.sentiment === 'BULLISH' && !u.hedgeDiscountApplied);
+  const bearishUOA = unusualActivity.filter(u => u.sentiment === 'BEARISH' && !u.hedgeDiscountApplied);
+  const uoaBullPremium = bullishUOA.reduce((s, u) => s + u.metrics.premium, 0);
+  const uoaBearPremium = bearishUOA.reduce((s, u) => s + u.metrics.premium, 0);
+  const topBullUOA = bullishUOA[0];
+  const topBearUOA = bearishUOA[0];
+  const hasBullFlow = bullishUOA.length > 0 && (topBullUOA?.uoaScore ?? 0) >= 50;
+  const hasBearFlow = bearishUOA.length > 0 && (topBearUOA?.uoaScore ?? 0) >= 50;
+  const hasGoldenSweep = unusualActivity.some(u => u.alertType === 'GOLDEN_SWEEP');
+
+  // GEX context
+  const negGEX = gex.regime === 'NEGATIVE'; // dealers short gamma → amplified moves
+
+  // Helpers
+  const pctFromSupport = (currentPrice - support) / support * 100;
+  const pctFromResistance = (resistance - currentPrice) / resistance * 100;
+
+  const ivContextScore = ivCtx === 'FAVORABLE' ? 100 : ivCtx === 'ACCEPTABLE' ? 70 : ivCtx === 'CAUTION' ? 35 : 0;
+
+  // Find best matching contract in a window
+  function bestContract(type: 'call' | 'put', dteLow: number, dteHigh: number, deltaLow: number, deltaHigh: number): OptionContract | undefined {
+    const pool = (type === 'call' ? calls : puts).filter(c =>
+      c.dte >= dteLow && c.dte <= dteHigh &&
+      Math.abs(c.delta) >= deltaLow && Math.abs(c.delta) <= deltaHigh &&
+      c.spreadPercent <= 12 && c.openInterest >= 200 && c.mark >= 0.10
+    );
+    return pool.sort((a, b) => b.volume - a.volume)[0];
+  }
+
+  const setups: OptionsSetup[] = [];
+
+  // ── 1. FLOW CONFIRMATION BREAKOUT ────────────────────────────────────────
+  {
+    const criteria: string[] = [];
+    let techScore = 0;
+    const priceAboveRes = currentPrice >= resistance * 0.99;
+    if (priceAboveRes) { criteria.push('Price at/above resistance'); techScore += 25; }
+    if (trend === 'BULLISH') { criteria.push('Uptrend confirmed (SMA20 > SMA50)'); techScore += 20; }
+    if (rsi > 55 && rsi < 80) { criteria.push(`RSI ${rsi.toFixed(0)} — bullish momentum`); techScore += 15; }
+    const topUOAscore = topBullUOA?.uoaScore ?? 0;
+    if (hasBullFlow) { criteria.push(`Call sweep confirmed (score ${topUOAscore})`); techScore += 15; }
+    if (ivCtx !== 'AVOID') { criteria.push(`IV context: ${ivCtx}`); techScore += 10; }
+    if (negGEX) { criteria.push('Negative GEX — amplified upside breakout'); techScore += 15; }
+
+    if (criteria.length >= 3 && hasBullFlow) {
+      const uoaS = hasBullFlow ? (topBullUOA?.uoaScore ?? 0) : 0;
+      const confluence = Math.round(uoaS * 0.45 + techScore * 0.35 + ivContextScore * 0.20);
+      const rec = bestContract('call', 14, 35, 0.30, 0.55);
+      setups.push({
+        name: 'Flow Confirmation Breakout',
+        setupId: 'FLOW_BREAKOUT',
+        description: 'Price breaks resistance while large call sweep confirms institutional conviction.',
+        sentiment: 'BULLISH',
+        confluenceScore: Math.min(100, confluence),
+        confidenceLabel: confluence >= 80 ? 'EXTREME' : confluence >= 65 ? 'VERY_HIGH' : confluence >= 50 ? 'HIGH' : confluence >= 35 ? 'MEDIUM' : 'WATCH',
+        ivContext: ivCtx,
+        recommendedStructure: { type: 'CALL', dteLow: 14, dteHigh: 35, deltaLow: 0.30, deltaHigh: 0.55, description: 'ATM–slightly OTM call, 14–35 DTE' },
+        recommendedContract: rec ? { strike: rec.strike, expiration: rec.expiration, dte: rec.dte, delta: rec.delta, bid: rec.bid, ask: rec.ask, mark: rec.mark, iv: rec.iv, volume: rec.volume, openInterest: rec.openInterest, spreadPercent: rec.spreadPercent } : undefined,
+        criteriaHit: criteria,
+        uoaConfirmation: hasBullFlow,
+        totalPremium: uoaBullPremium,
+        riskNote: 'Max loss = premium paid. Exit if price falls back below breakout level.',
+      });
+    }
+  }
+
+  // ── 2. GAMMA SQUEEZE PRECURSOR ────────────────────────────────────────────
+  {
+    const criteria: string[] = [];
+    let techScore = 0;
+    // Repeat flow at same strike = key signal
+    const repeatFlow = unusualActivity.filter(u => u.isRepeatFlow && u.type === 'CALL' && !u.hedgeDiscountApplied);
+    const highVolOI = unusualActivity.filter(u => u.metrics.volumeOIRatio >= 2 && u.type === 'CALL' && u.dte >= 7 && u.dte <= 30);
+    const gexNegStrikes = gex.byStrike.filter(s => s.netGEX < -0.5 && s.strike > currentPrice);
+
+    if (repeatFlow.length >= 1) { criteria.push(`Repeat call accumulation (${repeatFlow.length} contracts)`); techScore += 25; }
+    if (highVolOI.length >= 1) { criteria.push(`Vol/OI >= 2x on near-dated calls`); techScore += 20; }
+    if (gexNegStrikes.length >= 1) { criteria.push('Negative GEX strikes above price — dealers must buy to hedge'); techScore += 20; }
+    if (trend !== 'BEARISH') { criteria.push('Trend not bearish — squeeze conditions valid'); techScore += 10; }
+    if (rsi < 60) { criteria.push(`RSI ${rsi.toFixed(0)} — not yet overbought`); techScore += 10; }
+
+    if (criteria.length >= 2 && (repeatFlow.length >= 1 || highVolOI.length >= 2)) {
+      const uoaS = topBullUOA?.uoaScore ?? 50;
+      const confluence = Math.round(uoaS * 0.45 + techScore * 0.35 + ivContextScore * 0.20);
+      const targetStrike = gexNegStrikes[0]?.strike ?? (repeatFlow[0]?.strike ?? undefined);
+      const rec = bestContract('call', 7, 30, 0.25, 0.45);
+      setups.push({
+        name: 'Gamma Squeeze Precursor',
+        setupId: 'GAMMA_SQUEEZE',
+        description: 'Concentrated call accumulation near negative GEX strikes. Dealers will be forced to buy shares as price rises, amplifying the move.',
+        sentiment: 'BULLISH',
+        confluenceScore: Math.min(100, confluence),
+        confidenceLabel: confluence >= 80 ? 'EXTREME' : confluence >= 65 ? 'VERY_HIGH' : confluence >= 50 ? 'HIGH' : 'MEDIUM',
+        ivContext: ivCtx,
+        recommendedStructure: { type: 'CALL', dteLow: 7, dteHigh: 30, deltaLow: 0.25, deltaHigh: 0.45, description: `OTM call near GEX wall${targetStrike ? ` ($${targetStrike})` : ''}, 7–30 DTE` },
+        recommendedContract: rec ? { strike: rec.strike, expiration: rec.expiration, dte: rec.dte, delta: rec.delta, bid: rec.bid, ask: rec.ask, mark: rec.mark, iv: rec.iv, volume: rec.volume, openInterest: rec.openInterest, spreadPercent: rec.spreadPercent } : undefined,
+        criteriaHit: criteria,
+        uoaConfirmation: hasBullFlow,
+        totalPremium: uoaBullPremium,
+        riskNote: 'Squeeze takes time — use 7–30 DTE, not 0DTE. Enter on price approaching the GEX wall.',
+      });
+    }
+  }
+
+  // ── 3. PRE-EARNINGS IV EXPANSION ──────────────────────────────────────────
+  // Note: without an earnings calendar, we approximate using IV term structure backwardation
+  {
+    const criteria: string[] = [];
+    let techScore = 0;
+    const isBackwardation = params.ivAnalysis.ivRank < 60;
+    // Proxy for earnings: near-term IV elevated + short-dated unusual call flow
+    const shortDatedFlow = unusualActivity.filter(u => u.dte <= 21 && u.type === 'CALL' && u.uoaScore >= 45);
+    const ivVsHV = atmIV > 0 && hv20 > 0 ? atmIV / hv20 : 1;
+
+    if (shortDatedFlow.length >= 1) { criteria.push(`Short-dated call flow (${shortDatedFlow.length} contracts, DTE ≤ 21)`); techScore += 30; }
+    if (ivVsHV >= 1.2) { criteria.push(`IV ${(ivVsHV).toFixed(1)}x historical vol — event premium building`); techScore += 25; }
+    if (ivCtx === 'ACCEPTABLE' || ivCtx === 'FAVORABLE') { criteria.push(`IV rank ${ivRank.toFixed(0)} — room to expand`); techScore += 20; }
+    if (hasBullFlow || hasGoldenSweep) { criteria.push('Large directional flow confirms positioning'); techScore += 25; }
+
+    if (criteria.length >= 2 && shortDatedFlow.length >= 1) {
+      const uoaS = topBullUOA?.uoaScore ?? topBearUOA?.uoaScore ?? 45;
+      const confluence = Math.round(uoaS * 0.45 + techScore * 0.35 + ivContextScore * 0.20);
+      const rec = bestContract('call', 7, 25, 0.40, 0.60);
+      setups.push({
+        name: 'Pre-Catalyst IV Expansion',
+        setupId: 'IV_EXPANSION',
+        description: 'Short-dated flow + IV building above historical vol signals an upcoming catalyst. Buy before IV peaks.',
+        sentiment: 'NEUTRAL',
+        confluenceScore: Math.min(100, confluence),
+        confidenceLabel: confluence >= 65 ? 'HIGH' : confluence >= 50 ? 'MEDIUM' : 'WATCH',
+        ivContext: ivCtx,
+        recommendedStructure: { type: 'STRADDLE', dteLow: 7, dteHigh: 21, deltaLow: 0.40, deltaHigh: 0.55, description: 'ATM straddle or OTM strangle, 7–21 DTE. Exit BEFORE event to capture IV expansion.' },
+        recommendedContract: rec ? { strike: rec.strike, expiration: rec.expiration, dte: rec.dte, delta: rec.delta, bid: rec.bid, ask: rec.ask, mark: rec.mark, iv: rec.iv, volume: rec.volume, openInterest: rec.openInterest, spreadPercent: rec.spreadPercent } : undefined,
+        criteriaHit: criteria,
+        uoaConfirmation: hasBullFlow || hasBearFlow,
+        totalPremium: uoaBullPremium + uoaBearPremium,
+        riskNote: 'Exit BEFORE the catalyst to avoid IV crush. Max loss = premium paid.',
+      });
+    }
+  }
+
+  // ── 4. MOMENTUM CONTINUATION ──────────────────────────────────────────────
+  {
+    const criteria: string[] = [];
+    let techScore = 0;
+    const inUptrend = currentPrice > sma20 && sma20 > sma50;
+    const inDowntrend = currentPrice < sma20 && sma20 < sma50;
+
+    if (inUptrend) { criteria.push('Price > SMA20 > SMA50 — confirmed uptrend'); techScore += 20; }
+    if (inDowntrend) { criteria.push('Price < SMA20 < SMA50 — confirmed downtrend'); techScore += 20; }
+    if (rsi > 50 && rsi < 70 && inUptrend) { criteria.push(`RSI ${rsi.toFixed(0)} — trend momentum zone`); techScore += 15; }
+    if (rsi < 50 && rsi > 30 && inDowntrend) { criteria.push(`RSI ${rsi.toFixed(0)} — bearish momentum zone`); techScore += 15; }
+    if (inUptrend && hasBullFlow) { criteria.push(`Call sweep in uptrend — high conviction`); techScore += 25; }
+    if (inDowntrend && hasBearFlow) { criteria.push(`Put sweep in downtrend — high conviction`); techScore += 25; }
+    if (ivCtx !== 'AVOID') { criteria.push(`IV context: ${ivCtx}`); techScore += 15; }
+
+    const sentiment: 'BULLISH' | 'BEARISH' = inDowntrend ? 'BEARISH' : 'BULLISH';
+    const hasFlow = sentiment === 'BULLISH' ? hasBullFlow : hasBearFlow;
+
+    if (criteria.length >= 3 && hasFlow && (inUptrend || inDowntrend)) {
+      const uoaS = sentiment === 'BULLISH' ? (topBullUOA?.uoaScore ?? 0) : (topBearUOA?.uoaScore ?? 0);
+      const confluence = Math.round(uoaS * 0.45 + techScore * 0.35 + ivContextScore * 0.20);
+      const rec = bestContract(sentiment === 'BULLISH' ? 'call' : 'put', 21, 45, 0.35, 0.55);
+      const totalPrem = sentiment === 'BULLISH' ? uoaBullPremium : uoaBearPremium;
+      setups.push({
+        name: 'Momentum Continuation',
+        setupId: 'MOMENTUM_CONT',
+        description: `Strong ${sentiment.toLowerCase()} trend confirmed by EMAs. Large ${sentiment === 'BULLISH' ? 'call' : 'put'} flow confirms institutional participation.`,
+        sentiment,
+        confluenceScore: Math.min(100, confluence),
+        confidenceLabel: confluence >= 80 ? 'EXTREME' : confluence >= 65 ? 'VERY_HIGH' : confluence >= 50 ? 'HIGH' : 'MEDIUM',
+        ivContext: ivCtx,
+        recommendedStructure: { type: sentiment === 'BULLISH' ? 'CALL' : 'PUT', dteLow: 21, dteHigh: 45, deltaLow: 0.35, deltaHigh: 0.55, description: `ATM ${sentiment === 'BULLISH' ? 'call' : 'put'}, 21–45 DTE — trend needs time to play out` },
+        recommendedContract: rec ? { strike: rec.strike, expiration: rec.expiration, dte: rec.dte, delta: rec.delta, bid: rec.bid, ask: rec.ask, mark: rec.mark, iv: rec.iv, volume: rec.volume, openInterest: rec.openInterest, spreadPercent: rec.spreadPercent } : undefined,
+        criteriaHit: criteria,
+        uoaConfirmation: hasFlow,
+        totalPremium: totalPrem,
+        riskNote: 'Do NOT use 0DTE for trend continuation — use 21–45 DTE to give the trend room.',
+      });
+    }
+  }
+
+  // ── 5. SUPPORT RECLAIM REVERSAL ───────────────────────────────────────────
+  {
+    const criteria: string[] = [];
+    let techScore = 0;
+    const nearSupport = pctFromSupport < 3;
+    const oversold = rsi < 38;
+
+    if (nearSupport) { criteria.push(`Price within 3% of key support ($${support.toFixed(2)})`); techScore += 25; }
+    if (oversold) { criteria.push(`RSI ${rsi.toFixed(0)} — oversold territory`); techScore += 20; }
+    if (hasBullFlow && nearSupport) { criteria.push('Call buying at support — institutional conviction'); techScore += 30; }
+    if (ivCtx === 'FAVORABLE' || ivCtx === 'ACCEPTABLE') { criteria.push(`IV rank ${ivRank.toFixed(0)} — reasonable premium`); techScore += 15; }
+
+    if (criteria.length >= 2 && nearSupport && hasBullFlow) {
+      const uoaS = topBullUOA?.uoaScore ?? 0;
+      const confluence = Math.round(uoaS * 0.45 + techScore * 0.35 + ivContextScore * 0.20);
+      const rec = bestContract('call', 21, 45, 0.40, 0.65);
+      setups.push({
+        name: 'Support Reclaim Reversal',
+        setupId: 'SUPPORT_REVERSAL',
+        description: 'Large call buying at key technical support. Institutions are loading up expecting a bounce.',
+        sentiment: 'BULLISH',
+        confluenceScore: Math.min(100, confluence),
+        confidenceLabel: confluence >= 65 ? 'HIGH' : confluence >= 50 ? 'MEDIUM' : 'WATCH',
+        ivContext: ivCtx,
+        recommendedStructure: { type: 'CALL', dteLow: 21, dteHigh: 45, deltaLow: 0.40, deltaHigh: 0.65, description: 'ITM or ATM call, 21–45 DTE — higher delta for higher probability bounce play' },
+        recommendedContract: rec ? { strike: rec.strike, expiration: rec.expiration, dte: rec.dte, delta: rec.delta, bid: rec.bid, ask: rec.ask, mark: rec.mark, iv: rec.iv, volume: rec.volume, openInterest: rec.openInterest, spreadPercent: rec.spreadPercent } : undefined,
+        criteriaHit: criteria,
+        uoaConfirmation: hasBullFlow,
+        totalPremium: uoaBullPremium,
+        riskNote: 'Exit if support level breaks with volume. Stop = close below support.',
+      });
+    }
+  }
+
+  // ── 6. RESISTANCE BREAKDOWN (BEARISH) ────────────────────────────────────
+  {
+    const criteria: string[] = [];
+    let techScore = 0;
+    const nearResistance = pctFromResistance < 3;
+    const overbought = rsi > 68;
+
+    if (trend === 'BEARISH') { criteria.push('Bearish trend (SMA20 < SMA50)'); techScore += 20; }
+    if (nearResistance) { criteria.push(`Price within 3% of resistance ($${resistance.toFixed(2)})`); techScore += 20; }
+    if (overbought) { criteria.push(`RSI ${rsi.toFixed(0)} — overbought at resistance`); techScore += 20; }
+    if (hasBearFlow) { criteria.push(`Put sweep confirmed (score ${topBearUOA?.uoaScore ?? 0})`); techScore += 30; }
+    if (ivCtx !== 'AVOID') { criteria.push(`IV context: ${ivCtx}`); techScore += 10; }
+
+    if (criteria.length >= 3 && hasBearFlow) {
+      const uoaS = topBearUOA?.uoaScore ?? 0;
+      const confluence = Math.round(uoaS * 0.45 + techScore * 0.35 + ivContextScore * 0.20);
+      const rec = bestContract('put', 14, 35, 0.30, 0.55);
+      setups.push({
+        name: 'Resistance Breakdown',
+        setupId: 'RESISTANCE_BREAK',
+        description: 'Put buying at resistance with overbought conditions. Institutions positioning for reversal or continuation lower.',
+        sentiment: 'BEARISH',
+        confluenceScore: Math.min(100, confluence),
+        confidenceLabel: confluence >= 65 ? 'HIGH' : confluence >= 50 ? 'MEDIUM' : 'WATCH',
+        ivContext: ivCtx,
+        recommendedStructure: { type: 'PUT', dteLow: 14, dteHigh: 35, deltaLow: 0.30, deltaHigh: 0.55, description: 'ATM or slightly OTM put, 14–35 DTE' },
+        recommendedContract: rec ? { strike: rec.strike, expiration: rec.expiration, dte: rec.dte, delta: rec.delta, bid: rec.bid, ask: rec.ask, mark: rec.mark, iv: rec.iv, volume: rec.volume, openInterest: rec.openInterest, spreadPercent: rec.spreadPercent } : undefined,
+        criteriaHit: criteria,
+        uoaConfirmation: hasBearFlow,
+        totalPremium: uoaBearPremium,
+        riskNote: 'Max loss = premium paid. Exit if price breaks above resistance with volume.',
+      });
+    }
+  }
+
+  // ── 7. GOLDEN SWEEP FOLLOW ────────────────────────────────────────────────
+  {
+    const goldenSweeps = unusualActivity.filter(u => u.alertType === 'GOLDEN_SWEEP');
+    if (goldenSweeps.length > 0) {
+      const topGolden = goldenSweeps[0];
+      const isBull = topGolden.type === 'CALL';
+      const criteria = [
+        `Golden sweep detected — $${(topGolden.metrics.premium / 1e6).toFixed(2)}M at-ask premium`,
+        `${topGolden.dte} DTE ${topGolden.type} $${topGolden.strike} — institutional conviction`,
+        `UOA score: ${topGolden.uoaScore}/100`,
+      ];
+      const techScore = 60; // Golden sweep itself is high-signal
+      const uoaS = topGolden.uoaScore;
+      const confluence = Math.round(uoaS * 0.55 + techScore * 0.25 + ivContextScore * 0.20);
+      const rec = bestContract(
+        isBull ? 'call' : 'put',
+        Math.max(7, topGolden.dte - 7),
+        Math.min(60, topGolden.dte + 14),
+        0.30, 0.55
+      );
+      setups.push({
+        name: 'Golden Sweep Follow',
+        setupId: 'GOLDEN_SWEEP_FOLLOW',
+        description: `$1M+ premium ${isBull ? 'call' : 'put'} sweep — highest conviction institutional signal. Follow the smart money.`,
+        sentiment: isBull ? 'BULLISH' : 'BEARISH',
+        confluenceScore: Math.min(100, confluence),
+        confidenceLabel: confluence >= 80 ? 'EXTREME' : confluence >= 65 ? 'VERY_HIGH' : 'HIGH',
+        ivContext: ivCtx,
+        recommendedStructure: {
+          type: isBull ? 'CALL' : 'PUT',
+          dteLow: 7, dteHigh: 45, deltaLow: 0.30, deltaHigh: 0.55,
+          description: `Match the sweep: $${topGolden.strike} ${topGolden.type}, similar DTE`,
+        },
+        recommendedContract: rec ? { strike: rec.strike, expiration: rec.expiration, dte: rec.dte, delta: rec.delta, bid: rec.bid, ask: rec.ask, mark: rec.mark, iv: rec.iv, volume: rec.volume, openInterest: rec.openInterest, spreadPercent: rec.spreadPercent } : undefined,
+        criteriaHit: criteria,
+        uoaConfirmation: true,
+        totalPremium: topGolden.metrics.premium,
+        riskNote: 'Golden sweeps are not infallible — use 1–2% max portfolio risk. Stop at -50% of premium.',
+      });
+    }
+  }
+
+  // Sort by confluence score descending
+  return setups
+    .filter(s => s.confluenceScore >= 30)
+    .sort((a, b) => b.confluenceScore - a.confluenceScore);
+}
+
+// ============================================================
 // GENERATE SUGGESTIONS
 // ============================================================
 interface OptionScore {
@@ -686,7 +1005,7 @@ function generateSuggestions(
   rsi: number,
   ivAnalysis: IVAnalysis,
   metrics: MarketMetrics,
-  unusualActivity: UnusualActivity[],
+  unusualActivity: UOAResult[],
 ): any[] {
   const suggestions: any[] = [];
 
@@ -762,11 +1081,11 @@ function liquidityOk(c: OptionContract): boolean {
     const topUnusual = unusualActivity[0];
     suggestions.push({
       type: 'ALERT',
-      strategy: `🔥 Unusual Activity: ${topUnusual.contract.type.toUpperCase()} $${topUnusual.contract.strike}`,
-      contract: topUnusual.contract,
+      strategy: `Unusual Activity: ${topUnusual.type.toUpperCase()} $${topUnusual.strike}`,
+      contract: { type: topUnusual.type, strike: topUnusual.strike, expiration: topUnusual.expiration },
       reasoning: topUnusual.signals,
       warnings: [],
-      confidence: topUnusual.score,
+      confidence: topUnusual.uoaScore,
       riskLevel: 'WARNING',
       sentiment: topUnusual.sentiment,
     });
@@ -1105,13 +1424,68 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
 
   const ivAnalysis = analyzeIV(calls, puts, currentPrice);
   const marketMetrics = calculateMarketMetrics(calls, puts, currentPrice);
-  const unusualActivity = detectUnusualActivity(calls, puts, currentPrice, stockTrend, false);
+
+  // Phase E: load repeat flow map from snapshot store
+  let repeatFlowMap = new Map<string, number>();
+  try {
+    const store = await getSnapshotStore();
+    const recentSnaps = await store.getSnapshotsByTicker(ticker, 10);
+    const today = new Date().toISOString().slice(0, 10);
+    const dayMap = new Map<string, Set<string>>();
+    for (const snap of recentSnaps) {
+      const dayKey = (snap.asOf || '').slice(0, 10);
+      if (dayKey === today) continue; // skip today, only count prior sessions
+      const uoaList: any[] = snap.payload?.uoaContracts ?? [];
+      for (const item of uoaList) {
+        const key = item.optionSymbol ?? `${snap.ticker}_${item.expiration}${item.type?.[0]}${item.strike}`;
+        if (!dayMap.has(key)) dayMap.set(key, new Set());
+        dayMap.get(key)!.add(dayKey);
+      }
+    }
+    for (const [key, days] of dayMap.entries()) {
+      repeatFlowMap.set(key, days.size);
+    }
+  } catch { /* non-fatal */ }
+
+  const unusualActivity = detectUnusualActivity(calls, puts, currentPrice, stockTrend, false, ticker, repeatFlowMap);
+
+  // Phase C: named setup matching
+  const optionsSetups = matchOptionsSetups({
+    calls, puts, trend, rsi, sma20, sma50, support, resistance,
+    currentPrice, ivAnalysis, hv20, unusualActivity, gex,
+  });
+
   const suggestions = generateSuggestions(calls, puts, trend, rsi, ivAnalysis, marketMetrics, unusualActivity);
   const tradable = suggestions.filter((s: any) => s.type === 'CALL' || s.type === 'PUT');
   const tradeDecision = tradable.length === 0 || suggestions[0]?.type === 'NO_TRADE'
     ? { action: 'NO_TRADE', confidence: 0, rationale: suggestions[0]?.reasoning || ['No trade'] }
     : { action: 'OPTIONS_TRADE', confidence: Math.max(0, Math.min(95, Math.round(tradable[0]?.confidence || 0))), rationale: tradable[0]?.reasoning || [] };
 
+
+  // Save snapshot for repeat flow tracking (best-effort)
+  try {
+    const store = await getSnapshotStore();
+    const uoaContracts = unusualActivity.slice(0, 8).map(u => ({
+      optionSymbol: u.optionSymbol,
+      type: u.type,
+      strike: u.strike,
+      expiration: u.expiration,
+      dte: u.dte,
+      uoaScore: u.uoaScore,
+      alertType: u.alertType,
+    }));
+    await store.saveSnapshot({
+      id: `opt_${ticker}_${Date.now()}`,
+      asOf: new Date().toISOString(),
+      source: 'options',
+      ticker,
+      decision: unusualActivity.length > 0 ? 'TRADE' : 'NO_TRADE',
+      setupName: optionsSetups[0]?.name ?? null,
+      confidence: optionsSetups[0]?.confluenceScore ?? 0,
+      evidence: null,
+      payload: { uoaContracts },
+    });
+  } catch { /* non-fatal */ }
 
   const firstExp = expirations[0] || '';
 
@@ -1150,46 +1524,72 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       avgIV: ivAnalysis.atmIV,
       ivRank: ivAnalysis.ivRank,
     },
+    // IV context label for frontend
+    ivContext: getIVContext(ivAnalysis.ivRank),
+    // Named options setups (Phase C)
+    optionsSetups,
     unusualActivity: unusualActivity.map(u => ({
-      strike: u.contract.strike,
-      type: u.contract.type,
-      expiration: u.contract.expiration,
-      dte: u.contract.dte,
-      volume: u.contract.volume,
-      openInterest: u.contract.openInterest,
-      volumeOIRatio: u.contract.volumeOIRatio,
-      delta: u.contract.delta,
-      iv: u.contract.iv,
-      bid: u.contract.bid,
-      ask: u.contract.ask,
-      mark: u.contract.mark,
-      premium: Math.round(u.premiumValue),
-      premiumFormatted: u.premiumValue >= 1000000 
-        ? `$${(u.premiumValue / 1e6).toFixed(2)}M` 
-        : `$${(u.premiumValue / 1e3).toFixed(0)}K`,
+      // Core identification
+      optionSymbol: u.optionSymbol,
+      strike: u.strike,
+      type: u.type,
+      expiration: u.expiration,
+      dte: u.dte,
+      delta: u.delta,
+      // New scoring fields
+      uoaScore: u.uoaScore,
+      tier: u.tier,
+      alertType: u.alertType,
+      scoreBreakdown: u.scoreBreakdown,
+      aggressionProxy: u.aggressionProxy,
+      // Legacy fields (kept for existing component compat)
+      score: u.uoaScore,
+      volume: u.metrics.volume,
+      openInterest: u.metrics.openInterest,
+      volumeOIRatio: u.metrics.volumeOIRatio,
+      bid: u.type === 'CALL'
+        ? (calls.find(c => c.strike === u.strike && c.expiration === u.expiration)?.bid ?? 0)
+        : (puts.find(p => p.strike === u.strike && p.expiration === u.expiration)?.bid ?? 0),
+      ask: u.type === 'CALL'
+        ? (calls.find(c => c.strike === u.strike && c.expiration === u.expiration)?.ask ?? 0)
+        : (puts.find(p => p.strike === u.strike && p.expiration === u.expiration)?.ask ?? 0),
+      mark: u.type === 'CALL'
+        ? (calls.find(c => c.strike === u.strike && c.expiration === u.expiration)?.mark ?? 0)
+        : (puts.find(p => p.strike === u.strike && p.expiration === u.expiration)?.mark ?? 0),
+      premium: Math.round(u.metrics.premium),
+      premiumFormatted: u.metrics.premium >= 1_000_000
+        ? `$${(u.metrics.premium / 1e6).toFixed(2)}M`
+        : `$${(u.metrics.premium / 1e3).toFixed(0)}K`,
       signals: u.signals,
-      score: u.score,
       sentiment: u.sentiment,
       convictionLevel: u.convictionLevel,
       interpretation: u.interpretation,
-      // NEW: Hedge vs Directional classification
       tradeType: u.tradeType,
       tradeTypeReason: u.tradeTypeReason,
       insiderProbability: u.insiderProbability,
       insiderSignals: u.insiderSignals,
-      // Full contract for tracking
+      isRepeatFlow: u.isRepeatFlow,
+      consecutiveDays: u.consecutiveDays,
+      hedgeDiscountApplied: u.hedgeDiscountApplied,
+      // Full contract for tracking (legacy)
       contract: {
-        strike: u.contract.strike,
-        type: u.contract.type,
-        expiration: u.contract.expiration,
-        dte: u.contract.dte,
-        delta: u.contract.delta,
-        volume: u.contract.volume,
-        openInterest: u.contract.openInterest,
-        volumeOIRatio: u.contract.volumeOIRatio,
-        bid: u.contract.bid,
-        ask: u.contract.ask,
-        mark: u.contract.mark,
+        strike: u.strike,
+        type: u.type.toLowerCase(),
+        expiration: u.expiration,
+        dte: u.dte,
+        delta: u.delta,
+        volume: u.metrics.volume,
+        openInterest: u.metrics.openInterest,
+        volumeOIRatio: u.metrics.volumeOIRatio,
+        bid: u.type === 'CALL'
+          ? (calls.find(c => c.strike === u.strike && c.expiration === u.expiration)?.bid ?? 0)
+          : (puts.find(p => p.strike === u.strike && p.expiration === u.expiration)?.bid ?? 0),
+        ask: u.type === 'CALL'
+          ? (calls.find(c => c.strike === u.strike && c.expiration === u.expiration)?.ask ?? 0)
+          : (puts.find(p => p.strike === u.strike && p.expiration === u.expiration)?.ask ?? 0),
+        mark: u.type === 'CALL'
+          ? (calls.find(c => c.strike === u.strike && c.expiration === u.expiration)?.mark ?? 0)
+          : (puts.find(p => p.strike === u.strike && p.expiration === u.expiration)?.mark ?? 0),
       },
     })),
     suggestions,

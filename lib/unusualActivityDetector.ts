@@ -1,6 +1,32 @@
 // lib/unusualActivityDetector.ts
-// Enhanced unusual options activity detection engine
-// Detects: Large trades, unusual volume, aggressive sweeps, gamma squeezes
+// Professional-grade UOA detection engine
+// Scoring model based on Unusual Whales / Cheddar Flow / BlackBox Stocks research
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type AlertType =
+  | 'GOLDEN_SWEEP'   // Premium >= $1M, ask-side, DTE 8-45
+  | 'SWEEP'          // Premium >= $100K, ask-side execution proxy
+  | 'BLOCK'          // Large single print near midpoint
+  | 'UNUSUAL_VOLUME' // Vol/OI >= 2.0, no aggression signal
+  | 'REPEATED_HIT';  // Same contract flagged 2+ consecutive sessions
+
+export type UOATier = 'EXTREME' | 'VERY_HIGH' | 'HIGH' | 'MEDIUM' | 'LOW';
+
+export type AggressionProxy = 'AA' | 'A' | 'M' | 'B' | 'BB';
+
+export interface UOAScoreBreakdown {
+  premium: number;     // 0-30
+  volOI: number;       // 0-20
+  aggression: number;  // 0-20
+  dte: number;         // 0-15
+  moneyness: number;   // 0-10
+  catalyst: number;    // 0-5  (earnings proximity)
+  repeat: number;      // 0-5  (multi-day accumulation)
+  hedgeDiscount: number; // 0 or -20
+}
 
 export interface UnusualActivity {
   symbol: string;
@@ -8,8 +34,22 @@ export interface UnusualActivity {
   type: 'CALL' | 'PUT';
   strike: number;
   expiration: string;
-  activityType: 'SWEEP' | 'BLOCK' | 'UNUSUAL_VOLUME' | 'GAMMA_SQUEEZE' | 'WHALE_TRADE';
+  dte: number;
+  delta: number;
+
+  // Scoring
+  uoaScore: number;          // 0-100 composite
+  tier: UOATier;
+  alertType: AlertType;
+  scoreBreakdown: UOAScoreBreakdown;
+  aggressionProxy: AggressionProxy;
+
+  // Legacy compat fields (used by existing components)
   severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'EXTREME';
+  activityType: 'SWEEP' | 'BLOCK' | 'UNUSUAL_VOLUME' | 'GAMMA_SQUEEZE' | 'WHALE_TRADE';
+  confidence: number; // alias for uoaScore
+
+  // Metrics
   metrics: {
     volume: number;
     openInterest: number;
@@ -19,176 +59,373 @@ export interface UnusualActivity {
     premium: number;
     impliedMove: number;
   };
+
+  // Classification
   sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
-  confidence: number;
+  tradeType: 'DIRECTIONAL' | 'LIKELY_HEDGE' | 'UNCERTAIN';
+  tradeTypeReason: string;
+  hedgeDiscountApplied: boolean;
+
+  // Insider signals (kept for existing UnusualActivitySection)
+  insiderProbability: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY';
+  insiderSignals: string[];
+
+  // Repeat flow
+  isRepeatFlow: boolean;
+  consecutiveDays: number;
+
   reasoning: string[];
+  signals: string[];  // alias for reasoning (legacy compat)
   timestamp: number;
+
+  // For compatibility with options route consumer
+  convictionLevel: 'HIGH' | 'MEDIUM' | 'LOW';
+  interpretation: string;
 }
 
 export interface ActivityFilters {
   minVolume?: number;
   minPremium?: number;
   minVolumeOIRatio?: number;
+  minUOAScore?: number;
   minSeverity?: 'LOW' | 'MEDIUM' | 'HIGH' | 'EXTREME';
   types?: Array<'CALL' | 'PUT'>;
   sentiments?: Array<'BULLISH' | 'BEARISH' | 'NEUTRAL'>;
+  excludeHedges?: boolean;
 }
 
-// ============================================================
-// DETECTION ALGORITHMS
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// SCORING HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Detects unusual options activity from options chain data
- */
-export function detectUnusualActivity(
-  optionsChain: any[],
-  underlyingPrice: number,
-  filters?: ActivityFilters
-): UnusualActivity[] {
-  const activities: UnusualActivity[] = [];
+function scorePremium(premium: number): number {
+  if (premium < 20_000) return 0;
+  if (premium < 100_000) return 5;
+  if (premium < 250_000) return 10;
+  if (premium < 500_000) return 18;
+  if (premium < 1_000_000) return 24;
+  return 30; // $1M+ golden tier
+}
 
-  for (const contract of optionsChain) {
-    const activity = analyzeContract(contract, underlyingPrice);
-    
-    if (activity && meetsFilters(activity, filters)) {
-      activities.push(activity);
-    }
+function scoreVolOI(ratio: number, volExceedsOI: boolean): number {
+  let s = 0;
+  if (ratio >= 5) s = 20;
+  else if (ratio >= 2) s = 15;
+  else if (ratio >= 1) s = 10;
+  else if (ratio >= 0.5) s = 5;
+  if (volExceedsOI) s = Math.min(20, s + 5);
+  return s;
+}
+
+function scoreAggression(proxy: AggressionProxy): number {
+  switch (proxy) {
+    case 'AA': return 20;
+    case 'A':  return 10;
+    case 'M':  return 0;
+    case 'B':  return -5;
+    case 'BB': return -10;
   }
-
-  // Sort by severity and confidence
-  return activities.sort((a, b) => {
-    const severityOrder = { EXTREME: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
-    if (severityOrder[a.severity] !== severityOrder[b.severity]) {
-      return severityOrder[b.severity] - severityOrder[a.severity];
-    }
-    return b.confidence - a.confidence;
-  });
 }
 
-/**
- * Analyzes a single options contract for unusual activity
- */
-function analyzeContract(contract: any, underlyingPrice: number): UnusualActivity | null {
-  const volume = contract.totalVolume || 0;
-  const openInterest = contract.openInterest || 0;
-  const bid = contract.bid || 0;
-  const ask = contract.ask || 0;
-  const last = contract.last || 0;
-  const strike = contract.strikePrice || 0;
-  const isCall = contract.putCall === 'CALL';
-  
-  // Skip if no volume
+function scoreDTE(dte: number, hasKnownCatalyst: boolean): number {
+  if (dte === 0) return hasKnownCatalyst ? 15 : 8;
+  if (dte <= 7)  return hasKnownCatalyst ? 15 : 13;
+  if (dte <= 21) return 15;
+  if (dte <= 45) return 12;
+  if (dte <= 90) return 8;
+  if (dte <= 180) return 3;
+  return 0;
+}
+
+function scoreMoneyness(absDelta: number): number {
+  if (absDelta >= 0.30 && absDelta <= 0.50) return 10; // peak conviction zone
+  if (absDelta >= 0.25 && absDelta <= 0.55) return 8;
+  if (absDelta >= 0.55 && absDelta <= 0.65) return 6;
+  if (absDelta >= 0.65 && absDelta <= 0.85) return 4;
+  if (absDelta > 0.85) return 2;
+  if (absDelta >= 0.15) return 5; // OTM — speculative but valid
+  if (absDelta >= 0.05) return 1;
+  return 0;
+}
+
+function deriveAggressionProxy(last: number, bid: number, ask: number): AggressionProxy {
+  if (bid <= 0 || ask <= 0) return 'M';
+  const mid = (bid + ask) / 2;
+  if (last >= ask * 1.01) return 'AA';
+  if (last >= ask * 0.97) return 'A';
+  if (last <= bid * 0.99) return 'BB';
+  if (last <= bid * 1.03) return 'B';
+  return 'M';
+}
+
+function scoreTier(score: number): UOATier {
+  if (score >= 80) return 'EXTREME';
+  if (score >= 65) return 'VERY_HIGH';
+  if (score >= 50) return 'HIGH';
+  if (score >= 30) return 'MEDIUM';
+  return 'LOW';
+}
+
+function tierToSeverity(tier: UOATier): 'LOW' | 'MEDIUM' | 'HIGH' | 'EXTREME' {
+  switch (tier) {
+    case 'EXTREME':   return 'EXTREME';
+    case 'VERY_HIGH': return 'HIGH';
+    case 'HIGH':      return 'HIGH';
+    case 'MEDIUM':    return 'MEDIUM';
+    default:          return 'LOW';
+  }
+}
+
+function classifyAlertType(
+  premium: number,
+  proxy: AggressionProxy,
+  dte: number,
+  isRepeat: boolean,
+  volumeOIRatio: number,
+): AlertType {
+  if (isRepeat) return 'REPEATED_HIT';
+  const isAskSide = proxy === 'A' || proxy === 'AA';
+  if (premium >= 1_000_000 && isAskSide && dte >= 8 && dte <= 45) return 'GOLDEN_SWEEP';
+  if (premium >= 100_000 && isAskSide) return 'SWEEP';
+  if (premium >= 100_000 && !isAskSide) return 'BLOCK';
+  if (volumeOIRatio >= 2.0) return 'UNUSUAL_VOLUME';
+  return 'UNUSUAL_VOLUME';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HEDGE DETECTION
+// ─────────────────────────────────────────────────────────────────────────────
+
+function detectHedge(
+  type: 'CALL' | 'PUT',
+  dte: number,
+  absDelta: number,
+  stockTrend: 'UP' | 'DOWN' | 'SIDEWAYS',
+  volumeOIRatio: number,
+  symbol: string,
+): { isHedge: boolean; reason: string } {
+  // Index/ETF with DTE > 30 — likely portfolio hedge
+  const isIndex = ['SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'XLF', 'XLE', 'XLK', 'XLV'].includes(symbol);
+  if (isIndex && dte > 30 && type === 'PUT') {
+    return { isHedge: true, reason: 'ETF put hedge (portfolio protection)' };
+  }
+  // DTE > 90 AND ITM — portfolio hedge signature
+  if (dte > 90 && absDelta > 0.65) {
+    return { isHedge: true, reason: 'Long-dated ITM option (likely hedge or synthetic)' };
+  }
+  // Trend contradiction with low vol/OI
+  if (type === 'PUT' && stockTrend === 'UP' && volumeOIRatio < 0.5) {
+    return { isHedge: true, reason: 'Put in uptrend with low vol/OI — likely protective hedge' };
+  }
+  // Very low vol/OI means mostly existing positions being traded
+  if (volumeOIRatio < 0.3) {
+    return { isHedge: true, reason: 'Vol/OI < 0.3 — mostly closing positions' };
+  }
+  return { isHedge: false, reason: 'Directional signals predominate' };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INSIDER / CONVICTION SIGNALS
+// ─────────────────────────────────────────────────────────────────────────────
+
+function detectInsiderSignals(
+  premium: number,
+  dte: number,
+  otmPercent: number,
+  volumeOIRatio: number,
+  proxy: AggressionProxy,
+  isNearEarnings: boolean,
+  type: 'CALL' | 'PUT',
+): { signals: string[]; probability: 'HIGH' | 'MEDIUM' | 'LOW' | 'UNLIKELY' } {
+  const signals: string[] = [];
+  let score = 0;
+
+  if (dte < 14) { signals.push('Short-dated (< 2 weeks) — high urgency'); score += 2; }
+  if (proxy === 'AA') { signals.push('Paid above ask — maximum execution urgency'); score += 2; }
+  if (otmPercent > 10 && dte < 30 && volumeOIRatio > 1) {
+    signals.push(`Deep OTM (${otmPercent.toFixed(0)}%) + short-dated + new positions`); score += 3;
+  }
+  if (premium > 1_000_000) { signals.push(`$${(premium / 1e6).toFixed(1)}M premium — whale size`); score += 2; }
+  if (isNearEarnings && type === 'CALL' && dte < 14) {
+    signals.push('Near-earnings call with urgency — possible catalyst positioning'); score += 2;
+  }
+  if (volumeOIRatio > 5) { signals.push(`Vol/OI ${volumeOIRatio.toFixed(1)}x — significant new positioning`); score += 1; }
+
+  const probability =
+    score >= 6 ? 'HIGH' :
+    score >= 4 ? 'MEDIUM' :
+    score >= 2 ? 'LOW' : 'UNLIKELY';
+
+  return { signals, probability };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONTRACT ANALYZER
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ContractInput {
+  symbol?: string;
+  optionSymbol?: string;
+  putCall?: string;       // 'CALL' | 'PUT'
+  type?: string;          // 'call' | 'put' (options route uses this)
+  strikePrice?: number;
+  strike?: number;
+  expirationDate?: string;
+  expiration?: string;
+  daysToExpiration?: number;
+  dte?: number;
+  delta?: number;
+  totalVolume?: number;
+  volume?: number;
+  openInterest?: number;
+  bid?: number;
+  ask?: number;
+  last?: number;
+  mark?: number;
+}
+
+function analyzeContract(
+  raw: ContractInput,
+  underlyingPrice: number,
+  stockTrend: 'UP' | 'DOWN' | 'SIDEWAYS',
+  isNearEarnings: boolean,
+  repeatDays: number,
+  symbol: string,
+): UnusualActivity | null {
+  const isCall = (raw.putCall || raw.type || '').toUpperCase().startsWith('C');
+  const type: 'CALL' | 'PUT' = isCall ? 'CALL' : 'PUT';
+
+  const strike = raw.strikePrice ?? raw.strike ?? 0;
+  const expiration = raw.expirationDate ?? raw.expiration ?? '';
+  const dte = raw.daysToExpiration ?? raw.dte ?? 0;
+  const delta = Math.abs(raw.delta ?? (isCall ? 0.40 : -0.40));
+  const volume = raw.totalVolume ?? raw.volume ?? 0;
+  const openInterest = raw.openInterest ?? 0;
+  const bid = raw.bid ?? 0;
+  const ask = raw.ask ?? 0;
+  const last = raw.last ?? raw.mark ?? (bid + ask) / 2;
+  const mark = raw.mark ?? ((bid + ask) / 2 || last);
+
   if (volume === 0) return null;
 
-  // Calculate key metrics
-  const volumeOIRatio = openInterest > 0 ? volume / openInterest : volume;
-  const avgVolume = openInterest * 0.1; // Assume 10% of OI is normal daily volume
+  // ── Metrics ──────────────────────────────────────────────
+  const volumeOIRatio = openInterest > 0 ? volume / openInterest : volume > 0 ? 99 : 0;
+  const avgVolume = Math.max(openInterest / 45, 10); // better heuristic: OI/45
   const volumeVsAvg = avgVolume > 0 ? volume / avgVolume : volume;
-  const midPrice = (bid + ask) / 2;
-  const premium = volume * midPrice * 100; // Premium in dollars
+  const premium = volume * mark * 100;
   const impliedMove = Math.abs(strike - underlyingPrice) / underlyingPrice * 100;
+  const otmPercent = isCall
+    ? Math.max(0, (strike - underlyingPrice) / underlyingPrice * 100)
+    : Math.max(0, (underlyingPrice - strike) / underlyingPrice * 100);
 
-  // Detection thresholds
-  const VOLUME_THRESHOLD = 100; // Minimum 100 contracts
-  const VOLUME_OI_THRESHOLD = 0.5; // Volume is 50% of OI
-  const VOLUME_VS_AVG_THRESHOLD = 3; // Volume is 3x average
-  const PREMIUM_THRESHOLD = 50000; // $50k minimum premium
-  const SWEEP_THRESHOLD = 1000; // 1000+ contracts = sweep
-  const WHALE_THRESHOLD = 500000; // $500k+ = whale trade
+  // ── Minimum gates ─────────────────────────────────────────
+  if (premium < 20_000 && volume < 100) return null;
+  if (volumeOIRatio < 0.5 && volume < 500) return null;
 
-  // Skip if below minimum thresholds
-  if (volume < VOLUME_THRESHOLD && premium < PREMIUM_THRESHOLD) {
-    return null;
-  }
+  // ── Aggression proxy ──────────────────────────────────────
+  const proxy = deriveAggressionProxy(last, bid, ask);
 
-  // Determine activity type
-  let activityType: UnusualActivity['activityType'] = 'UNUSUAL_VOLUME';
-  let severity: UnusualActivity['severity'] = 'LOW';
-  const reasoning: string[] = [];
+  // ── Score components ──────────────────────────────────────
+  const premiumScore = scorePremium(premium);
+  const volOIScore   = scoreVolOI(volumeOIRatio, volume >= openInterest && openInterest > 100);
+  const aggrScore    = scoreAggression(proxy);
+  const dteScore     = scoreDTE(dte, isNearEarnings);
+  const moneynessScore = scoreMoneyness(delta);
+  const catalystScore  = isNearEarnings ? 5 : 0;
+  const repeatScore    = repeatDays >= 3 ? 5 : repeatDays >= 2 ? 3 : repeatDays >= 1 ? 2 : 0;
 
-  // Sweep detection (aggressive buying/selling)
-  if (volume >= SWEEP_THRESHOLD) {
-    activityType = 'SWEEP';
-    severity = 'HIGH';
-    reasoning.push(`Large sweep: ${volume.toLocaleString()} contracts`);
-  }
+  // ── Hedge detection ───────────────────────────────────────
+  const { isHedge, reason: hedgeReason } = detectHedge(type, dte, delta, stockTrend, volumeOIRatio, symbol);
+  const hedgeDiscount = isHedge ? -20 : 0;
 
-  // Block trade detection (institutional size)
-  if (premium >= WHALE_THRESHOLD) {
-    activityType = volume >= SWEEP_THRESHOLD ? 'SWEEP' : 'BLOCK';
-    severity = 'EXTREME';
-    reasoning.push(`Whale trade: $${(premium / 1000000).toFixed(2)}M premium`);
-  }
+  const rawScore = premiumScore + volOIScore + aggrScore + dteScore + moneynessScore + catalystScore + repeatScore;
+  const uoaScore = Math.max(0, Math.min(100, rawScore + hedgeDiscount));
 
-  // Unusual volume detection
-  if (volumeOIRatio >= VOLUME_OI_THRESHOLD) {
-    if (activityType === 'UNUSUAL_VOLUME') {
-      severity = 'MEDIUM';
-    }
-    reasoning.push(`Volume ${volumeOIRatio.toFixed(1)}x open interest`);
-  }
+  // After hedge discount — apply minimum threshold
+  if (uoaScore < 20) return null;
 
-  if (volumeVsAvg >= VOLUME_VS_AVG_THRESHOLD) {
-    reasoning.push(`Volume ${volumeVsAvg.toFixed(1)}x average`);
-  }
+  const tier = scoreTier(uoaScore);
+  const isRepeat = repeatDays >= 2;
+  const alertType = classifyAlertType(premium, proxy, dte, isRepeat, volumeOIRatio);
 
-  // Gamma squeeze potential (near-the-money, high volume)
-  const moneyness = Math.abs(strike - underlyingPrice) / underlyingPrice * 100;
-  if (moneyness < 5 && volumeOIRatio > 1 && volume > 500) {
-    activityType = 'GAMMA_SQUEEZE';
-    severity = 'HIGH';
-    reasoning.push(`Gamma squeeze potential: ${moneyness.toFixed(1)}% OTM`);
-  }
-
-  // Determine sentiment
-  let sentiment: UnusualActivity['sentiment'] = 'NEUTRAL';
-  
-  if (isCall) {
-    // Calls being bought = bullish
-    // Calls being sold = bearish (hedging)
-    sentiment = last >= midPrice ? 'BULLISH' : 'BEARISH';
+  // ── Sentiment ─────────────────────────────────────────────
+  let sentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+  if (type === 'CALL') {
+    sentiment = (proxy === 'A' || proxy === 'AA' || last >= mark) ? 'BULLISH' : 'NEUTRAL';
   } else {
-    // Puts being bought = bearish
-    // Puts being sold = bullish (hedging)
-    sentiment = last >= midPrice ? 'BEARISH' : 'BULLISH';
+    sentiment = (proxy === 'A' || proxy === 'AA' || last >= mark) ? 'BEARISH' : 'NEUTRAL';
   }
+  if (isHedge) sentiment = 'NEUTRAL';
 
-  // Adjust sentiment based on moneyness
-  if (moneyness > 10) {
-    // Far OTM = speculative
-    if (volume > 1000) {
-      reasoning.push(`Speculative ${isCall ? 'call' : 'put'} buying (${moneyness.toFixed(1)}% OTM)`);
-    }
-  } else if (moneyness < 3) {
-    // ATM = directional
-    reasoning.push(`At-the-money ${isCall ? 'call' : 'put'} activity`);
-  }
+  // ── Insider signals ───────────────────────────────────────
+  const { signals: insiderSignals, probability: insiderProbability } = detectInsiderSignals(
+    premium, dte, otmPercent, volumeOIRatio, proxy, isNearEarnings, type
+  );
 
-  // Calculate confidence score
-  let confidence = 50;
-  
-  if (volumeOIRatio >= VOLUME_OI_THRESHOLD) confidence += 15;
-  if (volumeVsAvg >= VOLUME_VS_AVG_THRESHOLD) confidence += 15;
-  if (premium >= WHALE_THRESHOLD) confidence += 20;
-  if (volume >= SWEEP_THRESHOLD) confidence += 10;
-  if (moneyness < 5) confidence += 10; // Near-the-money = more significant
-  
-  confidence = Math.min(95, confidence);
+  // ── Trade type classification ──────────────────────────────
+  const tradeType: 'DIRECTIONAL' | 'LIKELY_HEDGE' | 'UNCERTAIN' = isHedge ? 'LIKELY_HEDGE' : 'DIRECTIONAL';
 
-  // Add context to reasoning
-  reasoning.push(`${volume.toLocaleString()} contracts at $${midPrice.toFixed(2)}`);
-  reasoning.push(`Premium: $${(premium / 1000).toFixed(0)}k`);
-  reasoning.push(`Strike: $${strike.toFixed(2)} (${moneyness.toFixed(1)}% ${strike > underlyingPrice ? 'OTM' : 'ITM'})`);
+  // ── Human-readable reasoning ──────────────────────────────
+  const reasoning: string[] = [];
+  if (alertType === 'GOLDEN_SWEEP') reasoning.push(`Golden sweep — $${(premium / 1e6).toFixed(2)}M at ask-side`);
+  else if (alertType === 'SWEEP') reasoning.push(`Sweep — $${(premium / 1e3).toFixed(0)}K aggressive buy`);
+  else if (alertType === 'BLOCK') reasoning.push(`Block print — $${(premium / 1e3).toFixed(0)}K institutional`);
+  else if (alertType === 'REPEATED_HIT') reasoning.push(`Repeat flow — ${repeatDays}d consecutive accumulation`);
+  else reasoning.push(`Unusual volume — ${volumeOIRatio.toFixed(1)}x normal`);
+
+  if (proxy === 'A' || proxy === 'AA') reasoning.push('Bought at/above ask — buyer is urgent');
+  if (volumeOIRatio >= 2) reasoning.push(`Vol/OI ${volumeOIRatio.toFixed(1)}x — significant new positions`);
+  if (volume > openInterest && openInterest > 100) reasoning.push('Volume exceeds open interest — all new positioning');
+  reasoning.push(`${volume.toLocaleString()} contracts · $${(premium / 1e3).toFixed(0)}K premium · δ${delta.toFixed(2)}`);
+  if (isHedge) reasoning.push(`Hedge signal: ${hedgeReason}`);
+
+  // ── Legacy compat ─────────────────────────────────────────
+  const severity = tierToSeverity(tier);
+  const activityType: UnusualActivity['activityType'] =
+    alertType === 'GOLDEN_SWEEP' || alertType === 'SWEEP' ? 'SWEEP' :
+    alertType === 'BLOCK' ? 'BLOCK' :
+    premium >= 500_000 ? 'WHALE_TRADE' :
+    Math.abs(strike - underlyingPrice) / underlyingPrice < 0.05 && volumeOIRatio > 1 ? 'GAMMA_SQUEEZE' :
+    'UNUSUAL_VOLUME';
+
+  const convictionLevel: 'HIGH' | 'MEDIUM' | 'LOW' =
+    uoaScore >= 65 ? 'HIGH' : uoaScore >= 40 ? 'MEDIUM' : 'LOW';
+
+  const interpretation = isHedge
+    ? `Likely hedge: ${hedgeReason}`
+    : `${convictionLevel} conviction ${sentiment.toLowerCase()} — ${alertType.replace('_', ' ')}`;
+
+  const optionSymbol = raw.optionSymbol ||
+    `${symbol}_${expiration}${type[0]}${strike}`;
 
   return {
-    symbol: contract.symbol || 'UNKNOWN',
-    optionSymbol: contract.optionSymbol || `${contract.symbol}_${contract.expirationDate}${isCall ? 'C' : 'P'}${strike}`,
-    type: isCall ? 'CALL' : 'PUT',
+    symbol,
+    optionSymbol,
+    type,
     strike,
-    expiration: contract.expirationDate || 'Unknown',
-    activityType,
+    expiration,
+    dte,
+    delta,
+
+    uoaScore,
+    tier,
+    alertType,
+    scoreBreakdown: {
+      premium: premiumScore,
+      volOI: volOIScore,
+      aggression: aggrScore,
+      dte: dteScore,
+      moneyness: moneynessScore,
+      catalyst: catalystScore,
+      repeat: repeatScore,
+      hedgeDiscount,
+    },
+    aggressionProxy: proxy,
+
     severity,
+    activityType,
+    confidence: uoaScore,
+
     metrics: {
       volume,
       openInterest,
@@ -198,134 +435,104 @@ function analyzeContract(contract: any, underlyingPrice: number): UnusualActivit
       premium: Math.round(premium),
       impliedMove: Math.round(impliedMove * 100) / 100,
     },
+
     sentiment,
-    confidence,
+    tradeType,
+    tradeTypeReason: isHedge ? hedgeReason : 'Directional signals predominate',
+    hedgeDiscountApplied: isHedge,
+
+    insiderProbability,
+    insiderSignals,
+
+    isRepeatFlow: isRepeat,
+    consecutiveDays: repeatDays,
+
     reasoning,
+    signals: reasoning,
     timestamp: Date.now(),
+
+    convictionLevel,
+    interpretation,
   };
 }
 
-/**
- * Filters activities based on criteria
- */
-function meetsFilters(activity: UnusualActivity, filters?: ActivityFilters): boolean {
-  if (!filters) return true;
+// ─────────────────────────────────────────────────────────────────────────────
+// PUBLIC API
+// ─────────────────────────────────────────────────────────────────────────────
 
-  if (filters.minVolume && activity.metrics.volume < filters.minVolume) {
-    return false;
+export function detectUnusualActivity(
+  optionsChain: any[],
+  underlyingPrice: number,
+  filters?: ActivityFilters,
+  opts?: {
+    stockTrend?: 'UP' | 'DOWN' | 'SIDEWAYS';
+    isNearEarnings?: boolean;
+    repeatFlowMap?: Map<string, number>; // optionSymbol -> days
+    symbol?: string;
   }
+): UnusualActivity[] {
+  const trend = opts?.stockTrend ?? 'SIDEWAYS';
+  const nearEarnings = opts?.isNearEarnings ?? false;
+  const repeatMap = opts?.repeatFlowMap ?? new Map();
+  const sym = opts?.symbol ?? 'UNKNOWN';
 
-  if (filters.minPremium && activity.metrics.premium < filters.minPremium) {
-    return false;
-  }
+  const activities: UnusualActivity[] = [];
 
-  if (filters.minVolumeOIRatio && activity.metrics.volumeOIRatio < filters.minVolumeOIRatio) {
-    return false;
-  }
-
-  if (filters.minSeverity) {
-    const severityOrder = { LOW: 1, MEDIUM: 2, HIGH: 3, EXTREME: 4 };
-    if (severityOrder[activity.severity] < severityOrder[filters.minSeverity]) {
-      return false;
+  for (const raw of optionsChain) {
+    const key = raw.optionSymbol || raw.symbol || '';
+    const repeatDays = repeatMap.get(key) ?? 0;
+    const activity = analyzeContract(raw, underlyingPrice, trend, nearEarnings, repeatDays, sym);
+    if (activity && meetsFilters(activity, filters)) {
+      activities.push(activity);
     }
   }
 
-  if (filters.types && !filters.types.includes(activity.type)) {
-    return false;
-  }
+  return activities.sort((a, b) => {
+    if (b.uoaScore !== a.uoaScore) return b.uoaScore - a.uoaScore;
+    return b.metrics.premium - a.metrics.premium;
+  });
+}
 
-  if (filters.sentiments && !filters.sentiments.includes(activity.sentiment)) {
-    return false;
+// Overload used by the options route which passes calls+puts separately
+export function detectUnusualActivityFromChain(
+  calls: any[],
+  puts: any[],
+  underlyingPrice: number,
+  symbol: string,
+  opts?: {
+    stockTrend?: 'UP' | 'DOWN' | 'SIDEWAYS';
+    isNearEarnings?: boolean;
+    repeatFlowMap?: Map<string, number>;
   }
+): UnusualActivity[] {
+  const all = [...calls, ...puts];
+  const result = detectUnusualActivity(all, underlyingPrice, undefined, {
+    ...opts,
+    symbol,
+  });
+  return result.slice(0, 12);
+}
 
+function meetsFilters(activity: UnusualActivity, filters?: ActivityFilters): boolean {
+  if (!filters) return true;
+  if (filters.minVolume && activity.metrics.volume < filters.minVolume) return false;
+  if (filters.minPremium && activity.metrics.premium < filters.minPremium) return false;
+  if (filters.minVolumeOIRatio && activity.metrics.volumeOIRatio < filters.minVolumeOIRatio) return false;
+  if (filters.minUOAScore && activity.uoaScore < filters.minUOAScore) return false;
+  if (filters.excludeHedges && activity.hedgeDiscountApplied) return false;
+  if (filters.types && !filters.types.includes(activity.type)) return false;
+  if (filters.sentiments && !filters.sentiments.includes(activity.sentiment)) return false;
+  if (filters.minSeverity) {
+    const order = { LOW: 1, MEDIUM: 2, HIGH: 3, EXTREME: 4 };
+    if (order[activity.severity] < order[filters.minSeverity]) return false;
+  }
   return true;
 }
 
-// ============================================================
-// REAL-TIME MONITORING
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// PATTERN DETECTION (kept for compat)
+// ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Monitors unusual activity in real-time using streaming data
- */
-export class UnusualActivityMonitor {
-  private activities: Map<string, UnusualActivity> = new Map();
-  private callbacks: Set<(activity: UnusualActivity) => void> = new Set();
-  private thresholds: ActivityFilters;
-
-  constructor(thresholds?: ActivityFilters) {
-    this.thresholds = thresholds || {
-      minVolume: 100,
-      minPremium: 50000,
-      minSeverity: 'MEDIUM',
-    };
-  }
-
-  /**
-   * Process new options data
-   */
-  processUpdate(contract: any, underlyingPrice: number) {
-    const activity = analyzeContract(contract, underlyingPrice);
-    
-    if (activity && meetsFilters(activity, this.thresholds)) {
-      const key = activity.optionSymbol;
-      
-      // Check if this is new or updated activity
-      const existing = this.activities.get(key);
-      if (!existing || activity.metrics.volume > existing.metrics.volume) {
-        this.activities.set(key, activity);
-        
-        // Notify callbacks
-        this.callbacks.forEach(cb => cb(activity));
-      }
-    }
-  }
-
-  /**
-   * Subscribe to unusual activity alerts
-   */
-  subscribe(callback: (activity: UnusualActivity) => void) {
-    this.callbacks.add(callback);
-    return () => this.callbacks.delete(callback);
-  }
-
-  /**
-   * Get all current unusual activities
-   */
-  getActivities(): UnusualActivity[] {
-    return Array.from(this.activities.values()).sort((a, b) => {
-      const severityOrder = { EXTREME: 4, HIGH: 3, MEDIUM: 2, LOW: 1 };
-      return severityOrder[b.severity] - severityOrder[a.severity];
-    });
-  }
-
-  /**
-   * Clear old activities
-   */
-  clearOld(maxAgeMs: number = 3600000) { // 1 hour default
-    const now = Date.now();
-    for (const [key, activity] of this.activities.entries()) {
-      if (now - activity.timestamp > maxAgeMs) {
-        this.activities.delete(key);
-      }
-    }
-  }
-
-  /**
-   * Update thresholds
-   */
-  setThresholds(thresholds: ActivityFilters) {
-    this.thresholds = thresholds;
-  }
-}
-
-// ============================================================
-// PATTERN DETECTION
-// ============================================================
-
-/**
- * Detects specific patterns in unusual activity
- */
 export interface ActivityPattern {
   pattern: 'CALL_SWEEP' | 'PUT_SWEEP' | 'STRADDLE' | 'STRANGLE' | 'RATIO_SPREAD' | 'MIXED_SIGNALS';
   description: string;
@@ -336,102 +543,70 @@ export interface ActivityPattern {
 
 export function detectPatterns(activities: UnusualActivity[]): ActivityPattern[] {
   const patterns: ActivityPattern[] = [];
-
-  // Group by symbol
   const bySymbol = new Map<string, UnusualActivity[]>();
-  for (const activity of activities) {
-    const symbol = activity.symbol;
-    if (!bySymbol.has(symbol)) {
-      bySymbol.set(symbol, []);
-    }
-    bySymbol.get(symbol)!.push(activity);
+
+  for (const a of activities) {
+    if (!bySymbol.has(a.symbol)) bySymbol.set(a.symbol, []);
+    bySymbol.get(a.symbol)!.push(a);
   }
 
-  // Analyze each symbol
-  for (const [symbol, symbolActivities] of bySymbol.entries()) {
-    // Call sweep pattern
-    const callSweeps = symbolActivities.filter(a => 
-      a.type === 'CALL' && 
-      (a.activityType === 'SWEEP' || a.activityType === 'WHALE_TRADE')
+  for (const [, symbolActivities] of bySymbol.entries()) {
+    const callSweeps = symbolActivities.filter(a =>
+      a.type === 'CALL' && (a.alertType === 'SWEEP' || a.alertType === 'GOLDEN_SWEEP')
     );
-    
     if (callSweeps.length > 0) {
-      const totalPremium = callSweeps.reduce((sum, a) => sum + a.metrics.premium, 0);
+      const total = callSweeps.reduce((s, a) => s + a.metrics.premium, 0);
       patterns.push({
         pattern: 'CALL_SWEEP',
-        description: `${callSweeps.length} call sweeps totaling $${(totalPremium / 1000000).toFixed(2)}M`,
+        description: `${callSweeps.length} call sweeps totaling $${(total / 1e6).toFixed(2)}M`,
         sentiment: 'BULLISH',
         confidence: Math.min(95, 60 + callSweeps.length * 10),
         activities: callSweeps,
       });
     }
 
-    // Put sweep pattern
-    const putSweeps = symbolActivities.filter(a => 
-      a.type === 'PUT' && 
-      (a.activityType === 'SWEEP' || a.activityType === 'WHALE_TRADE')
+    const putSweeps = symbolActivities.filter(a =>
+      a.type === 'PUT' && (a.alertType === 'SWEEP' || a.alertType === 'GOLDEN_SWEEP')
     );
-    
     if (putSweeps.length > 0) {
-      const totalPremium = putSweeps.reduce((sum, a) => sum + a.metrics.premium, 0);
+      const total = putSweeps.reduce((s, a) => s + a.metrics.premium, 0);
       patterns.push({
         pattern: 'PUT_SWEEP',
-        description: `${putSweeps.length} put sweeps totaling $${(totalPremium / 1000000).toFixed(2)}M`,
+        description: `${putSweeps.length} put sweeps totaling $${(total / 1e6).toFixed(2)}M`,
         sentiment: 'BEARISH',
         confidence: Math.min(95, 60 + putSweeps.length * 10),
         activities: putSweeps,
       });
     }
 
-    // Straddle/Strangle detection (calls + puts at similar strikes)
     const calls = symbolActivities.filter(a => a.type === 'CALL');
-    const puts = symbolActivities.filter(a => a.type === 'PUT');
-    
+    const puts  = symbolActivities.filter(a => a.type === 'PUT');
+
     if (calls.length > 0 && puts.length > 0) {
-      // Check for matching strikes (straddle)
-      for (const call of calls) {
-        const matchingPut = puts.find(p => Math.abs(p.strike - call.strike) < 1);
-        if (matchingPut) {
+      // Straddle: matching strikes
+      for (const c of calls) {
+        const mp = puts.find(p => Math.abs(p.strike - c.strike) < 1);
+        if (mp) {
           patterns.push({
             pattern: 'STRADDLE',
-            description: `Straddle at $${call.strike.toFixed(2)} - expecting big move`,
+            description: `Straddle at $${c.strike} — expecting big move`,
             sentiment: 'NEUTRAL',
             confidence: 75,
-            activities: [call, matchingPut],
+            activities: [c, mp],
           });
         }
       }
-      
-      // Check for near-strikes (strangle)
-      for (const call of calls) {
-        const nearPut = puts.find(p => 
-          p.strike < call.strike && 
-          Math.abs(p.strike - call.strike) / call.strike < 0.1
-        );
-        if (nearPut) {
-          patterns.push({
-            pattern: 'STRANGLE',
-            description: `Strangle $${nearPut.strike.toFixed(2)}/$${call.strike.toFixed(2)} - expecting volatility`,
-            sentiment: 'NEUTRAL',
-            confidence: 70,
-            activities: [call, nearPut],
-          });
-        }
-      }
-    }
 
-    // Mixed signals (conflicting call and put activity)
-    if (calls.length > 0 && puts.length > 0) {
-      const callPremium = calls.reduce((sum, a) => sum + a.metrics.premium, 0);
-      const putPremium = puts.reduce((sum, a) => sum + a.metrics.premium, 0);
-      const ratio = Math.min(callPremium, putPremium) / Math.max(callPremium, putPremium);
-      
-      if (ratio > 0.5) { // Significant activity on both sides
+      // Mixed signals
+      const callPrem = calls.reduce((s, a) => s + a.metrics.premium, 0);
+      const putPrem  = puts.reduce((s, a) => s + a.metrics.premium, 0);
+      const ratio = Math.min(callPrem, putPrem) / Math.max(callPrem, putPrem);
+      if (ratio > 0.5) {
         patterns.push({
           pattern: 'MIXED_SIGNALS',
-          description: `Mixed signals: $${(callPremium / 1000000).toFixed(2)}M calls vs $${(putPremium / 1000000).toFixed(2)}M puts`,
+          description: `Mixed: $${(callPrem / 1e6).toFixed(2)}M calls vs $${(putPrem / 1e6).toFixed(2)}M puts`,
           sentiment: 'NEUTRAL',
-          confidence: 65,
+          confidence: 50,
           activities: [...calls, ...puts],
         });
       }
@@ -439,4 +614,48 @@ export function detectPatterns(activities: UnusualActivity[]): ActivityPattern[]
   }
 
   return patterns;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MONITOR (kept for compat)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export class UnusualActivityMonitor {
+  private activities = new Map<string, UnusualActivity>();
+  private callbacks = new Set<(a: UnusualActivity) => void>();
+  private thresholds: ActivityFilters;
+
+  constructor(thresholds?: ActivityFilters) {
+    this.thresholds = thresholds ?? { minUOAScore: 30 };
+  }
+
+  processUpdate(contract: any, underlyingPrice: number, symbol?: string) {
+    const activity = analyzeContract(contract, underlyingPrice, 'SIDEWAYS', false, 0, symbol ?? 'UNKNOWN');
+    if (activity && meetsFilters(activity, this.thresholds)) {
+      const key = activity.optionSymbol;
+      const existing = this.activities.get(key);
+      if (!existing || activity.uoaScore > existing.uoaScore) {
+        this.activities.set(key, activity);
+        this.callbacks.forEach(cb => cb(activity));
+      }
+    }
+  }
+
+  subscribe(callback: (a: UnusualActivity) => void) {
+    this.callbacks.add(callback);
+    return () => this.callbacks.delete(callback);
+  }
+
+  getActivities(): UnusualActivity[] {
+    return [...this.activities.values()].sort((a, b) => b.uoaScore - a.uoaScore);
+  }
+
+  clearOld(maxAgeMs = 3_600_000) {
+    const now = Date.now();
+    for (const [key, a] of this.activities.entries()) {
+      if (now - a.timestamp > maxAgeMs) this.activities.delete(key);
+    }
+  }
+
+  setThresholds(t: ActivityFilters) { this.thresholds = t; }
 }

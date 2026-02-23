@@ -14,6 +14,7 @@ import { ChartPatternCard } from './components/stock/ChartPatternCard';
 import { OptionsDecisionHero } from './components/options/OptionsDecisionHero';
 import { UnusualActivitySection } from './components/options/UnusualActivitySection';
 import { OptionsSetupCard } from './components/options/OptionsSetupCard';
+import { FlowSetupCard } from './components/options/FlowSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
 import { RealPortfolio } from './components/portfolio/RealPortfolio';
 import { PortfolioContextAlert } from './components/portfolio/PortfolioContextAlert';
@@ -737,36 +738,79 @@ function OptionsTab({
         onViewEvidence={onViewEvidence}
       />
       
+      {/* Named Flow Setups — Phase C results */}
+      {data.optionsSetups?.length > 0 && (
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-white px-1">Flow Setups</h3>
+          {data.optionsSetups.slice(0, 4).map((setup: any, i: number) => (
+            <FlowSetupCard
+              key={i}
+              setup={setup}
+              onTrack={() => {
+                if (!onTrack || !setup.recommendedContract) return;
+                const rc = setup.recommendedContract;
+                const optType = setup.recommendedStructure?.type === 'PUT' ? 'PUT' : 'CALL';
+                fetch('/api/tracker', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    ticker,
+                    type: optType,
+                    strategy: setup.name,
+                    entryPrice: rc.ask || rc.mark || 1.00,
+                    confidence: setup.confluenceScore || 0,
+                    reasoning: setup.criteriaHit || [],
+                    evidencePacket: data,
+                    optionContract: {
+                      strike: rc.strike,
+                      expiration: rc.expiration,
+                      dte: rc.dte,
+                      delta: rc.delta,
+                      entryAsk: rc.ask || rc.mark || 1.00,
+                      optionType: optType,
+                    },
+                  }),
+                }).then(res => res.json()).then(result => {
+                  onTrack(result.success, result.message || result.error);
+                }).catch(() => {
+                  onTrack(false, 'Failed to track position');
+                });
+              }}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Unusual Options Activity - ALWAYS VISIBLE */}
-      <UnusualActivitySection 
+      <UnusualActivitySection
         activities={data.unusualActivity || []}
         onTrack={(activity) => {
           if (!onTrack) return;
-          
-          const optionType = (activity.contract?.type || activity.type)?.toUpperCase();
+
+          const optionType = activity.type?.toUpperCase() === 'PUT' ? 'PUT' : 'CALL';
           fetch('/api/tracker', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               ticker,
               type: optionType,
-              strategy: `Unusual ${optionType}: $${activity.contract?.strike || activity.strike} ${activity.contract?.expiration || ''} (${activity.tradeType || 'UOA'})`,
-              entryPrice: activity.contract?.ask || activity.contract?.mark || 1.00,
-              confidence: activity.score || 70,
+              strategy: `${activity.alertType ?? 'UOA'}: $${activity.strike} ${optionType} (${activity.tradeType ?? 'UOA'})`,
+              entryPrice: 1.00,
+              confidence: activity.uoaScore ?? activity.confidence ?? 70,
               reasoning: activity.signals || [],
-              evidencePacket: data, // Store evidence
+              evidencePacket: data,
               optionContract: {
-                strike: activity.contract?.strike || activity.strike,
-                expiration: activity.contract?.expiration || activity.expiration || 'N/A',
-                dte: activity.contract?.dte || activity.dte,
-                delta: activity.contract?.delta || 0.5,
-                entryAsk: activity.contract?.ask || activity.contract?.mark || 1.00,
-                optionType: optionType === 'PUT' ? 'PUT' : 'CALL',
+                strike: activity.strike,
+                expiration: activity.expiration ?? 'N/A',
+                dte: activity.dte,
+                delta: activity.delta ?? 0.5,
+                entryAsk: 1.00,
+                optionType,
               },
             }),
           }).then(res => res.json()).then(result => {
             onTrack(result.success, result.message || result.error);
-          }).catch(err => {
+          }).catch(() => {
             onTrack(false, 'Failed to track position');
           });
         }}
