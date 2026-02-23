@@ -16,9 +16,6 @@ export const runtime = 'nodejs';
 // ============================================================
 
 const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
-const SCHWAB_APP_KEY = process.env.SCHWAB_APP_KEY;
-const SCHWAB_APP_SECRET = process.env.SCHWAB_APP_SECRET;
-const SCHWAB_REFRESH_TOKEN = process.env.SCHWAB_REFRESH_TOKEN;
 
 // CRITICAL FIX: Headers required for Akamai/Schwab API
 // Without User-Agent, Akamai's CDN blocks requests with 403
@@ -32,10 +29,10 @@ const SCHWAB_HEADERS = {
 // Accuracy-first helpers (freshness gates, regime detection, confidence calibration)
 // ============================================================
 
-type MarketRegime = 'TREND' | 'RANGE' | 'HIGH_VOL';
+type MarketRegime = 'TREND' | 'BULLISH_TREND' | 'BEARISH_TREND' | 'RANGE' | 'HIGH_VOL' | 'WEAK_TREND';
 
-function computeRegime(priceHistory: { close: number; high: number; low: number }[], sma50: number, sma200: number) : { regime: MarketRegime; atrPct: number; trendStrength: number } {
-  if (!priceHistory || priceHistory.length < 60) return { regime: 'RANGE', atrPct: 0, trendStrength: 0 };
+function computeRegime(priceHistory: { close: number; high: number; low: number }[], sma50: number, sma200: number) : { regime: MarketRegime; atrPct: number; trendStrength: number; adx: number; plusDI: number; minusDI: number } {
+  if (!priceHistory || priceHistory.length < 60) return { regime: 'RANGE', atrPct: 0, trendStrength: 0, adx: 0, plusDI: 0, minusDI: 0 };
   const last = priceHistory[priceHistory.length - 1];
   // ATR(14) approximate
   const n = 14;
@@ -50,18 +47,29 @@ function computeRegime(priceHistory: { close: number; high: number; low: number 
   const atr = trSum / Math.max(1, (priceHistory.length - start));
   const atrPct = last.close > 0 ? (atr / last.close) * 100 : 0;
 
+  const adxResult = calculateADX(priceHistory);
+  const { adx, plusDI, minusDI } = adxResult;
+
+  // Legacy trendStrength kept for compatibility in response payload
   const trendStrength = last.close > 0 ? (Math.abs(sma50 - sma200) / last.close) * 100 : 0;
 
-  // Regime rules (simple but stable):
+  // Regime rules using ADX:
   // - HIGH_VOL if ATR% elevated
-  // - TREND if 50/200 separation meaningful
-  // - otherwise RANGE
-  const regime: MarketRegime =
-    atrPct >= 4 ? 'HIGH_VOL' :
-    trendStrength >= 2 ? 'TREND' :
-    'RANGE';
+  // - BULLISH_TREND / BEARISH_TREND if ADX > 25 (strong trend)
+  // - WEAK_TREND if 20 <= ADX <= 25 (transitional)
+  // - RANGE if ADX < 20
+  let regime: MarketRegime;
+  if (atrPct >= 4) {
+    regime = 'HIGH_VOL';
+  } else if (adx > 25) {
+    regime = plusDI > minusDI ? 'BULLISH_TREND' : 'BEARISH_TREND';
+  } else if (adx >= 20) {
+    regime = 'WEAK_TREND';
+  } else {
+    regime = 'RANGE';
+  }
 
-  return { regime, atrPct: Math.round(atrPct * 100) / 100, trendStrength: Math.round(trendStrength * 100) / 100 };
+  return { regime, atrPct: Math.round(atrPct * 100) / 100, trendStrength: Math.round(trendStrength * 100) / 100, adx, plusDI, minusDI };
 }
 
 function calibratedConfidence(modelScore: number, maxScore: number, agreementCount: number, completeness: number, regime: MarketRegime) {
@@ -83,7 +91,7 @@ function calibratedConfidence(modelScore: number, maxScore: number, agreementCou
   else if (completeness < 80) conf -= 12;
 
   // Regime adjustment (trend = slightly more reliable for trend-following signals)
-  if (regime === 'TREND') conf += 3;
+  if (regime === 'TREND' || regime === 'BULLISH_TREND' || regime === 'BEARISH_TREND') conf += 3;
   if (regime === 'HIGH_VOL') conf -= 4;
 
   conf = Math.max(5, Math.min(95, Math.round(conf)));
@@ -106,28 +114,6 @@ function buildNoTrade(reason: string[], asOfIso: string) {
   }];
 }
 
-// ============================================================
-// TOKEN CACHE - Schwab access tokens last 30 minutes
-// Cache them to avoid hitting rate limits on the oauth endpoint
-// ============================================================
-interface TokenCache {
-  accessToken: string;
-  expiresAt: number; // Unix timestamp
-}
-
-let tokenCache: TokenCache | null = null;
-
-// ============================================================
-// SCHWAB AUTH WITH CACHING
-// ============================================================
-async function getSchwabToken(): Promise<string | null> {
-  const res = await getSchwabAccessToken('stock');
-  if (!res.token) {
-    console.warn(res.error || '[Schwab Stock] Token error');
-    return null;
-  }
-  return res.token;
-}
 
 async function fetchSchwabQuote(token: string, symbol: string) {
   try {
@@ -267,20 +253,77 @@ function calculateEMA(prices: number[], period: number): number {
 
 function calculateRSI(prices: number[], period = 14): number {
   if (prices.length < period + 1) return 50;
-  const changes = prices.slice(-period - 1).map((p, i, arr) => i > 0 ? p - arr[i-1] : 0).slice(1);
-  const gains = changes.filter(c => c > 0).reduce((a, b) => a + b, 0) / period;
-  const losses = Math.abs(changes.filter(c => c < 0).reduce((a, b) => a + b, 0)) / period;
-  if (losses === 0) return 100;
-  return 100 - (100 / (1 + gains / losses));
+
+  // Compute all changes across the full price history
+  const changes: number[] = [];
+  for (let i = 1; i < prices.length; i++) {
+    changes.push(prices[i] - prices[i - 1]);
+  }
+
+  // Seed: simple average of the first `period` changes
+  let avgGain = 0;
+  let avgLoss = 0;
+  for (let i = 0; i < period; i++) {
+    if (changes[i] > 0) avgGain += changes[i];
+    else avgLoss += Math.abs(changes[i]);
+  }
+  avgGain /= period;
+  avgLoss /= period;
+
+  // Wilder's smoothing (RMA) for all subsequent changes
+  for (let i = period; i < changes.length; i++) {
+    const gain = changes[i] > 0 ? changes[i] : 0;
+    const loss = changes[i] < 0 ? Math.abs(changes[i]) : 0;
+    avgGain = (avgGain * (period - 1) + gain) / period;
+    avgLoss = (avgLoss * (period - 1) + loss) / period;
+  }
+
+  if (avgLoss === 0) return 100;
+  return 100 - (100 / (1 + avgGain / avgLoss));
+}
+
+// Returns the full EMA series (same length as prices).
+// Values at indices 0..(period-2) are 0 (insufficient data).
+function calculateEMASeries(prices: number[], period: number): number[] {
+  const result: number[] = new Array(prices.length).fill(0);
+  if (prices.length < period) return result;
+
+  const k = 2 / (period + 1);
+  // Seed with SMA of the first `period` values
+  let ema = prices.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  result[period - 1] = ema;
+
+  for (let i = period; i < prices.length; i++) {
+    ema = prices[i] * k + ema * (1 - k);
+    result[i] = ema;
+  }
+  return result;
 }
 
 function calculateMACD(prices: number[]): { macd: number; signal: number; histogram: number } {
-  const ema12 = calculateEMA(prices, 12);
-  const ema26 = calculateEMA(prices, 26);
-  const macd = ema12 - ema26;
-  // Signal line is 9-period EMA of MACD (simplified)
-  const signal = macd * 0.9; // Approximation
-  return { macd, signal, histogram: macd - signal };
+  if (prices.length < 26) return { macd: 0, signal: 0, histogram: 0 };
+
+  const ema12Series = calculateEMASeries(prices, 12);
+  const ema26Series = calculateEMASeries(prices, 26);
+
+  // MACD line: valid from the first index where EMA26 exists (index 25)
+  const macdSeries: number[] = [];
+  for (let i = 25; i < prices.length; i++) {
+    macdSeries.push(ema12Series[i] - ema26Series[i]);
+  }
+
+  const macdValue = macdSeries[macdSeries.length - 1];
+
+  // Signal line: 9-EMA of the MACD series
+  if (macdSeries.length < 9) {
+    // Not enough MACD values to form a signal line; histogram = 0
+    return { macd: macdValue, signal: macdValue, histogram: 0 };
+  }
+
+  const signalSeries = calculateEMASeries(macdSeries, 9);
+  const signalValue = signalSeries[signalSeries.length - 1];
+
+  return { macd: macdValue, signal: signalValue, histogram: macdValue - signalValue };
 }
 
 function calculateBollingerBands(prices: number[], period = 20): { upper: number; middle: number; lower: number } {
@@ -311,6 +354,172 @@ function calculateATR(candles: { high: number; low: number; close: number }[], p
     atr += tr;
   }
   return atr / period;
+}
+
+// ============================================================
+// NEW INDICATORS: ADX, OBV, Fibonacci, Stochastic, CMF
+// ============================================================
+
+function calculateADX(candles: { high: number; low: number; close: number }[], period = 14): { adx: number; plusDI: number; minusDI: number } {
+  if (candles.length < period * 2 + 1) return { adx: 0, plusDI: 0, minusDI: 0 };
+
+  // Compute TR, +DM, -DM for each bar
+  const tr: number[] = [];
+  const plusDM: number[] = [];
+  const minusDM: number[] = [];
+
+  for (let i = 1; i < candles.length; i++) {
+    const cur = candles[i];
+    const prev = candles[i - 1];
+    const trueRange = Math.max(
+      cur.high - cur.low,
+      Math.abs(cur.high - prev.close),
+      Math.abs(cur.low - prev.close)
+    );
+    tr.push(trueRange);
+
+    const upMove = cur.high - prev.high;
+    const downMove = prev.low - cur.low;
+    plusDM.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    minusDM.push(downMove > upMove && downMove > 0 ? downMove : 0);
+  }
+
+  // Wilder's smoothing (seed with sum, then RMA)
+  let smoothTR = tr.slice(0, period).reduce((a, b) => a + b, 0);
+  let smoothPlus = plusDM.slice(0, period).reduce((a, b) => a + b, 0);
+  let smoothMinus = minusDM.slice(0, period).reduce((a, b) => a + b, 0);
+
+  const dxValues: number[] = [];
+  let latestPlusDI = 0;
+  let latestMinusDI = 0;
+
+  for (let i = period; i < tr.length; i++) {
+    smoothTR = smoothTR - smoothTR / period + tr[i];
+    smoothPlus = smoothPlus - smoothPlus / period + plusDM[i];
+    smoothMinus = smoothMinus - smoothMinus / period + minusDM[i];
+
+    latestPlusDI = smoothTR > 0 ? (smoothPlus / smoothTR) * 100 : 0;
+    latestMinusDI = smoothTR > 0 ? (smoothMinus / smoothTR) * 100 : 0;
+
+    const diSum = latestPlusDI + latestMinusDI;
+    const dx = diSum > 0 ? (Math.abs(latestPlusDI - latestMinusDI) / diSum) * 100 : 0;
+    dxValues.push(dx);
+  }
+
+  // ADX = Wilder's smooth of DX
+  if (dxValues.length < period) return { adx: 0, plusDI: Math.round(latestPlusDI * 100) / 100, minusDI: Math.round(latestMinusDI * 100) / 100 };
+
+  let adx = dxValues.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  for (let i = period; i < dxValues.length; i++) {
+    adx = (adx * (period - 1) + dxValues[i]) / period;
+  }
+
+  return {
+    adx: Math.round(adx * 100) / 100,
+    plusDI: Math.round(latestPlusDI * 100) / 100,
+    minusDI: Math.round(latestMinusDI * 100) / 100,
+  };
+}
+
+function calculateOBV(candles: { close: number; volume: number }[]): number[] {
+  const obv: number[] = [0];
+  for (let i = 1; i < candles.length; i++) {
+    const prev = obv[obv.length - 1];
+    if (candles[i].close > candles[i - 1].close) obv.push(prev + candles[i].volume);
+    else if (candles[i].close < candles[i - 1].close) obv.push(prev - candles[i].volume);
+    else obv.push(prev);
+  }
+  return obv;
+}
+
+function detectOBVDivergence(candles: { close: number }[], obvSeries: number[], lookback = 20): 'BULLISH' | 'BEARISH' | 'NONE' {
+  if (candles.length < lookback || obvSeries.length < lookback) return 'NONE';
+  const priceSlice = candles.slice(-lookback).map(c => c.close);
+  const obvSlice = obvSeries.slice(-lookback);
+
+  const priceHigh = Math.max(...priceSlice);
+  const priceLow = Math.min(...priceSlice);
+  const obvHigh = Math.max(...obvSlice);
+  const obvLow = Math.min(...obvSlice);
+
+  const priceIdxHigh = priceSlice.lastIndexOf(priceHigh);
+  const priceIdxLow = priceSlice.lastIndexOf(priceLow);
+
+  // Compare first-half vs second-half extremes for simple divergence
+  const midpoint = Math.floor(lookback / 2);
+  const firstHalfPriceHigh = Math.max(...priceSlice.slice(0, midpoint));
+  const secondHalfPriceHigh = Math.max(...priceSlice.slice(midpoint));
+  const firstHalfOBVHigh = Math.max(...obvSlice.slice(0, midpoint));
+  const secondHalfOBVHigh = Math.max(...obvSlice.slice(midpoint));
+
+  const firstHalfPriceLow = Math.min(...priceSlice.slice(0, midpoint));
+  const secondHalfPriceLow = Math.min(...priceSlice.slice(midpoint));
+  const firstHalfOBVLow = Math.min(...obvSlice.slice(0, midpoint));
+  const secondHalfOBVLow = Math.min(...obvSlice.slice(midpoint));
+
+  // BEARISH: price higher highs but OBV lower highs
+  if (secondHalfPriceHigh > firstHalfPriceHigh && secondHalfOBVHigh < firstHalfOBVHigh) return 'BEARISH';
+  // BULLISH: price lower lows but OBV higher lows
+  if (secondHalfPriceLow < firstHalfPriceLow && secondHalfOBVLow > firstHalfOBVLow) return 'BULLISH';
+  return 'NONE';
+}
+
+function calculateFibonacciLevels(high: number, low: number, currentPrice: number): {
+  levels: { pct: number; price: number; label: string }[];
+  nearestSupport: number;
+  nearestResistance: number;
+} {
+  const range = high - low;
+  const fibPcts = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1.0];
+  const labels = ['0%', '23.6%', '38.2%', '50%', '61.8%', '78.6%', '100%'];
+
+  const levels = fibPcts.map((pct, i) => ({
+    pct,
+    price: Math.round((high - pct * range) * 100) / 100,
+    label: labels[i],
+  }));
+
+  const belowCurrent = levels.filter(l => l.price < currentPrice).map(l => l.price);
+  const aboveCurrent = levels.filter(l => l.price > currentPrice).map(l => l.price);
+
+  const nearestSupport = belowCurrent.length > 0 ? Math.max(...belowCurrent) : low;
+  const nearestResistance = aboveCurrent.length > 0 ? Math.min(...aboveCurrent) : high;
+
+  return { levels, nearestSupport, nearestResistance };
+}
+
+function calculateStochastic(candles: { high: number; low: number; close: number }[], kPeriod = 14, dPeriod = 3): { k: number; d: number } {
+  if (candles.length < kPeriod + dPeriod) return { k: 50, d: 50 };
+
+  const kValues: number[] = [];
+  for (let i = kPeriod - 1; i < candles.length; i++) {
+    const window = candles.slice(i - kPeriod + 1, i + 1);
+    const lowestLow = Math.min(...window.map(c => c.low));
+    const highestHigh = Math.max(...window.map(c => c.high));
+    const range = highestHigh - lowestLow;
+    kValues.push(range > 0 ? ((candles[i].close - lowestLow) / range) * 100 : 50);
+  }
+
+  const k = kValues[kValues.length - 1];
+  const dSlice = kValues.slice(-dPeriod);
+  const d = dSlice.reduce((a, b) => a + b, 0) / dSlice.length;
+
+  return { k: Math.round(k * 100) / 100, d: Math.round(d * 100) / 100 };
+}
+
+function calculateCMF(candles: { high: number; low: number; close: number; volume: number }[], period = 20): number {
+  if (candles.length < period) return 0;
+  const slice = candles.slice(-period);
+  let sumMFV = 0;
+  let sumVol = 0;
+  for (const c of slice) {
+    const range = c.high - c.low;
+    const mfm = range > 0 ? ((c.close - c.low) - (c.high - c.close)) / range : 0;
+    sumMFV += mfm * c.volume;
+    sumVol += c.volume;
+  }
+  const cmf = sumVol > 0 ? sumMFV / sumVol : 0;
+  return Math.round(cmf * 10000) / 10000;
 }
 
 // ============================================================
@@ -915,6 +1124,10 @@ interface FundamentalMetrics {
   revenueGrowth: number;
   epsGrowth: number;
   grossMargin: number;
+  // New fields
+  fcfYield: number;
+  peg: number;
+  evEbitda: number;
 }
 
 function calculateFundamentalScore(metrics: FundamentalMetrics): {
@@ -941,8 +1154,13 @@ function calculateFundamentalScore(metrics: FundamentalMetrics): {
   factors.push({ name: 'Revenue Growth', passed: metrics.revenueGrowth > 0, value: `${metrics.revenueGrowth?.toFixed(1) || 0}%`, threshold: '> 0%', weight: 1 });
   factors.push({ name: 'EPS Growth', passed: metrics.epsGrowth > 0, value: `${metrics.epsGrowth?.toFixed(1) || 0}%`, threshold: '> 0%', weight: 1 });
 
+  // New factors (3)
+  factors.push({ name: 'FCF Yield >2%', passed: metrics.fcfYield > 2, value: `${metrics.fcfYield?.toFixed(1) || 'N/A'}%`, threshold: '> 2%', weight: 1 });
+  factors.push({ name: 'PEG Ratio <2', passed: metrics.peg > 0 && metrics.peg < 2, value: metrics.peg?.toFixed(2) || 'N/A', threshold: '0-2', weight: 1 });
+  factors.push({ name: 'EV/EBITDA <20', passed: metrics.evEbitda > 0 && metrics.evEbitda < 20, value: metrics.evEbitda?.toFixed(1) || 'N/A', threshold: '0-20', weight: 1 });
+
   const score = factors.filter(f => f.passed).length;
-  return { score, maxScore: 9, factors };
+  return { score, maxScore: 12, factors };
 }
 
 interface TechnicalInputs {
@@ -961,6 +1179,10 @@ interface TechnicalInputs {
   low52Week: number;
   avgVolume: number;
   currentVolume: number;
+  // New fields
+  adx: number;
+  cmf: number;
+  obvDivergence: 'BULLISH' | 'BEARISH' | 'NONE';
 }
 
 function calculateTechnicalScore(inputs: TechnicalInputs): {
@@ -969,26 +1191,31 @@ function calculateTechnicalScore(inputs: TechnicalInputs): {
   factors: { name: string; passed: boolean; value: string; threshold: string; weight: number }[];
 } {
   const factors: { name: string; passed: boolean; value: string; threshold: string; weight: number }[] = [];
-  const { price, sma20, sma50, sma200, rsi, macd, previousClose, high52Week, low52Week, avgVolume, currentVolume } = inputs;
+  const { price, sma20, sma50, sma200, rsi, macd, previousClose, high52Week, low52Week, avgVolume, currentVolume, adx, cmf, obvDivergence } = inputs;
 
   // Trend (3 factors)
   factors.push({ name: 'Above 20 SMA', passed: price > sma20, value: `$${price.toFixed(2)}`, threshold: `> $${sma20.toFixed(2)}`, weight: 1 });
   factors.push({ name: 'Above 50 SMA', passed: price > sma50, value: `$${price.toFixed(2)}`, threshold: `> $${sma50.toFixed(2)}`, weight: 1 });
   factors.push({ name: 'Above 200 SMA', passed: price > sma200, value: `$${price.toFixed(2)}`, threshold: `> $${sma200.toFixed(2)}`, weight: 1 });
-  
+
   // Momentum (3 factors)
   factors.push({ name: 'Golden Cross (50>200)', passed: sma50 > sma200, value: `50: $${sma50.toFixed(2)}`, threshold: `> 200: $${sma200.toFixed(2)}`, weight: 1 });
   factors.push({ name: 'MACD Bullish', passed: macd.macd > macd.signal, value: macd.macd.toFixed(3), threshold: `> Signal`, weight: 1 });
   factors.push({ name: 'RSI Not Overbought', passed: rsi < 70, value: rsi.toFixed(0), threshold: '< 70', weight: 1 });
-  
+
   // Position (3 factors)
   factors.push({ name: 'RSI Not Oversold', passed: rsi > 30, value: rsi.toFixed(0), threshold: '> 30', weight: 1 });
   const midpoint = (high52Week + low52Week) / 2;
   factors.push({ name: 'Above 52w Midpoint', passed: price > midpoint, value: `$${price.toFixed(2)}`, threshold: `> $${midpoint.toFixed(2)}`, weight: 1 });
   factors.push({ name: 'Near 52w High (>80%)', passed: price >= high52Week * 0.8, value: `${((price / high52Week) * 100).toFixed(0)}%`, threshold: '> 80%', weight: 1 });
 
+  // New factors (3)
+  factors.push({ name: 'Trending Market (ADX>20)', passed: adx > 20, value: adx.toFixed(1), threshold: '> 20', weight: 1 });
+  factors.push({ name: 'Positive Money Flow (CMF)', passed: cmf > 0, value: cmf.toFixed(4), threshold: '> 0', weight: 1 });
+  factors.push({ name: 'No Bearish OBV Divergence', passed: obvDivergence !== 'BEARISH', value: obvDivergence, threshold: '≠ BEARISH', weight: 1 });
+
   const score = factors.filter(f => f.passed).length;
-  return { score, maxScore: 9, factors };
+  return { score, maxScore: 12, factors };
 }
 
 // ============================================================
@@ -1152,9 +1379,9 @@ function generateSuggestions(
 ) {
   const suggestions: any[] = [];
   
-  // PRIMARY SCORE: Use the combined fundamental + technical score (18 max)
+  // PRIMARY SCORE: Use the combined fundamental + technical score (24 max)
   const combinedScore = fundamentalScore + technicalScore;
-  
+
   // Secondary factors (adjust confidence only)
   let confidenceAdjustment = 0;
   const adjustmentReasons: string[] = [];
@@ -1195,31 +1422,31 @@ function generateSuggestions(
     adjustmentReasons.push(`-5% confidence: Negative price target (${analystRating.targetUpside.toFixed(1)}%)`);
   }
   
-  // MAIN RECOMMENDATION based on combined score
+  // MAIN RECOMMENDATION based on combined score (24 max)
   let mainType: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
   let strategy = 'Hold - Mixed Signals';
   let baseConfidence = 50;
-  
-  if (combinedScore >= 14) {
+
+  if (combinedScore >= 18) {
     mainType = 'BUY';
     strategy = 'Strong Buy - Excellent Fundamentals & Technicals';
-    baseConfidence = 75 + (combinedScore - 14) * 5;
-  } else if (combinedScore >= 11) {
+    baseConfidence = 75 + (combinedScore - 18) * 5;
+  } else if (combinedScore >= 15) {
     mainType = 'BUY';
     strategy = 'Buy - Favorable Conditions';
-    baseConfidence = 60 + (combinedScore - 11) * 5;
-  } else if (combinedScore >= 7) {
+    baseConfidence = 60 + (combinedScore - 15) * 5;
+  } else if (combinedScore >= 9) {
     mainType = 'HOLD';
     strategy = 'Hold - Wait for Better Entry';
-    baseConfidence = 40 + (combinedScore - 7) * 5;
-  } else if (combinedScore >= 4) {
+    baseConfidence = 40 + (combinedScore - 9) * 5;
+  } else if (combinedScore >= 6) {
     mainType = 'SELL';
     strategy = 'Sell - Weak Signals';
-    baseConfidence = 55 + (7 - combinedScore) * 5;
+    baseConfidence = 55 + (9 - combinedScore) * 5;
   } else {
     mainType = 'SELL';
     strategy = 'Strong Sell - Multiple Red Flags';
-    baseConfidence = 70 + (4 - combinedScore) * 5;
+    baseConfidence = 70 + (6 - combinedScore) * 5;
   }
   
   const finalConfidence = Math.min(95, Math.max(25, baseConfidence + confidenceAdjustment));
@@ -1231,25 +1458,25 @@ function generateSuggestions(
   const failedTechnicals = technicalFactors.filter(f => !f.passed);
   
   const detailedExplanation = {
-    summary: `Based on a combined analysis score of ${combinedScore}/18, this stock receives a ${mainType} recommendation with ${finalConfidence}% confidence.`,
-    
+    summary: `Based on a combined analysis score of ${combinedScore}/24, this stock receives a ${mainType} recommendation with ${finalConfidence}% confidence.`,
+
     scoreBreakdown: {
       fundamental: {
         score: fundamentalScore,
-        maxScore: 9,
-        interpretation: fundamentalScore >= 7 ? 'Strong fundamentals' : fundamentalScore >= 5 ? 'Decent fundamentals' : 'Weak fundamentals',
+        maxScore: 12,
+        interpretation: fundamentalScore >= 9 ? 'Strong fundamentals' : fundamentalScore >= 6 ? 'Decent fundamentals' : 'Weak fundamentals',
         passed: passedFundamentals.map(f => `✓ ${f.name}: ${f.value}`),
         failed: failedFundamentals.map(f => `✗ ${f.name}: ${f.value} (needs ${f.threshold})`),
       },
       technical: {
         score: technicalScore,
-        maxScore: 9,
-        interpretation: technicalScore >= 7 ? 'Strong technicals - uptrend' : technicalScore >= 5 ? 'Mixed technicals' : 'Weak technicals - downtrend',
+        maxScore: 12,
+        interpretation: technicalScore >= 9 ? 'Strong technicals - uptrend' : technicalScore >= 6 ? 'Mixed technicals' : 'Weak technicals - downtrend',
         passed: passedTechnicals.map(f => `✓ ${f.name}: ${f.value}`),
         failed: failedTechnicals.map(f => `✗ ${f.name}: ${f.value} (needs ${f.threshold})`),
       },
     },
-    
+
     keyMetrics: {
       valuation: `P/E: ${fundamentals.pe?.toFixed(1) || 'N/A'} | P/B: ${fundamentals.pb?.toFixed(2) || 'N/A'}`,
       profitability: `ROE: ${fundamentals.roe?.toFixed(1)}% | Profit Margin: ${fundamentals.profitMargin?.toFixed(1)}%`,
@@ -1257,9 +1484,9 @@ function generateSuggestions(
       momentum: `RSI: ${technicals.rsi} | vs 50 SMA: ${technicals.priceVsSma50?.toFixed(1)}%`,
       trend: `Price: $${price.toFixed(2)} | Support: $${technicals.support?.toFixed(2)} | Resistance: $${technicals.resistance?.toFixed(2)}`,
     },
-    
+
     confidenceFactors: {
-      baseConfidence: `${baseConfidence}% (from score ${combinedScore}/18)`,
+      baseConfidence: `${baseConfidence}% (from score ${combinedScore}/24)`,
       adjustments: adjustmentReasons,
       finalConfidence: `${finalConfidence}%`,
     },
@@ -1271,45 +1498,61 @@ function generateSuggestions(
       priceTarget: analystRating.targetUpside !== 0 ? `${analystRating.targetUpside >= 0 ? '+' : ''}${analystRating.targetUpside.toFixed(1)}% to target` : 'N/A',
     },
     
-    reasoning: mainType === 'BUY' 
+    reasoning: mainType === 'BUY'
       ? [
-          `The stock scores ${combinedScore}/18 on our combined analysis, indicating ${combinedScore >= 14 ? 'excellent' : 'favorable'} conditions.`,
-          `Fundamental analysis shows ${fundamentalScore}/9 factors passing, suggesting ${fundamentalScore >= 7 ? 'strong' : 'adequate'} company health.`,
-          `Technical analysis shows ${technicalScore}/9 factors passing, indicating ${technicalScore >= 7 ? 'strong upward momentum' : 'positive price action'}.`,
+          `The stock scores ${combinedScore}/24 on our combined analysis, indicating ${combinedScore >= 18 ? 'excellent' : 'favorable'} conditions.`,
+          `Fundamental analysis shows ${fundamentalScore}/12 factors passing, suggesting ${fundamentalScore >= 9 ? 'strong' : 'adequate'} company health.`,
+          `Technical analysis shows ${technicalScore}/12 factors passing, indicating ${technicalScore >= 9 ? 'strong upward momentum' : 'positive price action'}.`,
           technicals.rsi < 70 ? `RSI at ${technicals.rsi} is not overbought, suggesting room for upside.` : `Caution: RSI at ${technicals.rsi} is overbought.`,
           technicals.priceVsSma50 > 0 ? `Price is ${technicals.priceVsSma50.toFixed(1)}% above 50-day SMA, confirming uptrend.` : `Price is below 50-day SMA, watch for breakout.`,
         ]
       : mainType === 'SELL'
       ? [
-          `The stock scores only ${combinedScore}/18, indicating significant weakness.`,
-          `Fundamental analysis shows only ${fundamentalScore}/9 factors passing - ${9 - fundamentalScore} red flags.`,
-          `Technical analysis shows only ${technicalScore}/9 factors passing - price action is weak.`,
+          `The stock scores only ${combinedScore}/24, indicating significant weakness.`,
+          `Fundamental analysis shows only ${fundamentalScore}/12 factors passing - ${12 - fundamentalScore} red flags.`,
+          `Technical analysis shows only ${technicalScore}/12 factors passing - price action is weak.`,
           technicals.rsi > 70 ? `RSI at ${technicals.rsi} is overbought - potential pullback.` : technicals.rsi < 30 ? `RSI at ${technicals.rsi} is oversold but no reversal signal yet.` : '',
           technicals.priceVsSma50 < 0 ? `Price is ${Math.abs(technicals.priceVsSma50).toFixed(1)}% below 50-day SMA, confirming downtrend.` : '',
         ].filter(Boolean)
       : [
-          `The stock scores ${combinedScore}/18 - mixed signals suggest caution.`,
-          `Fundamental analysis shows ${fundamentalScore}/9 factors - neither strong nor weak.`,
-          `Technical analysis shows ${technicalScore}/9 factors - no clear trend.`,
+          `The stock scores ${combinedScore}/24 - mixed signals suggest caution.`,
+          `Fundamental analysis shows ${fundamentalScore}/12 factors - neither strong nor weak.`,
+          `Technical analysis shows ${technicalScore}/12 factors - no clear trend.`,
           `Wait for a clearer signal before entering a position.`,
         ],
   };
-  
+
+  // Kelly Criterion position sizing
+  const winRate = finalConfidence / 100;
+  // Use analyst target upside as reward, 5% as default stop loss
+  const targetUpsidePct = Math.max(5, analystRating.targetUpside > 0 ? analystRating.targetUpside : 10);
+  const stopLossPct = 5; // default 5% stop
+  const rewardRiskRatio = targetUpsidePct / stopLossPct;
+  const kellyFraction = rewardRiskRatio > 0 ? winRate - (1 - winRate) / rewardRiskRatio : 0;
+  const recommendedPositionSize = Math.round(Math.max(0, Math.min(25, kellyFraction * 100)) * 10) / 10;
+
   suggestions.push({
     type: mainType,
     strategy,
     confidence: finalConfidence,
     reasoning: [
-      `Combined Score: ${combinedScore}/18 (Fundamental ${fundamentalScore}/9 + Technical ${technicalScore}/9)`,
+      `Combined Score: ${combinedScore}/24 (Fundamental ${fundamentalScore}/12 + Technical ${technicalScore}/12)`,
       `News Sentiment: ${newsSentiment.signal} (${newsSentiment.score}%)`,
       `Analyst Consensus: ${analystRating.consensus} (${analystRating.buyPercent}% bullish)`,
       `Insider Activity: ${insiderActivity.netActivity}`,
       analystRating.targetUpside !== 0 ? `Price Target: ${analystRating.targetUpside >= 0 ? '+' : ''}${analystRating.targetUpside.toFixed(1)}% upside` : '',
     ].filter(Boolean),
-    riskLevel: combinedScore >= 12 ? 'LOW' : combinedScore >= 8 ? 'MEDIUM' : 'HIGH',
+    riskLevel: combinedScore >= 16 ? 'LOW' : combinedScore >= 10 ? 'MEDIUM' : 'HIGH',
     detailedExplanation,
+    kellyPositionSizing: {
+      kellyFraction: Math.round(kellyFraction * 1000) / 1000,
+      recommendedPositionSize,
+      winRate: Math.round(winRate * 100),
+      rewardRiskRatio: Math.round(rewardRiskRatio * 100) / 100,
+      note: 'Kelly fraction capped at 25% of portfolio for risk management',
+    },
   });
-  
+
   // Earnings alert
   if (earnings?.earningsCalendar?.[0]) {
     const nextEarnings = earnings.earningsCalendar[0];
@@ -1329,21 +1572,21 @@ function generateSuggestions(
       });
     }
   }
-  
+
   // Only show divergence alert if extreme
-  if (Math.abs(fundamentalScore - technicalScore) >= 5) {
+  if (Math.abs(fundamentalScore - technicalScore) >= 6) {
     suggestions.push({
       type: 'ALERT',
       strategy: 'Fundamental/Technical Divergence',
       confidence: 0,
       reasoning: [
-        `Fundamental: ${fundamentalScore}/9 vs Technical: ${technicalScore}/9`,
+        `Fundamental: ${fundamentalScore}/12 vs Technical: ${technicalScore}/12`,
         fundamentalScore > technicalScore ? 'Strong fundamentals but weak price action - potential value opportunity' : 'Strong price action but weak fundamentals - momentum play, higher risk',
       ],
       riskLevel: 'WARNING',
     });
   }
-  
+
   return suggestions;
 }
 
@@ -1377,7 +1620,7 @@ export async function GET(
   }
 
   // Try Schwab first
-  const schwabToken = await getSchwabToken();
+  const { token: schwabToken } = await getSchwabAccessToken('stock');
   if (schwabToken) {
     quote = await fetchSchwabQuote(schwabToken, ticker);
     priceHistory = await fetchSchwabPriceHistory(schwabToken, ticker);
@@ -1432,6 +1675,13 @@ export async function GET(
   const q = quote.quote;
   const price = q.lastPrice || q.mark || 0;
   const previousClose = q.closePrice || price;
+  // Extra Schwab quote fields
+  const todayOpen = q.openPrice || price;
+  const todayHigh = q.highPrice || price;
+  const todayLow = q.lowPrice || price;
+  const todayVolume = q.totalVolume || 0;
+  const schwab52WeekHigh: number = q['52WeekHigh'] || 0;
+  const schwab52WeekLow: number = q['52WeekLow'] || 0;
 
   // Calculate all technicals
   const closes = priceHistory.map(c => c.close);
@@ -1443,7 +1693,14 @@ export async function GET(
   const rsi = closes.length >= 15 ? calculateRSI(closes) : 50;
   const macd = calculateMACD(closes);
   const bbands = calculateBollingerBands(closes);
-  
+
+  // New indicators
+  const adxResult = calculateADX(priceHistory);
+  const obvSeries = calculateOBV(priceHistory);
+  const obvDivergence = detectOBVDivergence(priceHistory, obvSeries);
+  const stochastic = calculateStochastic(priceHistory);
+  const cmf = calculateCMF(priceHistory);
+
   // NEW: Detect professional chart patterns
   const patternCandles: PatternCandle[] = priceHistory.map((c: any) => ({
     open: c.open || c.close,
@@ -1455,14 +1712,24 @@ export async function GET(
   const chartPatterns = detectAllPatterns(patternCandles, price);
   const atr = calculateATR(priceHistory as any);
   const { support, resistance } = findSupportResistance(priceHistory as any);
-  const high52Week = closes.length > 0 ? Math.max(...closes) : price * 1.2;
-  const low52Week = closes.length > 0 ? Math.min(...closes) : price * 0.7;
+  // Prefer Schwab 52-week data if available, otherwise compute from candles
+  const high52Week = schwab52WeekHigh > 0 ? schwab52WeekHigh : (closes.length > 0 ? Math.max(...closes) : price * 1.2);
+  const low52Week = schwab52WeekLow > 0 ? schwab52WeekLow : (closes.length > 0 ? Math.min(...closes) : price * 0.7);
+  const fibonacci = calculateFibonacciLevels(high52Week, low52Week, price);
   const avgVolume = priceHistory.length > 0 ? priceHistory.reduce((sum, c) => sum + c.volume, 0) / priceHistory.length : 0;
 
   // Get fundamentals
   const metrics = financials?.metric || {};
+  // Compute new derived metrics
+  const fcfPerShare = metrics.freeCashFlowPerShareTTM || 0;
+  const fcfYield = fcfPerShare > 0 && price > 0 ? (fcfPerShare / price) * 100 : 0;
+  const peTTM = metrics.peTTM || metrics.peBasicExclExtraTTM || 0;
+  const epsGrowthTTM = metrics.epsGrowthTTMYoy || 0;
+  const peg = peTTM > 0 && epsGrowthTTM > 0 ? peTTM / epsGrowthTTM : 0;
+  const evEbitda = metrics['currentEv/ebitdaTTM'] || 0;
+
   const fundamentalMetrics: FundamentalMetrics = {
-    pe: metrics.peTTM || metrics.peBasicExclExtraTTM || 0,
+    pe: peTTM,
     pb: metrics.pbAnnual || 0,
     roe: metrics.roeTTM || 0,
     roa: metrics.roaTTM || 0,
@@ -1470,13 +1737,17 @@ export async function GET(
     currentRatio: metrics.currentRatioAnnual || 0,
     profitMargin: metrics.netProfitMarginTTM || 0,
     revenueGrowth: metrics.revenueGrowthTTMYoy || 0,
-    epsGrowth: metrics.epsGrowthTTMYoy || 0,
+    epsGrowth: epsGrowthTTM,
     grossMargin: metrics.grossMarginTTM || 0,
+    fcfYield,
+    peg,
+    evEbitda,
   };
 
   const technicalInputs: TechnicalInputs = {
     price, sma20, sma50, sma200, ema12, ema26, rsi, macd, bbands, atr,
-    previousClose, high52Week, low52Week, avgVolume, currentVolume: 0,
+    previousClose, high52Week, low52Week, avgVolume, currentVolume: todayVolume,
+    adx: adxResult.adx, cmf, obvDivergence,
   };
 
   // Calculate scores
@@ -1570,10 +1841,10 @@ export async function GET(
   // ============================================================
   const combinedModelScore = fundamentalAnalysis.score + technicalAnalysis.score;
   const combinedModelRating =
-    combinedModelScore >= 14 ? 'STRONG_BUY' :
-    combinedModelScore >= 11 ? 'BUY' :
-    combinedModelScore >= 7 ? 'HOLD' :
-    combinedModelScore >= 4 ? 'SELL' : 'STRONG_SELL';
+    combinedModelScore >= 18 ? 'STRONG_BUY' :
+    combinedModelScore >= 15 ? 'BUY' :
+    combinedModelScore >= 9 ? 'HOLD' :
+    combinedModelScore >= 6 ? 'SELL' : 'STRONG_SELL';
 
   const completenessScore = calculateCompletenessScore({
     hasPrice: price > 0,
@@ -1588,8 +1859,8 @@ export async function GET(
   });
 
   const agreementCount = [
-    fundamentalAnalysis.score >= 5,
-    technicalAnalysis.score >= 5,
+    fundamentalAnalysis.score >= 6,
+    technicalAnalysis.score >= 6,
     newsAnalysis.signal === 'BULLISH',
     analystAnalysis.buyPercent >= 50,
     insiderAnalysis.netActivity === 'BUYING',
@@ -1606,7 +1877,7 @@ export async function GET(
 
   // Use the computed moving averages already in scope (avoid referencing non-existent identifiers)
   const regimeInfo = computeRegime(priceHistory, sma50, sma200);
-  const calib = calibratedConfidence(combinedModelScore, 18, agreementCount, completenessScore, regimeInfo.regime);
+  const calib = calibratedConfidence(combinedModelScore, 24, agreementCount, completenessScore, regimeInfo.regime);
 
   const gateFailures: string[] = [];
   if (freshness.isStale) gateFailures.push('Stale price quote (>60s). Refresh required for accurate suggestions.');
@@ -1624,7 +1895,7 @@ export async function GET(
   // ============================================================
   let portfolioAnalysis: any = null;
   let enhancedScore = combinedModelScore;
-  let enhancedMaxScore = 18;
+  let enhancedMaxScore = 24;
   let enhancedRating = combinedModelRating;
   
   if (portfolioContext?.success && portfolioContext.context) {
@@ -1772,7 +2043,7 @@ export async function GET(
     if (suggestions[0] && typeof suggestions[0].confidence === 'number') suggestions[0].confidence = calib.confidence;
     if (suggestions[0] && Array.isArray(suggestions[0].reasoning)) {
       suggestions[0].reasoning.unshift(`Calibration: ${calib.calibrationVersion} (${calib.bucket})`);
-      suggestions[0].reasoning.unshift(`Regime: ${regimeInfo.regime} (ATR% ${regimeInfo.atrPct}, trendStrength ${regimeInfo.trendStrength})`);
+      suggestions[0].reasoning.unshift(`Regime: ${regimeInfo.regime} (ATR% ${regimeInfo.atrPct}, ADX ${regimeInfo.adx})`);
     }
   }
 
@@ -1794,6 +2065,9 @@ return NextResponse.json({
       regime: regimeInfo.regime,
       atrPct: regimeInfo.atrPct,
       trendStrength: regimeInfo.trendStrength,
+      adx: regimeInfo.adx,
+      plusDI: regimeInfo.plusDI,
+      minusDI: regimeInfo.minusDI,
       tradeDecision,
       warnings: {
         news: FINNHUB_KEY ? null : 'News requires FINNHUB_API_KEY (missing in environment).',
@@ -1839,26 +2113,35 @@ return NextResponse.json({
       goldenCross: sma50 > sma200,
       priceVsSma50: Math.round(((price / sma50 - 1) * 100) * 100) / 100,
       priceVsSma200: Math.round(((price / sma200 - 1) * 100) * 100) / 100,
+      // New indicators
+      adx: adxResult.adx,
+      plusDI: adxResult.plusDI,
+      minusDI: adxResult.minusDI,
+      obv: obvSeries.length > 0 ? obvSeries[obvSeries.length - 1] : 0,
+      obvDivergence,
+      cmf,
+      stochastic,
+      fibonacci,
     },
 
     analysis: {
       fundamental: {
         score: fundamentalAnalysis.score,
         maxScore: fundamentalAnalysis.maxScore,
-        rating: fundamentalAnalysis.score >= 7 ? 'STRONG' : fundamentalAnalysis.score >= 5 ? 'GOOD' : fundamentalAnalysis.score >= 3 ? 'FAIR' : 'WEAK',
+        rating: fundamentalAnalysis.score >= 9 ? 'STRONG' : fundamentalAnalysis.score >= 6 ? 'GOOD' : fundamentalAnalysis.score >= 3 ? 'FAIR' : 'WEAK',
         factors: fundamentalAnalysis.factors,
       },
       technical: {
         score: technicalAnalysis.score,
         maxScore: technicalAnalysis.maxScore,
-        rating: technicalAnalysis.score >= 7 ? 'STRONG_BUY' : technicalAnalysis.score >= 5 ? 'BUY' : technicalAnalysis.score >= 3 ? 'HOLD' : 'SELL',
+        rating: technicalAnalysis.score >= 9 ? 'STRONG_BUY' : technicalAnalysis.score >= 7 ? 'BUY' : technicalAnalysis.score >= 4 ? 'HOLD' : 'SELL',
         factors: technicalAnalysis.factors,
       },
       combined: {
         score: enhancedScore,
         maxScore: enhancedMaxScore,
         baseScore: combinedModelScore,
-        baseMaxScore: 18,
+        baseMaxScore: 24,
         modelRating: combinedModelRating,
         rating: enhancedRating,
         calibratedConfidence: tradeDecision.action === 'NO_TRADE' ? 0 : tradeDecision.confidence,

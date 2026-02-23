@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
 
     // Fetch fresh suggestions
     const suggestions = await scanMarketForSuggestions();
-    
+
     cachedSuggestions = suggestions;
     lastFetchTime = now;
 
@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
       success: true,
       suggestions: filtered,
       cached: false,
-      totalScanned: MARKET_UNIVERSE.length,
+      totalScanned: suggestions.length > 0 ? suggestions.length : MARKET_UNIVERSE.length,
       nextUpdate: CACHE_DURATION,
     });
 
@@ -73,9 +73,36 @@ export async function GET(req: NextRequest) {
   }
 }
 
+async function fetchSchwabMovers(token: string): Promise<string[]> {
+  const headers = {
+    'Authorization': `Bearer ${token}`,
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'application/json',
+  };
+  const results: string[] = [];
+  try {
+    const [spxRes, ndxRes] = await Promise.all([
+      fetch('https://api.schwabapi.com/marketdata/v1/movers/%24SPX?sort=VOLUME&frequency=0', { headers }),
+      fetch('https://api.schwabapi.com/marketdata/v1/movers/%24NDX?sort=PERCENT_CHANGE_UP&frequency=0', { headers }),
+    ]);
+    for (const res of [spxRes, ndxRes]) {
+      if (!res.ok) continue;
+      const data = await res.json();
+      const movers: any[] = data?.screeners || data?.movers || [];
+      for (const m of movers.slice(0, 10)) {
+        const sym = m.symbol || m.Symbol || '';
+        if (sym && !results.includes(sym)) results.push(sym);
+      }
+    }
+  } catch (err) {
+    console.error('[Suggestions] Movers fetch failed:', err);
+  }
+  return results;
+}
+
 async function scanMarketForSuggestions(): Promise<Suggestion[]> {
   const suggestions: Suggestion[] = [];
-  
+
   // Get Schwab token
   const tokenResult = await getSchwabAccessToken('options', { forceRefresh: false });
   if (!tokenResult.token) {
@@ -83,14 +110,18 @@ async function scanMarketForSuggestions(): Promise<Suggestion[]> {
     return [];
   }
 
-  // Scan each symbol
-  for (const symbol of MARKET_UNIVERSE.slice(0, 15)) { // Limit to first 15 to avoid rate limits
-    try {
-      // 1. Get stock data
-      const stockSuggestion = await analyzeStock(symbol, tokenResult.token);
-      if (stockSuggestion) suggestions.push(stockSuggestion);
+  // Try live movers; fall back to static universe
+  let symbolsToScan: string[] = await fetchSchwabMovers(tokenResult.token);
+  let scannedFromMovers = symbolsToScan.length > 0;
+  if (!scannedFromMovers) {
+    console.log('[Suggestions] Movers unavailable, using static universe');
+    symbolsToScan = MARKET_UNIVERSE.slice(0, 15);
+  }
 
-      // 2. Get options data for unusual activity
+  // Scan each symbol
+  for (const symbol of symbolsToScan.slice(0, 20)) { // Limit to avoid rate limits
+    try {
+      // 1. Get options data for unusual activity
       const optionsSuggestion = await analyzeOptions(symbol, tokenResult.token);
       if (optionsSuggestion) suggestions.push(optionsSuggestion);
 
