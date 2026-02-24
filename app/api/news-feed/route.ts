@@ -16,17 +16,40 @@ export interface MarketEvent {
   label: string;
   type: 'opex' | 'quarterly_opex' | 'economic' | 'earnings';
   impact: 'high' | 'medium' | 'low';
-  detail?: string;     // e.g. "8:30am ET"
+  detail?: string;     // e.g. "8:30am ET" or "AMC" / "BMO"
+  ticker?: string;     // populated for earnings events
 }
 
 export interface NewsItem {
-  ticker: string;
+  ticker: string;      // company ticker or 'MARKET' for general news
   headline: string;
   source: string;
   url: string;
   datetime: number;    // Unix timestamp (seconds)
   summary: string;
 }
+
+// ── Always-on tickers for company news ───────────────────────────────────────
+// Merged with flow signal tickers at request time
+
+const CORE_NEWS_TICKERS = [
+  'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'META',
+  'AMZN', 'TSLA', 'AMD', 'JPM', 'COIN',
+  'PLTR', 'NFLX', 'SPY', 'QQQ', 'UBER',
+  'GS', 'AVGO', 'CRM', 'SHOP', 'MELI',
+];
+
+// Key tickers to show earnings for
+const EARNINGS_WATCH_TICKERS = new Set([
+  'AAPL', 'MSFT', 'NVDA', 'GOOGL', 'META', 'AMZN', 'TSLA', 'AMD',
+  'JPM', 'GS', 'MS', 'C', 'BAC', 'WFC', 'V', 'MA',
+  'COIN', 'PLTR', 'NFLX', 'DIS', 'ORCL', 'CRM', 'ADBE',
+  'UBER', 'SHOP', 'MELI', 'INTC', 'QCOM', 'AVGO', 'MU',
+  'UNH', 'JNJ', 'LLY', 'ABBV', 'TMO', 'ABT',
+  'XOM', 'CVX', 'COP', 'HD', 'WMT', 'COST',
+  'MCD', 'SBUX', 'NKE', 'PG', 'KO', 'PEP',
+  'SPY', 'QQQ', 'IWM', 'SOFI', 'SQ', 'HOOD',
+]);
 
 // ── OpEx calendar (computed) ───────────────────────────────────────────────────
 
@@ -77,8 +100,34 @@ async function fetchCompanyNews(ticker: string): Promise<NewsItem[]> {
     const data = await res.json();
     if (!Array.isArray(data)) return [];
 
-    return data.slice(0, 5).map((n: any) => ({
+    return data.slice(0, 4).map((n: any) => ({
       ticker,
+      headline: n.headline ?? '',
+      source: n.source ?? '',
+      url: n.url ?? '',
+      datetime: n.datetime ?? 0,
+      summary: (n.summary ?? '').slice(0, 200),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ── Finnhub: general market news ──────────────────────────────────────────────
+
+async function fetchGeneralNews(): Promise<NewsItem[]> {
+  if (!FINNHUB_KEY) return [];
+  try {
+    const res = await fetch(
+      `https://finnhub.io/api/v1/news?category=general&token=${FINNHUB_KEY}`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+
+    return data.slice(0, 20).map((n: any) => ({
+      ticker: 'MARKET',
       headline: n.headline ?? '',
       source: n.source ?? '',
       url: n.url ?? '',
@@ -115,6 +164,45 @@ async function fetchEconomicCalendar(): Promise<MarketEvent[]> {
         impact: 'high' as const,
         detail: e.time ? e.time.slice(11, 16) + ' UTC' : undefined,
       }))
+      .filter(e => e.date.length === 10);
+  } catch {
+    return [];
+  }
+}
+
+// ── Finnhub: earnings calendar ─────────────────────────────────────────────────
+
+async function fetchEarningsCalendar(): Promise<MarketEvent[]> {
+  if (!FINNHUB_KEY) return [];
+  const from = new Date().toISOString().slice(0, 10);
+  const to = new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10);
+
+  try {
+    const res = await fetch(
+      `https://finnhub.io/api/v1/calendar/earnings?from=${from}&to=${to}&token=${FINNHUB_KEY}`,
+      { signal: AbortSignal.timeout(5000) },
+    );
+    if (!res.ok) return [];
+    const data = await res.json();
+    const earnings: any[] = data.earningsCalendar ?? [];
+
+    return earnings
+      .filter((e: any) => EARNINGS_WATCH_TICKERS.has(e.symbol))
+      .map((e: any) => {
+        const hour = (e.hour ?? '').toLowerCase();
+        const timing =
+          hour === 'bmo' ? 'Before Market Open' :
+          hour === 'amc' ? 'After Market Close' :
+          'During Day';
+        return {
+          date: e.date ?? '',
+          label: `${e.symbol} Earnings (${timing})`,
+          type: 'earnings' as const,
+          impact: 'high' as const,
+          detail: timing,
+          ticker: e.symbol,
+        };
+      })
       .filter(e => e.date.length === 10);
   } catch {
     return [];
@@ -171,49 +259,65 @@ ${newsLines || 'No recent news'}`;
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const tickersParam = url.searchParams.get('tickers') ?? 'SPY,QQQ,NVDA,TSLA,AAPL,AMD,MSFT,META,AMZN,GOOGL';
+  const tickersParam = url.searchParams.get('tickers') ?? '';
   const flowSummary = url.searchParams.get('flowSummary') ?? '';
   const force = url.searchParams.has('force');
 
-  const cacheKey = `news-feed-${tickersParam}`;
+  // Merge flow tickers with core news tickers, deduplicate, cap at 20
+  const flowTickers = tickersParam
+    ? tickersParam.split(',').map(t => t.trim()).filter(Boolean)
+    : [];
+  const mergedTickers = [...new Set([...flowTickers, ...CORE_NEWS_TICKERS])].slice(0, 20);
+
+  const cacheKey = `news-feed-v2-${mergedTickers.join(',')}`;
   const cached = cache.get(cacheKey);
   if (cached && !force) return NextResponse.json(cached);
 
-  const tickers = tickersParam.split(',').map(t => t.trim()).slice(0, 8);
-
-  // Parallel: company news for all tickers + economic calendar
-  const [economicRaw, ...newsArrays] = await Promise.all([
+  // Parallel: company news + general news + economic calendar + earnings calendar
+  const [economicRaw, earningsRaw, generalNewsRaw, ...newsArrays] = await Promise.all([
     fetchEconomicCalendar(),
-    ...tickers.map(t => fetchCompanyNews(t)),
+    fetchEarningsCalendar(),
+    fetchGeneralNews(),
+    ...mergedTickers.map(t => fetchCompanyNews(t)),
   ]);
 
   // Merge and sort all events
+  const todayStr = new Date().toISOString().slice(0, 10);
   const opExEvents = getUpcomingOpEx(45);
   const allEvents: MarketEvent[] = [
     ...opExEvents,
     ...economicRaw,
+    ...earningsRaw,
   ]
-    .filter(e => e.date >= new Date().toISOString().slice(0, 10))
+    .filter(e => e.date >= todayStr)
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  // Flatten news, sort by recency
-  const allNews: NewsItem[] = (newsArrays as NewsItem[][])
+  // Flatten company news, sort by recency
+  const allCompanyNews: NewsItem[] = (newsArrays as NewsItem[][])
     .flat()
     .sort((a, b) => b.datetime - a.datetime)
-    .slice(0, 40);
+    .slice(0, 60);
 
-  // Top 2 headlines per ticker for AI context
-  const topNews = tickers.flatMap(t => allNews.filter(n => n.ticker === t).slice(0, 2));
+  // General market news sorted by recency
+  const generalNews: NewsItem[] = (generalNewsRaw as NewsItem[])
+    .sort((a, b) => b.datetime - a.datetime);
+
+  // Top 2 headlines per ticker for AI context (prefer flow tickers)
+  const aiTickers = flowTickers.length > 0 ? flowTickers : mergedTickers.slice(0, 6);
+  const topNews = aiTickers.flatMap(t =>
+    allCompanyNews.filter(n => n.ticker === t).slice(0, 2),
+  );
 
   // Generate AI insight
   const insight = await generateInsight(flowSummary, allEvents, topNews);
 
   const response = {
     events: allEvents,
-    newsItems: allNews,
+    newsItems: allCompanyNews,
+    generalNews,
     insight,
     generatedAt: new Date().toISOString(),
-    tickers,
+    tickers: mergedTickers,
   };
 
   cache.set(cacheKey, response, CACHE_TTL);

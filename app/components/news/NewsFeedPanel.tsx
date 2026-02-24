@@ -2,9 +2,10 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   Newspaper, RefreshCw, ExternalLink, TrendingUp, TrendingDown,
-  Zap, CalendarDays, Sparkles,
+  Zap, CalendarDays, Sparkles, X, ChevronRight,
 } from 'lucide-react';
 import type { MarketEvent, NewsItem } from '@/app/api/news-feed/route';
+import { getPlaybook, type EventPlaybook } from '@/lib/eventPlaybooks';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -72,9 +73,95 @@ const EVENT_STYLE: Record<MarketEvent['type'], { dot: string; badge: string }> =
   earnings:       { dot: 'bg-purple-400',  badge: 'text-purple-300 bg-purple-500/15 border-purple-500/25' },
 };
 
+const STRATEGY_STYLE: Record<string, string> = {
+  bullish: 'border-l-emerald-500 bg-emerald-500/5',
+  bearish: 'border-l-red-500 bg-red-500/5',
+  neutral: 'border-l-blue-500 bg-blue-500/5',
+  warning: 'border-l-amber-500 bg-amber-500/5',
+};
+
+const STRATEGY_LABEL: Record<string, string> = {
+  bullish: 'text-emerald-400',
+  bearish: 'text-red-400',
+  neutral: 'text-blue-400',
+  warning: 'text-amber-400',
+};
+
 function getNearby(expDate: string, events: MarketEvent[], range = 5): MarketEvent[] {
   const expDu = daysUntil(expDate);
   return events.filter(e => Math.abs(daysUntil(e.date) - expDu) <= range);
+}
+
+// ── PlaybookCard ──────────────────────────────────────────────────────────────
+
+function PlaybookCard({
+  playbook,
+  eventLabel,
+  onClose,
+}: {
+  playbook: EventPlaybook;
+  eventLabel: string;
+  onClose: () => void;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-600/50 bg-slate-900/80 overflow-hidden">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 px-4 py-3 border-b border-slate-700/50 bg-slate-800/40">
+        <div className="flex items-center gap-2">
+          <span className="text-xl">{playbook.emoji}</span>
+          <div>
+            <p className="text-[12px] font-bold text-white leading-tight">{playbook.title}</p>
+            <p className="text-[10px] text-slate-500 mt-0.5 truncate max-w-[260px]">{eventLabel}</p>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className="flex-shrink-0 p-1 rounded-md text-slate-500 hover:text-white hover:bg-slate-700 transition-colors"
+        >
+          <X size={13} />
+        </button>
+      </div>
+
+      <div className="px-4 py-3 space-y-3">
+        {/* What is it */}
+        <div>
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">What is it?</p>
+          <p className="text-[12px] text-slate-300 leading-relaxed">{playbook.whatIsIt}</p>
+        </div>
+
+        {/* Typical behavior */}
+        <div>
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Typical Market Behavior</p>
+          <p className="text-[12px] text-slate-400 leading-relaxed">{playbook.typicalBehavior}</p>
+        </div>
+
+        {/* Strategies */}
+        <div>
+          <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Trading Strategies</p>
+          <div className="space-y-2">
+            {playbook.strategies.map((s, i) => (
+              <div
+                key={i}
+                className={`rounded-lg border-l-2 px-3 py-2 ${STRATEGY_STYLE[s.type] ?? STRATEGY_STYLE.neutral}`}
+              >
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className={`text-[10px] font-bold uppercase tracking-wide ${STRATEGY_LABEL[s.type] ?? STRATEGY_LABEL.neutral}`}>
+                    {s.type}
+                  </span>
+                  <span className="text-[11px] font-semibold text-slate-200">{s.name}</span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">{s.description}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="px-4 py-2 border-t border-slate-800/60">
+        <p className="text-[10px] text-slate-600">Educational purposes only. Not financial advice.</p>
+      </div>
+    </div>
+  );
 }
 
 // ── Main component ─────────────────────────────────────────────────────────────
@@ -83,6 +170,7 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
   const [flowSignals, setFlowSignals] = useState<FlowSignal[]>([]);
   const [events, setEvents] = useState<MarketEvent[]>([]);
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
+  const [generalNews, setGeneralNews] = useState<NewsItem[]>([]);
   const [insight, setInsight] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +179,8 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
 
   const [activeTab, setActiveTab] = useState<TabId>('insights');
   const [tickerFilter, setTickerFilter] = useState('ALL');
+  const [selectedPlaybook, setSelectedPlaybook] = useState<{ playbook: EventPlaybook; label: string } | null>(null);
+  const [expandedCalEvent, setExpandedCalEvent] = useState<string | null>(null); // key = `${date}-${label}`
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 15_000);
@@ -121,6 +211,7 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
 
       setEvents(nd.events ?? []);
       setNewsItems(nd.newsItems ?? []);
+      setGeneralNews(nd.generalNews ?? []);
       setInsight(nd.insight ?? null);
       setUpdatedAt(nd.generatedAt ?? null);
     } catch (e: any) {
@@ -165,10 +256,15 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
 
   const flowTickers = useMemo(() => [...new Set(flowSignals.map(s => s.ticker))], [flowSignals]);
 
-  const filteredNews = useMemo(
-    () => tickerFilter === 'ALL' ? newsItems : newsItems.filter(n => n.ticker === tickerFilter),
-    [newsItems, tickerFilter],
-  );
+  // Combined news for the News tab
+  const filteredNews = useMemo(() => {
+    if (tickerFilter === 'ALL') {
+      // Show general market news first, then company news
+      return [...generalNews, ...newsItems];
+    }
+    if (tickerFilter === 'MARKET') return generalNews;
+    return newsItems.filter(n => n.ticker === tickerFilter);
+  }, [newsItems, generalNews, tickerFilter]);
 
   const calGroups = useMemo(() => ({
     thisWeek:  events.filter(e => daysUntil(e.date) <= 7),
@@ -181,6 +277,18 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
     { id: 'news'     as TabId, label: 'News',           Icon: Newspaper },
     { id: 'calendar' as TabId, label: 'Calendar',       Icon: CalendarDays },
   ];
+
+  function handleEventClick(event: MarketEvent) {
+    const playbook = getPlaybook(event);
+    if (!playbook) return;
+    const key = `${event.date}-${event.label}`;
+    if (selectedPlaybook?.label === event.label) {
+      setSelectedPlaybook(null);
+    } else {
+      setSelectedPlaybook({ playbook, label: event.label });
+      setExpandedCalEvent(key);
+    }
+  }
 
   return (
     <div className="space-y-3 max-w-3xl">
@@ -224,20 +332,40 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
             {events.slice(0, 20).map((e, i) => {
               const s = EVENT_STYLE[e.type] ?? EVENT_STYLE.opex;
               const du = daysUntil(e.date);
-              const label = e.label.length > 22 ? e.label.slice(0, 22) + '…' : e.label;
+              const label = e.label.length > 24 ? e.label.slice(0, 24) + '…' : e.label;
+              const hasPlaybook = !!getPlaybook(e);
+              const isSelected = selectedPlaybook?.label === e.label;
               return (
-                <span
+                <button
                   key={i}
-                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium flex-shrink-0 ${s.badge}`}
+                  onClick={() => handleEventClick(e)}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium flex-shrink-0 transition-all ${s.badge} ${
+                    hasPlaybook
+                      ? isSelected
+                        ? 'ring-1 ring-offset-1 ring-offset-slate-900 ring-white/30 brightness-125'
+                        : 'hover:brightness-125 cursor-pointer'
+                      : 'cursor-default'
+                  }`}
+                  title={hasPlaybook ? 'Click to learn what to do during this event' : undefined}
                 >
                   <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${s.dot}`} />
                   {label}
                   <span className="opacity-50 text-[10px]">{du === 0 ? 'today' : `${du}d`}</span>
-                </span>
+                  {hasPlaybook && <ChevronRight size={9} className="opacity-40" />}
+                </button>
               );
             })}
           </div>
         </div>
+      )}
+
+      {/* ── Playbook card (appears below events strip) ── */}
+      {selectedPlaybook && (
+        <PlaybookCard
+          playbook={selectedPlaybook.playbook}
+          eventLabel={selectedPlaybook.label}
+          onClose={() => setSelectedPlaybook(null)}
+        />
       )}
 
       {/* ── Tab bar ── */}
@@ -358,15 +486,18 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
                         {nearby.map((e, i) => {
                           const s = EVENT_STYLE[e.type] ?? EVENT_STYLE.opex;
                           const edu = daysUntil(e.date);
+                          const hasPlaybook = !!getPlaybook(e);
                           return (
-                            <span
+                            <button
                               key={i}
-                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium ${s.badge}`}
+                              onClick={() => handleEventClick(e)}
+                              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium transition-all ${s.badge} ${hasPlaybook ? 'hover:brightness-125' : 'cursor-default'}`}
                             >
                               <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${s.dot}`} />
                               {e.label}
                               <span className="opacity-50">({getDuLabel(edu)})</span>
-                            </span>
+                              {hasPlaybook && <ChevronRight size={9} className="opacity-40" />}
+                            </button>
                           );
                         })}
                       </div>
@@ -389,40 +520,70 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
       {activeTab === 'news' && !loading && (
         <div className="space-y-3">
 
-          {/* Ticker filter — sentiment-tinted pills */}
-          {flowTickers.length > 0 && (
-            <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5">
-              {(['ALL', ...flowTickers] as string[]).map(t => {
-                const sent = t !== 'ALL' ? tickerSentiment[t] : undefined;
-                const active = tickerFilter === t;
-                const activeCls = active ? 'bg-blue-600 border-blue-500 text-white' : (
-                  sent === 'bullish' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:border-emerald-400' :
-                  sent === 'bearish' ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:border-red-400' :
-                  'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
-                );
-                return (
-                  <button
-                    key={t}
-                    onClick={() => setTickerFilter(t)}
-                    className={`flex-shrink-0 px-3 py-1 text-[11px] font-bold rounded-full border transition-colors ${activeCls}`}
-                  >
-                    {t}
-                    {t !== 'ALL' && (
-                      <span className="ml-1 opacity-60 text-[9px]">
-                        {newsItems.filter(n => n.ticker === t).length}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          {/* Ticker filter pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5">
+            {/* ALL */}
+            <button
+              onClick={() => setTickerFilter('ALL')}
+              className={`flex-shrink-0 px-3 py-1 text-[11px] font-bold rounded-full border transition-colors ${
+                tickerFilter === 'ALL'
+                  ? 'bg-blue-600 border-blue-500 text-white'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
+              }`}
+            >
+              ALL
+              <span className="ml-1 opacity-60 text-[9px]">
+                {generalNews.length + newsItems.length}
+              </span>
+            </button>
+
+            {/* MARKET (general news) */}
+            {generalNews.length > 0 && (
+              <button
+                onClick={() => setTickerFilter('MARKET')}
+                className={`flex-shrink-0 px-3 py-1 text-[11px] font-bold rounded-full border transition-colors ${
+                  tickerFilter === 'MARKET'
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'bg-slate-800/60 border-slate-600/50 text-slate-400 hover:text-white hover:border-slate-500'
+                }`}
+              >
+                🌐 Market
+                <span className="ml-1 opacity-60 text-[9px]">{generalNews.length}</span>
+              </button>
+            )}
+
+            {/* Flow tickers */}
+            {flowTickers.map(t => {
+              const sent = tickerSentiment[t];
+              const active = tickerFilter === t;
+              const activeCls = active ? 'bg-blue-600 border-blue-500 text-white' : (
+                sent === 'bullish' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:border-emerald-400' :
+                sent === 'bearish' ? 'bg-red-500/10 border-red-500/30 text-red-400 hover:border-red-400' :
+                'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
+              );
+              return (
+                <button
+                  key={t}
+                  onClick={() => setTickerFilter(t)}
+                  className={`flex-shrink-0 px-3 py-1 text-[11px] font-bold rounded-full border transition-colors ${activeCls}`}
+                >
+                  {t}
+                  <span className="ml-1 opacity-60 text-[9px]">
+                    {newsItems.filter(n => n.ticker === t).length}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
           {/* News count */}
           {filteredNews.length > 0 && (
             <p className="text-[10px] text-slate-600">
               {filteredNews.length} article{filteredNews.length !== 1 ? 's' : ''}
-              {tickerFilter !== 'ALL' ? ` for ${tickerFilter}` : ' across all tickers'} · last 7 days
+              {tickerFilter === 'MARKET' ? ' · general market news'
+                : tickerFilter !== 'ALL' ? ` for ${tickerFilter}`
+                : ` across ${(new Set(newsItems.map(n => n.ticker))).size} companies + market news`}
+              {' '}· last 7 days
             </p>
           )}
 
@@ -434,13 +595,14 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
             </div>
           )}
 
-          {/* News cards — left-border sentiment accent, Robinhood-style */}
+          {/* News cards */}
           <div className="space-y-px rounded-2xl border border-slate-700/40 overflow-hidden">
             {filteredNews.map((n, i) => {
-              const sent = tickerSentiment[n.ticker];
+              const sent = n.ticker === 'MARKET' ? undefined : tickerSentiment[n.ticker];
               const bar =
                 sent === 'bullish' ? 'bg-emerald-500' :
                 sent === 'bearish' ? 'bg-red-500' :
+                n.ticker === 'MARKET' ? 'bg-blue-500' :
                 'bg-slate-600';
 
               return (
@@ -453,12 +615,18 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
 
                   <div className="flex items-start gap-3 px-3 py-3 flex-1 min-w-0">
                     {/* Ticker badge */}
-                    <button
-                      onClick={() => onSelectTicker?.(n.ticker)}
-                      className="flex-shrink-0 mt-0.5 text-[10px] font-bold font-mono px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 hover:bg-blue-600 hover:text-white transition-colors"
-                    >
-                      {n.ticker}
-                    </button>
+                    {n.ticker === 'MARKET' ? (
+                      <span className="flex-shrink-0 mt-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-500/15 text-blue-400 border border-blue-500/20">
+                        MKT
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => onSelectTicker?.(n.ticker)}
+                        className="flex-shrink-0 mt-0.5 text-[10px] font-bold font-mono px-1.5 py-0.5 rounded bg-slate-700 text-slate-300 hover:bg-blue-600 hover:text-white transition-colors"
+                      >
+                        {n.ticker}
+                      </button>
+                    )}
 
                     {/* Headline + meta */}
                     <div className="flex-1 min-w-0">
@@ -514,6 +682,7 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
                   :                          'Earnings'}
               </span>
             ))}
+            <span className="text-[10px] text-slate-600 ml-1">· Tap any row to learn what to do</span>
           </div>
 
           {/* Grouped calendar */}
@@ -530,21 +699,89 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
                 {data.map((e, i) => {
                   const s = EVENT_STYLE[e.type] ?? EVENT_STYLE.opex;
                   const du = daysUntil(e.date);
+                  const playbook = getPlaybook(e);
+                  const key = `${e.date}-${e.label}`;
+                  const isExpanded = expandedCalEvent === key;
+
                   return (
-                    <div key={i} className="flex items-center gap-3 px-4 py-2.5">
-                      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${s.dot}`} />
-                      <span className="text-[12px] font-semibold text-slate-400 w-16 flex-shrink-0 tabular-nums">
-                        {fmtMonthDay(e.date)}
-                      </span>
-                      <span className="text-[12px] text-slate-200 flex-1 min-w-0">{e.label}</span>
-                      {e.impact === 'high' && (
-                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20 flex-shrink-0">
-                          HIGH
+                    <div key={i}>
+                      <button
+                        onClick={() => {
+                          if (!playbook) return;
+                          if (isExpanded) {
+                            setExpandedCalEvent(null);
+                            setSelectedPlaybook(null);
+                          } else {
+                            setExpandedCalEvent(key);
+                            setSelectedPlaybook({ playbook, label: e.label });
+                          }
+                        }}
+                        className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                          playbook ? 'hover:bg-slate-700/30 cursor-pointer' : 'cursor-default'
+                        } ${isExpanded ? 'bg-slate-700/20' : ''}`}
+                      >
+                        <span className={`w-2 h-2 rounded-full flex-shrink-0 ${s.dot}`} />
+                        <span className="text-[12px] font-semibold text-slate-400 w-16 flex-shrink-0 tabular-nums">
+                          {fmtMonthDay(e.date)}
                         </span>
+                        <span className="text-[12px] text-slate-200 flex-1 min-w-0 text-left">
+                          {e.label}
+                        </span>
+                        {e.impact === 'high' && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/20 flex-shrink-0">
+                            HIGH
+                          </span>
+                        )}
+                        <span className={`text-[11px] font-medium flex-shrink-0 ${s.badge.split(' ')[0]}`}>
+                          {getDuLabel(du)}
+                        </span>
+                        {playbook && (
+                          <ChevronRight
+                            size={12}
+                            className={`flex-shrink-0 text-slate-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                          />
+                        )}
+                      </button>
+
+                      {/* Inline playbook expansion */}
+                      {isExpanded && playbook && (
+                        <div className="px-4 pb-3">
+                          <div className="rounded-xl border border-slate-700/50 bg-slate-900/60 overflow-hidden">
+                            <div className="px-3 py-2 border-b border-slate-800/60">
+                              <p className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                                <span>{playbook.emoji}</span>
+                                {playbook.title}
+                              </p>
+                            </div>
+                            <div className="px-3 py-2 space-y-2">
+                              <p className="text-[11px] text-slate-400 leading-relaxed">{playbook.whatIsIt}</p>
+                              <div className="border-t border-slate-800/60 pt-2">
+                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Typical Behavior</p>
+                                <p className="text-[11px] text-slate-400 leading-relaxed">{playbook.typicalBehavior}</p>
+                              </div>
+                              <div className="border-t border-slate-800/60 pt-2">
+                                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Trading Strategies</p>
+                                <div className="space-y-1.5">
+                                  {playbook.strategies.map((strat, si) => (
+                                    <div
+                                      key={si}
+                                      className={`rounded-lg border-l-2 px-2.5 py-1.5 ${STRATEGY_STYLE[strat.type] ?? STRATEGY_STYLE.neutral}`}
+                                    >
+                                      <div className="flex items-center gap-1.5 mb-0.5">
+                                        <span className={`text-[9px] font-bold uppercase tracking-wide ${STRATEGY_LABEL[strat.type] ?? STRATEGY_LABEL.neutral}`}>
+                                          {strat.type}
+                                        </span>
+                                        <span className="text-[11px] font-semibold text-slate-200">{strat.name}</span>
+                                      </div>
+                                      <p className="text-[11px] text-slate-400 leading-snug">{strat.description}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       )}
-                      <span className={`text-[11px] font-medium flex-shrink-0 ${s.badge.split(' ')[0]}`}>
-                        {getDuLabel(du)}
-                      </span>
                     </div>
                   );
                 })}
