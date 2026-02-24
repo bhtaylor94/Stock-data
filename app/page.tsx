@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Sparkles, BarChart2, Layers, Bell, Activity,
+  Sparkles, BarChart2, Layers, Bell, Activity, BookOpen,
   CheckCircle2, AlertCircle, AlertTriangle,
   Search, ChevronDown,
 } from 'lucide-react';
@@ -35,6 +35,8 @@ import { PositionSizingCalc } from './components/core/PositionSizingCalc';
 import { ScannerFeed } from './components/scanner/ScannerFeed';
 import { SectorHeatMap } from './components/scanner/SectorHeatMap';
 import { ExpirationFlowBar } from './components/options/ExpirationFlowBar';
+import { TopFlowFeed } from './components/ai-suggestions/TopFlowFeed';
+import { Glossary } from './components/learn/Glossary';
 
 // ============================================================
 // UTILITY COMPONENTS
@@ -847,13 +849,14 @@ export default function TradingDashboard() {
     { id: 'options', label: 'Options',  Icon: Layers    },
     { id: 'scanner', label: 'Scanner',  Icon: Activity  },
     { id: 'alerts',  label: 'Alerts',   Icon: Bell      },
+    { id: 'learn',   label: 'Learn',    Icon: BookOpen  },
   ] as const;
 
   const searchRef = useRef<HTMLInputElement>(null);
 
   const [ticker, setTicker] = useState('');
   const [showMoreTickers, setShowMoreTickers] = useState(false);
-  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'scanner' | 'alerts'>('feed');
+  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'scanner' | 'alerts' | 'learn'>('feed');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
   const [stockLoading, setStockLoading] = useState(false);
@@ -1112,7 +1115,16 @@ export default function TradingDashboard() {
         <div className="min-h-[60vh]">
           <ErrorBoundary>
             {activeTab === 'feed' && (
-              <SuggestionFeed />
+              <div className="space-y-6">
+                <TopFlowFeed
+                  onSelectTicker={(t) => {
+                    setTicker(t);
+                    handleSearch(t);
+                    setActiveTab('options');
+                  }}
+                />
+                <SuggestionFeed />
+              </div>
             )}
             
             {activeTab === 'stock' && (
@@ -1148,6 +1160,10 @@ export default function TradingDashboard() {
 
             {activeTab === 'alerts' && (
               <AlertManager />
+            )}
+
+            {activeTab === 'learn' && (
+              <Glossary />
             )}
           </ErrorBoundary>
         </div>
