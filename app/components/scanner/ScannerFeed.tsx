@@ -1,6 +1,6 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
-import { Activity, RefreshCw, TrendingUp, TrendingDown, Minus, Zap } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Activity, RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
 interface ScanResult {
   ticker: string;
@@ -22,11 +22,15 @@ interface ScanData {
   count: number;
 }
 
+type SortMode = 'heat' | 'volume' | 'change';
+
 function fmtVol(v: number): string {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
   if (v >= 1_000) return `${(v / 1_000).toFixed(0)}K`;
   return String(v);
 }
+
+const DISPLAY_LIMIT = 20;
 
 export function ScannerFeed({ onSelectTicker }: { onSelectTicker?: (ticker: string) => void }) {
   const [data, setData] = useState<ScanData | null>(null);
@@ -34,6 +38,11 @@ export function ScannerFeed({ onSelectTicker }: { onSelectTicker?: (ticker: stri
   const [error, setError] = useState(false);
   const [scannedAt, setScannedAt] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
+
+  const [sectorFilter, setSectorFilter] = useState('ALL');
+  const [sortMode, setSortMode] = useState<SortMode>('heat');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showAll, setShowAll] = useState(false);
 
   // Live age counter
   useEffect(() => {
@@ -62,10 +71,43 @@ export function ScannerFeed({ onSelectTicker }: { onSelectTicker?: (ticker: stri
     return () => clearInterval(interval);
   }, [fetchData]);
 
+  // Sector tab list: ALL + sorted by ticker count descending
+  const sectorTabs = useMemo(() => {
+    if (!data) return [{ label: 'All', key: 'ALL', count: 0 }];
+    const countMap: Record<string, number> = {};
+    for (const r of data.results) {
+      countMap[r.sector] = (countMap[r.sector] ?? 0) + 1;
+    }
+    const tabs = Object.entries(countMap)
+      .sort(([, a], [, b]) => b - a)
+      .map(([sector, count]) => ({ label: sector, key: sector, count }));
+    return [{ label: 'All', key: 'ALL', count: data.results.length }, ...tabs];
+  }, [data]);
+
+  const filtered = useMemo(() => {
+    let list = data?.results ?? [];
+    if (searchQuery) {
+      const q = searchQuery.toUpperCase();
+      list = list.filter(r => r.ticker.includes(q));
+    }
+    if (sectorFilter !== 'ALL') {
+      list = list.filter(r => r.sector === sectorFilter);
+    }
+    if (sortMode === 'volume') {
+      list = [...list].sort((a, b) => (b.volRatio ?? 0) - (a.volRatio ?? 0));
+    } else if (sortMode === 'change') {
+      list = [...list].sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
+    }
+    // 'heat' → already sorted from API
+    return list;
+  }, [data, searchQuery, sectorFilter, sortMode]);
+
+  const isExpanded = showAll || sectorFilter !== 'ALL' || !!searchQuery;
+  const displayList = isExpanded ? filtered : filtered.slice(0, DISPLAY_LIMIT);
+
   const ageSeconds = scannedAt ? Math.floor((now - new Date(scannedAt).getTime()) / 1000) : null;
   const gainers = data?.results.filter(r => r.direction === 'UP') ?? [];
   const losers = data?.results.filter(r => r.direction === 'DOWN') ?? [];
-  const flat = data?.results.filter(r => r.direction === 'FLAT') ?? [];
   const hottestSector = data
     ? Object.entries(data.sectorMap).sort(([, a], [, b]) => b.avgHeat - a.avgHeat)[0]?.[0]
     : null;
@@ -97,51 +139,84 @@ export function ScannerFeed({ onSelectTicker }: { onSelectTicker?: (ticker: stri
         </button>
       </div>
 
-      {/* What is the heat score? */}
-      <details className="group">
-        <summary className="px-4 py-2 text-[11px] text-slate-500 cursor-pointer hover:text-slate-300 transition-colors list-none flex items-center gap-1.5">
-          <Zap size={10} className="text-blue-400" />
-          How the heat score works
-          <span className="ml-auto text-slate-600 group-open:rotate-180 transition-transform">▼</span>
-        </summary>
-        <div className="px-4 pb-3 text-[11px] text-slate-400 space-y-1 border-b border-slate-800/60">
-          <p>Heat (0–100) combines <strong className="text-slate-300">price momentum + volume surge</strong> into one number:</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 mt-1.5">
-            <span>📈 % Change — up to 60 pts (5% move = max)</span>
-            <span>📊 Vol / 10d Avg — up to 40 pts (3× avg = max)</span>
-          </div>
-          <div className="flex items-center gap-4 mt-1.5">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-400 inline-block" /> 70+ Hot</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> 40–69 Warm</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> 0–39 Cool</span>
-          </div>
-          <p className="text-slate-600 mt-1">High heat = strong price move + unusual volume = potential options opportunity. Click any ticker to analyze its options chain.</p>
+      {/* Controls row: search + sort modes */}
+      <div className="px-3 pt-2.5 pb-1.5 border-b border-slate-800/40 flex items-center gap-2 flex-wrap">
+        <input
+          type="text"
+          placeholder="🔍 Search ticker..."
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          className="flex-1 min-w-[120px] px-3 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+        />
+        <div className="flex items-center gap-1">
+          {([
+            { mode: 'heat' as SortMode, label: '🔥 Heat' },
+            { mode: 'volume' as SortMode, label: '📊 Vol Surge' },
+            { mode: 'change' as SortMode, label: '📈 % Move' },
+          ] as const).map(({ mode, label }) => (
+            <button
+              key={mode}
+              onClick={() => setSortMode(mode)}
+              className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-colors whitespace-nowrap ${
+                sortMode === mode
+                  ? 'bg-blue-600 border-blue-500 text-white'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-      </details>
+      </div>
 
-      {/* Summary bar */}
+      {/* Sector filter tabs */}
+      {data && (
+        <div className="px-3 py-2 border-b border-slate-800/40 overflow-x-auto">
+          <div className="flex items-center gap-1.5 min-w-max">
+            {sectorTabs.map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => { setSectorFilter(tab.key); setShowAll(false); }}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-full border transition-colors whitespace-nowrap ${
+                  sectorFilter === tab.key
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'bg-slate-800/60 border-slate-700/60 text-slate-400 hover:text-white hover:border-slate-600'
+                }`}
+              >
+                {tab.label}
+                <span className={`text-[10px] rounded-full px-1 py-0 ${
+                  sectorFilter === tab.key ? 'bg-blue-500/40 text-blue-100' : 'bg-slate-700 text-slate-500'
+                }`}>
+                  {tab.count}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Summary strip */}
       {data && !loading && (
         <div className="px-4 py-2 border-b border-slate-800/40 flex items-center gap-4 flex-wrap">
           <span className="flex items-center gap-1 text-[11px]">
             <TrendingUp size={11} className="text-emerald-400" />
             <span className="text-emerald-400 font-semibold">{gainers.length}</span>
-            <span className="text-slate-500">gainers</span>
+            <span className="text-slate-500">gaining</span>
           </span>
           <span className="flex items-center gap-1 text-[11px]">
             <TrendingDown size={11} className="text-red-400" />
             <span className="text-red-400 font-semibold">{losers.length}</span>
             <span className="text-slate-500">losing</span>
           </span>
-          <span className="flex items-center gap-1 text-[11px]">
-            <Minus size={11} className="text-slate-500" />
-            <span className="text-slate-400 font-semibold">{flat.length}</span>
-            <span className="text-slate-500">flat</span>
-          </span>
           {hottestSector && (
-            <span className="ml-auto text-[11px] text-slate-500">
+            <span className="text-[11px] text-slate-500">
               Hottest sector: <span className="text-amber-400 font-semibold">{hottestSector}</span>
             </span>
           )}
+          <span className="ml-auto text-[11px] text-slate-500">
+            Showing <span className="text-slate-300 font-semibold">{displayList.length}</span> of{' '}
+            <span className="text-slate-300 font-semibold">{filtered.length}</span>
+          </span>
         </div>
       )}
 
@@ -166,14 +241,15 @@ export function ScannerFeed({ onSelectTicker }: { onSelectTicker?: (ticker: stri
         </div>
       )}
 
-      {/* Ticker grid — sorted by heat score descending */}
+      {/* Ticker grid */}
       {data && (
         <div className="p-3 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
-          {data.results.map((r, i) => {
+          {displayList.map((r, i) => {
             const heat = r.heat;
             const heatColor = heat >= 70 ? 'bg-red-400' : heat >= 40 ? 'bg-amber-400' : 'bg-emerald-400';
             const heatText = heat >= 70 ? 'text-red-400' : heat >= 40 ? 'text-amber-400' : 'text-emerald-400';
             const isHottest = i === 0;
+            const volSurge = r.volRatio != null && r.volRatio >= 3;
             const volHot = r.volRatio != null && r.volRatio >= 1.5;
 
             return (
@@ -188,13 +264,18 @@ export function ScannerFeed({ onSelectTicker }: { onSelectTicker?: (ticker: stri
                     : 'border-slate-700/40 bg-slate-800/20 hover:border-slate-600/60'
                 }`}
               >
-                {/* Ticker + sector */}
+                {/* Ticker + badges */}
                 <div className="flex items-center justify-between mb-1">
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1 flex-wrap">
                     <span className="text-sm font-bold font-mono text-white">{r.ticker}</span>
                     {isHottest && <span className="text-[10px]">🔥</span>}
+                    {volSurge && (
+                      <span className="text-[9px] font-bold px-1 py-0 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                        🚨 Vol
+                      </span>
+                    )}
                   </div>
-                  <span className="text-[10px] text-slate-500">{r.sector}</span>
+                  <span className="text-[10px] text-slate-500 shrink-0 ml-1">{r.sector}</span>
                 </div>
 
                 {/* Price + % change */}
@@ -240,11 +321,25 @@ export function ScannerFeed({ onSelectTicker }: { onSelectTicker?: (ticker: stri
         </div>
       )}
 
+      {/* Show-all / collapse button */}
+      {data && sectorFilter === 'ALL' && !searchQuery && filtered.length > DISPLAY_LIMIT && (
+        <div className="px-4 pb-3 flex justify-center">
+          <button
+            onClick={() => setShowAll(v => !v)}
+            className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors"
+          >
+            {showAll
+              ? `Show top ${DISPLAY_LIMIT} ↑`
+              : `See all ${filtered.length} tickers ↓`}
+          </button>
+        </div>
+      )}
+
       {/* Footer */}
       {data && (
         <div className="px-4 py-2 border-t border-slate-800/60">
           <p className="text-[10px] text-slate-600">
-            Sorted by heat score · Tap any ticker to analyze its options chain · Auto-refreshes every 30s
+            Tap any ticker to analyze its options chain · Auto-refreshes every 30s
           </p>
         </div>
       )}
