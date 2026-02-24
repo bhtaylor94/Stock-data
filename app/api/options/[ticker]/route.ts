@@ -584,6 +584,16 @@ export interface OptionsSetup {
   uoaConfirmation: boolean;
   totalPremium: number;     // Net UOA premium pointing this direction
   riskNote: string;
+  spread?: {
+    name: string;               // e.g. "Bull Call Spread"
+    structure: string;          // e.g. "Buy $145C / Sell $150C exp 2026-03-21"
+    debit: number;              // net cost per spread ($)
+    maxGain: number;            // max profit per spread ($)
+    breakeven: number;          // breakeven price
+    riskReward: string;         // e.g. "1 : 2.5"
+    preferOverNaked: boolean;   // true when IV context is CAUTION or AVOID
+    note: string;
+  };
 }
 
 function matchOptionsSetups(params: {
@@ -640,6 +650,66 @@ function matchOptionsSetups(params: {
     return pool.sort((a, b) => b.volume - a.volume)[0];
   }
 
+  // Build a vertical spread recommendation (bull call spread or bear put spread)
+  function buildVerticalSpread(
+    sentiment: 'BULLISH' | 'BEARISH',
+    longLeg: OptionContract | undefined,
+    preferSpread: boolean,
+  ): OptionsSetup['spread'] | undefined {
+    if (!longLeg) return undefined;
+    const isBull = sentiment === 'BULLISH';
+    const pool = (isBull ? calls : puts).filter(c =>
+      c.expiration === longLeg.expiration &&
+      c.dte === longLeg.dte &&
+      Math.abs(c.delta) >= 0.15 && Math.abs(c.delta) <= 0.30 &&
+      (isBull ? c.strike > longLeg.strike : c.strike < longLeg.strike)
+    );
+    if (pool.length === 0) return undefined;
+    const shortLeg = pool.sort((a, b) => Math.abs(a.delta) - Math.abs(b.delta))[0];
+    const debit = Math.round((longLeg.ask - shortLeg.bid) * 100) / 100;
+    const width = Math.abs(shortLeg.strike - longLeg.strike);
+    const maxGain = Math.round((width - debit) * 100) / 100;
+    const breakeven = isBull
+      ? Math.round((longLeg.strike + debit) * 100) / 100
+      : Math.round((longLeg.strike - debit) * 100) / 100;
+    const rr = debit > 0 ? (maxGain / debit).toFixed(1) : 'N/A';
+    const name = isBull ? 'Bull Call Spread' : 'Bear Put Spread';
+    const structure = isBull
+      ? `Buy $${longLeg.strike}C / Sell $${shortLeg.strike}C  ${longLeg.expiration}`
+      : `Buy $${longLeg.strike}P / Sell $${shortLeg.strike}P  ${longLeg.expiration}`;
+    return {
+      name,
+      structure,
+      debit,
+      maxGain,
+      breakeven,
+      riskReward: `1 : ${rr}`,
+      preferOverNaked: preferSpread,
+      note: preferSpread
+        ? `High IV environment — spread caps premium paid (max risk $${(debit * 100).toFixed(0)} per contract).`
+        : `Lower-risk alternative to naked ${isBull ? 'call' : 'put'}. Debit: $${(debit * 100).toFixed(0)}, max gain: $${(maxGain * 100).toFixed(0)} per contract.`,
+    };
+  }
+
+  // Build a straddle recommendation (for IV expansion setups)
+  function buildStraddle(dteLow: number, dteHigh: number): OptionsSetup['spread'] | undefined {
+    const atmCall = bestContract('call', dteLow, dteHigh, 0.45, 0.55);
+    const atmPut  = bestContract('put',  dteLow, dteHigh, 0.45, 0.55);
+    if (!atmCall || !atmPut || atmCall.expiration !== atmPut.expiration) return undefined;
+    const debit = Math.round((atmCall.ask + atmPut.ask) * 100) / 100;
+    const breakeven = Math.round(debit * 100) / 100;
+    return {
+      name: 'ATM Straddle',
+      structure: `Buy $${atmCall.strike}C + Buy $${atmPut.strike}P  ${atmCall.expiration}`,
+      debit,
+      maxGain: Infinity,
+      breakeven,
+      riskReward: 'Undefined upside',
+      preferOverNaked: true,
+      note: `Profits from large move in either direction. Need >${(debit * 100).toFixed(0)}pts move to profit. Best entered when IV < HV.`,
+    };
+  }
+
   const setups: OptionsSetup[] = [];
 
   // ── 1. FLOW CONFIRMATION BREAKOUT ────────────────────────────────────────
@@ -673,6 +743,7 @@ function matchOptionsSetups(params: {
         uoaConfirmation: hasBullFlow,
         totalPremium: uoaBullPremium,
         riskNote: 'Max loss = premium paid. Exit if price falls back below breakout level.',
+        spread: buildVerticalSpread('BULLISH', rec, ivCtx === 'CAUTION' || ivCtx === 'AVOID'),
       });
     }
   }
@@ -711,6 +782,7 @@ function matchOptionsSetups(params: {
         uoaConfirmation: hasBullFlow,
         totalPremium: uoaBullPremium,
         riskNote: 'Squeeze takes time — use 7–30 DTE, not 0DTE. Enter on price approaching the GEX wall.',
+        spread: buildVerticalSpread('BULLISH', rec, ivCtx === 'CAUTION' || ivCtx === 'AVOID'),
       });
     }
   }
@@ -748,6 +820,7 @@ function matchOptionsSetups(params: {
         uoaConfirmation: hasBullFlow || hasBearFlow,
         totalPremium: uoaBullPremium + uoaBearPremium,
         riskNote: 'Exit BEFORE the catalyst to avoid IV crush. Max loss = premium paid.',
+        spread: buildStraddle(7, 21),
       });
     }
   }
@@ -789,6 +862,7 @@ function matchOptionsSetups(params: {
         uoaConfirmation: hasFlow,
         totalPremium: totalPrem,
         riskNote: 'Do NOT use 0DTE for trend continuation — use 21–45 DTE to give the trend room.',
+        spread: buildVerticalSpread(sentiment, rec, ivCtx === 'CAUTION' || ivCtx === 'AVOID'),
       });
     }
   }
@@ -823,6 +897,7 @@ function matchOptionsSetups(params: {
         uoaConfirmation: hasBullFlow,
         totalPremium: uoaBullPremium,
         riskNote: 'Exit if support level breaks with volume. Stop = close below support.',
+        spread: buildVerticalSpread('BULLISH', rec, ivCtx === 'CAUTION' || ivCtx === 'AVOID'),
       });
     }
   }
@@ -858,6 +933,7 @@ function matchOptionsSetups(params: {
         uoaConfirmation: hasBearFlow,
         totalPremium: uoaBearPremium,
         riskNote: 'Max loss = premium paid. Exit if price breaks above resistance with volume.',
+        spread: buildVerticalSpread('BEARISH', rec, ivCtx === 'CAUTION' || ivCtx === 'AVOID'),
       });
     }
   }
@@ -900,6 +976,7 @@ function matchOptionsSetups(params: {
         uoaConfirmation: true,
         totalPremium: topGolden.metrics.premium,
         riskNote: 'Golden sweeps are not infallible — use 1–2% max portfolio risk. Stop at -50% of premium.',
+        spread: buildVerticalSpread(isBull ? 'BULLISH' : 'BEARISH', rec, ivCtx === 'CAUTION' || ivCtx === 'AVOID'),
       });
     }
   }

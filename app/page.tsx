@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Sparkles, BarChart2, Layers, Bell,
+  Sparkles, BarChart2, Layers, Bell, Activity,
   CheckCircle2, AlertCircle, AlertTriangle,
   Search, ChevronDown,
 } from 'lucide-react';
@@ -25,6 +25,16 @@ import { AlertManager } from './components/alerts/AlertManager';
 
 // NEW: AI Suggestions Feed
 import { SuggestionFeed } from './components/ai-suggestions/SuggestionFeed';
+
+// Elite features
+import { NarrativeCard } from './components/ai/NarrativeCard';
+import { EarningsWidget } from './components/core/EarningsWidget';
+import { OptionsChainTable } from './components/options/OptionsChainTable';
+import { IVSkewChart } from './components/options/IVSkewChart';
+import { PositionSizingCalc } from './components/core/PositionSizingCalc';
+import { ScannerFeed } from './components/scanner/ScannerFeed';
+import { SectorHeatMap } from './components/scanner/SectorHeatMap';
+import { FlowTape } from './components/options/FlowTape';
 
 // ============================================================
 // UTILITY COMPONENTS
@@ -245,6 +255,16 @@ function StockTab({
 
   return (
     <div className="space-y-4 animate-fade-in">
+      <EarningsWidget ticker={ticker} />
+
+      <NarrativeCard
+        ticker={ticker}
+        price={data.price || 0}
+        changePercent={data.changePercent || 0}
+        analysis={analysis}
+        technicals={technicals}
+      />
+
       <StockDecisionHero
         ticker={ticker}
         price={data.price || data.quote?.c || 0}
@@ -398,7 +418,8 @@ function OptionsTab({
   onViewEvidence?: () => void;
 }) {
   const [selectedExp, setSelectedExp] = useState<string>('');
-  
+  const [selectedContractAsk, setSelectedContractAsk] = useState<number>(0);
+
   useEffect(() => {
     if (data?.expirations?.length > 0 && !selectedExp) {
       setSelectedExp(data.expirations[0]);
@@ -422,14 +443,19 @@ function OptionsTab({
   return (
     <div className="space-y-4 animate-fade-in">
       {/* Options Decision Hero */}
-      <OptionsDecisionHero 
+      <OptionsDecisionHero
         ticker={ticker}
         currentPrice={data.currentPrice}
         meta={data.meta}
         suggestions={data.suggestions}
         onViewEvidence={onViewEvidence}
       />
-      
+
+      <EarningsWidget ticker={ticker} />
+
+      {/* Options Flow Tape */}
+      <FlowTape activities={data.unusualActivity || []} />
+
       {/* Named Flow Setups — Phase C results */}
       {data.optionsSetups?.length > 0 && (
         <div className="space-y-2">
@@ -511,7 +537,7 @@ function OptionsTab({
       {/* Trade Setups - Compact & Expandable */}
       {data.suggestions?.filter((s: any) => s.type !== 'ALERT' && s.type !== 'NO_TRADE').length > 0 && (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-white px-1">💡 Trade Setups</h3>
+          <h3 className="text-sm font-semibold text-white px-1">Trade Setups</h3>
           {data.suggestions
             .filter((s: any) => s.type !== 'ALERT' && s.type !== 'NO_TRADE')
             .slice(0, 4)
@@ -558,6 +584,65 @@ function OptionsTab({
             ))}
         </div>
       )}
+
+      {/* Expiration selector */}
+      {data.expirations?.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap pt-2">
+          <span className="text-xs text-slate-500">Expiration:</span>
+          {data.expirations.slice(0, 6).map((exp: string) => (
+            <button
+              key={exp}
+              onClick={() => setSelectedExp(exp)}
+              className={`text-xs px-2.5 py-0.5 rounded-md border transition-all font-mono ${
+                selectedExp === exp
+                  ? 'border-blue-500/50 bg-blue-500/15 text-blue-400'
+                  : 'border-slate-700/40 text-slate-400 hover:text-white hover:border-slate-600'
+              }`}
+            >
+              {exp}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* IV Skew Chart */}
+      {data.byExpiration && selectedExp && data.byExpiration[selectedExp] && (
+        <IVSkewChart
+          calls={data.byExpiration[selectedExp].calls}
+          puts={data.byExpiration[selectedExp].puts}
+          currentPrice={data.currentPrice}
+          expiration={selectedExp}
+        />
+      )}
+
+      {/* Full Options Chain Table */}
+      {data.byExpiration && selectedExp && data.byExpiration[selectedExp] && (
+        <OptionsChainTable
+          calls={data.byExpiration[selectedExp].calls}
+          puts={data.byExpiration[selectedExp].puts}
+          currentPrice={data.currentPrice}
+          onSelectContract={(c) => setSelectedContractAsk(c.ask)}
+        />
+      )}
+
+      {/* Position Sizing Calculator */}
+      <PositionSizingCalc
+        ticker={ticker}
+        setup={data.optionsSetups?.[0]}
+        contractAsk={selectedContractAsk || data.optionsSetups?.[0]?.recommendedContract?.ask}
+      />
+    </div>
+  );
+}
+
+// ============================================================
+// SCANNER TAB
+// ============================================================
+function ScannerTab({ onSelectTicker }: { onSelectTicker: (t: string) => void }) {
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <ScannerFeed onSelectTicker={onSelectTicker} />
+      <SectorHeatMap />
     </div>
   );
 }
@@ -653,6 +738,7 @@ export default function TradingDashboard() {
     { id: 'feed',    label: 'AI Feed',  Icon: Sparkles  },
     { id: 'stock',   label: 'Stocks',   Icon: BarChart2 },
     { id: 'options', label: 'Options',  Icon: Layers    },
+    { id: 'scanner', label: 'Scanner',  Icon: Activity  },
     { id: 'alerts',  label: 'Alerts',   Icon: Bell      },
   ] as const;
 
@@ -660,7 +746,7 @@ export default function TradingDashboard() {
 
   const [ticker, setTicker] = useState('');
   const [showMoreTickers, setShowMoreTickers] = useState(false);
-  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'alerts'>('feed');
+  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'scanner' | 'alerts'>('feed');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
   const [stockLoading, setStockLoading] = useState(false);
@@ -943,6 +1029,16 @@ export default function TradingDashboard() {
               />
             )}
             
+            {activeTab === 'scanner' && (
+              <ScannerTab
+                onSelectTicker={(t) => {
+                  setTicker(t);
+                  handleSearch(t);
+                  setActiveTab('stock');
+                }}
+              />
+            )}
+
             {activeTab === 'alerts' && (
               <AlertManager />
             )}

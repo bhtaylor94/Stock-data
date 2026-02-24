@@ -174,6 +174,36 @@ export function FlowSetupCard({
             </div>
           )}
 
+          {/* Spread alternative */}
+          {setup.spread && (
+            <div className={`p-2.5 rounded-lg border ${setup.spread.preferOverNaked ? 'border-amber-500/30 bg-amber-500/5' : 'border-slate-700/40 bg-slate-900/40'}`}>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-xs font-semibold text-white">{setup.spread.name}</p>
+                {setup.spread.preferOverNaked && (
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">Preferred in high IV</span>
+                )}
+              </div>
+              <p className="text-xs font-mono text-slate-300 mb-1.5">{setup.spread.structure}</p>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <p className="stat-label">Max Risk</p>
+                  <p className="text-xs font-bold text-red-400">${(setup.spread.debit * 100).toFixed(0)}</p>
+                </div>
+                <div>
+                  <p className="stat-label">Max Gain</p>
+                  <p className="text-xs font-bold text-emerald-400">
+                    {isFinite(setup.spread.maxGain) ? `$${(setup.spread.maxGain * 100).toFixed(0)}` : 'Unlimited'}
+                  </p>
+                </div>
+                <div>
+                  <p className="stat-label">R:R</p>
+                  <p className="text-xs font-bold text-white">{setup.spread.riskReward}</p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-500 mt-1">{setup.spread.note}</p>
+            </div>
+          )}
+
           {/* Total UOA premium + risk note */}
           <div className="flex items-start justify-between gap-3">
             {setup.totalPremium > 0 && (
