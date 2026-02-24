@@ -33,7 +33,7 @@ import { ScannerFeed } from './components/scanner/ScannerFeed';
 import { SectorHeatMap } from './components/scanner/SectorHeatMap';
 import { ExpirationFlowBar } from './components/options/ExpirationFlowBar';
 import { TopFlowFeed } from './components/ai-suggestions/TopFlowFeed';
-import { Glossary } from './components/learn/Glossary';
+import { LearnTab } from './components/learn/LearnTab';
 import { NewsFeedPanel } from './components/news/NewsFeedPanel';
 
 // ============================================================
@@ -1172,7 +1172,7 @@ export default function TradingDashboard() {
             )}
 
             {activeTab === 'learn' && (
-              <Glossary />
+              <LearnTab />
             )}
           </ErrorBoundary>
         </div>
