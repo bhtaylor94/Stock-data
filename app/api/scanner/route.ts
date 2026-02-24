@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSchwabAccessToken } from '@/lib/schwab';
+import { TTLCache } from '@/lib/cache';
 
 export const runtime = 'nodejs';
+
+const cache = new TTLCache<any>();
+const CACHE_TTL = 30_000; // 30 seconds
 
 const SCHWAB_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -21,17 +25,31 @@ const SECTOR_MAP: Record<string, string> = {
   CAT: 'Industrial', BA: 'Industrial', GE: 'Industrial', UPS: 'Industrial',
 };
 
-function heatScore(q: any): number {
+// ── Heat Score ─────────────────────────────────────────────────────────────────
+// 0–60 pts: % change momentum (5% change = 60 pts)
+// 0–40 pts: volume surge vs 10-day average (2× avg = 20 pts, 3× = 40 pts)
+// Falls back to pure % change score when avg volume data is unavailable.
+function heatScore(q: any, f: any = {}): number {
   const pctChange = Math.abs(q.netPercentChangeInDouble ?? 0);
   const volume = q.totalVolume ?? 0;
-  const avgVol = q.averageWeekVolume ?? volume;
-  const volRatio = avgVol > 0 ? volume / (avgVol / 5) : 1;
+  const avgVol10d = f.avg10DaysVolume ?? 0;
+
   const momentumScore = Math.min(60, pctChange * 12);
-  const volumeScore = Math.min(40, Math.max(0, (volRatio - 1) * 15));
+
+  let volumeScore = 0;
+  if (avgVol10d > 0) {
+    const ratio = volume / avgVol10d;
+    // 1× avg = 0 pts, 2× avg = 20 pts, 3× avg = 40 pts
+    volumeScore = Math.min(40, Math.max(0, (ratio - 1) * 20));
+  }
+
   return Math.round(momentumScore + volumeScore);
 }
 
 export async function GET(req: NextRequest) {
+  const cached = cache.get('scanner');
+  if (cached) return NextResponse.json(cached);
+
   try {
     const url = new URL(req.url);
     const tickerParam = url.searchParams.get('tickers');
@@ -45,8 +63,9 @@ export async function GET(req: NextRequest) {
     }
 
     const symbols = tickers.join(',');
+    // Request both quote and fundamental fields to get avg10DaysVolume
     const quotesRes = await fetch(
-      `https://api.schwabapi.com/marketdata/v1/quotes?symbols=${symbols}&fields=quote`,
+      `https://api.schwabapi.com/marketdata/v1/quotes?symbols=${symbols}&fields=quote,fundamental`,
       { headers: { ...SCHWAB_HEADERS, Authorization: `Bearer ${tokenResult.token}` } }
     );
 
@@ -60,17 +79,22 @@ export async function GET(req: NextRequest) {
       .map(ticker => {
         const entry = quotesData[ticker];
         const q = entry?.quote ?? {};
+        const f = entry?.fundamental ?? {};
         const price = q.lastPrice ?? q.mark ?? 0;
         const change = q.netChange ?? 0;
         const changePct = q.netPercentChangeInDouble ?? 0;
         const volume = q.totalVolume ?? 0;
-        const heat = heatScore(q);
+        const avgVol10d = f.avg10DaysVolume ?? 0;
+        const volRatio = avgVol10d > 0 ? Math.round((volume / avgVol10d) * 10) / 10 : null;
+        const heat = heatScore(q, f);
         return {
           ticker,
           price: Math.round(price * 100) / 100,
           change: Math.round(change * 100) / 100,
           changePct: Math.round(changePct * 100) / 100,
           volume,
+          avgVolume: avgVol10d,
+          volRatio,
           heat,
           sector: SECTOR_MAP[ticker] ?? 'Other',
           direction: (changePct >= 0.5 ? 'UP' : changePct <= -0.5 ? 'DOWN' : 'FLAT') as 'UP' | 'DOWN' | 'FLAT',
@@ -92,7 +116,9 @@ export async function GET(req: NextRequest) {
       if (s.tickers.length > 0) s.avgHeat = Math.round(s.avgHeat / s.tickers.length);
     }
 
-    return NextResponse.json({ results, sectorMap, scannedAt: new Date().toISOString(), count: results.length });
+    const response = { results, sectorMap, scannedAt: new Date().toISOString(), count: results.length };
+    cache.set('scanner', response, CACHE_TTL);
+    return NextResponse.json(response);
   } catch (err: any) {
     console.error('Scanner error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });

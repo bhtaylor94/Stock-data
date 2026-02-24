@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Sparkles, BarChart2, Layers, Bell, Activity, BookOpen,
+  Sparkles, BarChart2, Layers, Activity, BookOpen,
   CheckCircle2, AlertCircle, AlertTriangle,
   Search, ChevronDown,
 } from 'lucide-react';
@@ -19,9 +19,6 @@ import { EvidenceDrawer } from './components/core/EvidenceDrawer';
 import { PortfolioContextAlert } from './components/portfolio/PortfolioContextAlert';
 import { OrderModal } from './components/trading/OrderModal';
 import { COMPANY_NAMES } from '@/lib/companyNames';
-
-// Alerts tab
-import { AlertManager } from './components/alerts/AlertManager';
 
 // NEW: AI Suggestions Feed
 import { SuggestionFeed } from './components/ai-suggestions/SuggestionFeed';
@@ -848,7 +845,6 @@ export default function TradingDashboard() {
     { id: 'stock',   label: 'Stocks',   Icon: BarChart2 },
     { id: 'options', label: 'Options',  Icon: Layers    },
     { id: 'scanner', label: 'Scanner',  Icon: Activity  },
-    { id: 'alerts',  label: 'Alerts',   Icon: Bell      },
     { id: 'learn',   label: 'Learn',    Icon: BookOpen  },
   ] as const;
 
@@ -856,7 +852,7 @@ export default function TradingDashboard() {
 
   const [ticker, setTicker] = useState('');
   const [showMoreTickers, setShowMoreTickers] = useState(false);
-  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'scanner' | 'alerts' | 'learn'>('feed');
+  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'scanner' | 'learn'>('feed');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
   const [stockLoading, setStockLoading] = useState(false);
@@ -1153,13 +1149,9 @@ export default function TradingDashboard() {
                 onSelectTicker={(t) => {
                   setTicker(t);
                   handleSearch(t);
-                  setActiveTab('stock');
+                  setActiveTab('options');
                 }}
               />
-            )}
-
-            {activeTab === 'alerts' && (
-              <AlertManager />
             )}
 
             {activeTab === 'learn' && (
