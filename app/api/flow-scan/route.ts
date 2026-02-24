@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getSchwabAccessToken, schwabFetchJson } from '@/lib/schwab';
 import { TTLCache } from '@/lib/cache';
 
@@ -48,6 +48,7 @@ function scoreContract(
   expDate: string,
   ticker: string,
   currentPrice: number,
+  contractType: 'call' | 'put',
 ): FlowSignal | null {
   const strike = parseFloat(strikeStr);
   const volume = c.totalVolume || 0;
@@ -147,7 +148,7 @@ function scoreContract(
   if (score < 30) return null;
 
   // ── Alert label ───────────────────────────────────────────────────────────
-  let alertLabel = 'Unusual Call Flow';
+  let alertLabel = contractType === 'call' ? 'Unusual Call Flow' : 'Unusual Put Flow';
   if (volOI >= 10 && premium >= 100_000) alertLabel = 'Golden Sweep';
   else if (premium >= 500_000) alertLabel = 'Block Trade';
   else if (volOI >= 5) alertLabel = 'High Conviction';
@@ -157,7 +158,7 @@ function scoreContract(
     ticker,
     currentPrice,
     strike,
-    type: 'call',
+    type: contractType,
     expiration: expDate,
     dte,
     mark,
@@ -176,7 +177,7 @@ function scoreContract(
 async function scanTicker(token: string, ticker: string): Promise<FlowSignal[]> {
   const url =
     `https://api.schwabapi.com/marketdata/v1/chains` +
-    `?symbol=${ticker}&contractType=CALL&strikeCount=20` +
+    `?symbol=${ticker}&contractType=ALL&strikeCount=20` +
     `&includeUnderlyingQuote=true&range=ALL`;
 
   const result = await schwabFetchJson<any>(token, url, { scope: 'stock' });
@@ -191,13 +192,25 @@ async function scanTicker(token: string, ticker: string): Promise<FlowSignal[]> 
   if (!currentPrice) return [];
 
   const signals: FlowSignal[] = [];
-  const callMap = chainData.callExpDateMap ?? {};
 
+  // Process calls
+  const callMap = chainData.callExpDateMap ?? {};
   for (const [expKey, strikes] of Object.entries(callMap)) {
     const expDate = (expKey as string).split(':')[0];
     for (const [strikeStr, contracts] of Object.entries(strikes as Record<string, any[]>)) {
       if (!contracts || contracts.length === 0) continue;
-      const signal = scoreContract(contracts[0], strikeStr, expDate, ticker, currentPrice);
+      const signal = scoreContract(contracts[0], strikeStr, expDate, ticker, currentPrice, 'call');
+      if (signal) signals.push(signal);
+    }
+  }
+
+  // Process puts
+  const putMap = chainData.putExpDateMap ?? {};
+  for (const [expKey, strikes] of Object.entries(putMap)) {
+    const expDate = (expKey as string).split(':')[0];
+    for (const [strikeStr, contracts] of Object.entries(strikes as Record<string, any[]>)) {
+      if (!contracts || contracts.length === 0) continue;
+      const signal = scoreContract(contracts[0], strikeStr, expDate, ticker, currentPrice, 'put');
       if (signal) signals.push(signal);
     }
   }
@@ -205,9 +218,10 @@ async function scanTicker(token: string, ticker: string): Promise<FlowSignal[]> 
   return signals;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const force = new URL(req.url).searchParams.has('force');
   const cached = cache.get('flow-scan');
-  if (cached) return NextResponse.json(cached);
+  if (cached && !force) return NextResponse.json(cached);
 
   const { token, error } = await getSchwabAccessToken('stock');
   if (!token) {

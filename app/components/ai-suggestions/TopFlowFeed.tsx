@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
-import { Flame, TrendingUp, RefreshCw, ExternalLink, Zap } from 'lucide-react';
+import { Flame, TrendingUp, TrendingDown, RefreshCw, ExternalLink, Zap } from 'lucide-react';
 
 interface FlowSignal {
   ticker: string;
@@ -76,11 +76,12 @@ export function TopFlowFeed({
     return () => clearInterval(t);
   }, []);
 
-  async function fetchSignals() {
+  async function fetchSignals(force = false) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/flow-scan');
+      const url = force ? '/api/flow-scan?force=1' : '/api/flow-scan';
+      const res = await fetch(url);
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
       setSignals(data.signals ?? []);
@@ -94,7 +95,7 @@ export function TopFlowFeed({
 
   useEffect(() => {
     fetchSignals();
-    const t = setInterval(fetchSignals, 90_000);
+    const t = setInterval(() => fetchSignals(), 90_000);
     return () => clearInterval(t);
   }, []);
 
@@ -115,9 +116,9 @@ export function TopFlowFeed({
           </p>
         </div>
         <button
-          onClick={fetchSignals}
+          onClick={() => fetchSignals(true)}
           className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 hover:bg-slate-700 transition-colors"
-          title="Refresh"
+          title="Force refresh"
         >
           <RefreshCw size={12} className={`text-slate-400 ${loading ? 'animate-spin' : ''}`} />
         </button>
@@ -185,8 +186,8 @@ export function TopFlowFeed({
                       </button>
 
                       {/* Contract spec */}
-                      <span className="text-xs font-mono text-emerald-400 font-semibold">
-                        ${s.strike} CALL
+                      <span className={`text-xs font-mono font-semibold ${s.type === 'call' ? 'text-emerald-400' : 'text-red-400'}`}>
+                        ${s.strike} {s.type.toUpperCase()}
                       </span>
                       <span className="text-xs text-slate-500">
                         {fmtExp(s.expiration)} · {s.dte}d
@@ -227,8 +228,12 @@ export function TopFlowFeed({
                       <div className={`h-full ${bar.color} rounded-full`} style={{ width: bar.width }} />
                     </div>
                     <div className="flex items-center gap-0.5">
-                      <TrendingUp size={9} className="text-emerald-400" />
-                      <span className="text-[9px] text-emerald-400 font-semibold">CALL</span>
+                      {s.type === 'call'
+                        ? <TrendingUp size={9} className="text-emerald-400" />
+                        : <TrendingDown size={9} className="text-red-400" />}
+                      <span className={`text-[9px] font-semibold ${s.type === 'call' ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {s.type.toUpperCase()}
+                      </span>
                     </div>
                   </div>
                 </div>
