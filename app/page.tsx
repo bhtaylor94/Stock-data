@@ -252,7 +252,40 @@ function StockTab({
 
   const { analysis, suggestions, chartPatterns, technicals, fundamentals, news, analysts } = data;
 
+  const candles = data.meta?.priceHistory?.candles as number | undefined;
+  const ds = (data.dataSource ?? '') as string;
+
   return (
+    <>
+      {/* ── Data Quality Status Strip ── */}
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        {ds.startsWith('schwab') && !ds.includes('+finnhub') && (
+          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
+            ✓ Schwab Live
+          </span>
+        )}
+        {ds === 'finnhub' && (
+          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium text-amber-400 bg-amber-500/10 border-amber-500/20">
+            ⚠ Finnhub Fallback
+          </span>
+        )}
+        {ds.includes('+finnhub') && (
+          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium text-blue-400 bg-blue-500/10 border-blue-500/20">
+            ↔ Schwab + Finnhub
+          </span>
+        )}
+        {data.meta?.isStale && (
+          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium text-amber-400 bg-amber-500/10 border-amber-500/20">
+            ⏱ Stale Quote
+          </span>
+        )}
+        {candles != null && candles > 0 && candles < 200 && (
+          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium text-amber-400 bg-amber-500/10 border-amber-500/20">
+            ⚠ {candles} candles — SMA estimates
+          </span>
+        )}
+      </div>
+
     <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 animate-fade-in">
       {/* LEFT — sticky context column */}
       <div className="space-y-3 lg:sticky lg:top-[100px] lg:self-start">
@@ -401,6 +434,7 @@ function StockTab({
         )}
       </div>
     </div>
+    </>
   );
 }
 
@@ -456,7 +490,27 @@ function OptionsTab({
     ? putCallRatio >= 1.2 ? 'text-red-400' : putCallRatio <= 0.7 ? 'text-emerald-400' : 'text-white'
     : 'text-slate-400';
 
+  const optDs = (data.dataSource ?? '') as string;
+  const optResponseMs = data.meta?.responseTimeMs as number | undefined;
+
   return (
+    <>
+      {/* ── Data Quality Status Strip ── */}
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        {optDs === 'schwab-live' ? (
+          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium text-emerald-400 bg-emerald-500/10 border-emerald-500/20">
+            ✓ Schwab Live Options
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium text-amber-400 bg-amber-500/10 border-amber-500/20">
+            ⚠ Options data may be delayed or estimated
+          </span>
+        )}
+        {optResponseMs != null && (
+          <span className="text-[10px] text-slate-500">{optResponseMs}ms</span>
+        )}
+      </div>
+
     <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 animate-fade-in">
 
       {/* LEFT — sticky decision + setups */}
@@ -677,6 +731,7 @@ function OptionsTab({
         />
       </div>
     </div>
+    </>
   );
 }
 

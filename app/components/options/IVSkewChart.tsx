@@ -40,6 +40,23 @@ export function IVSkewChart({
   const filteredCalls = calls.filter(c => c.iv > 0 && Math.abs(c.strike - currentPrice) <= range).sort((a, b) => a.strike - b.strike);
   const filteredPuts = puts.filter(p => p.iv > 0 && Math.abs(p.strike - currentPrice) <= range).sort((a, b) => a.strike - b.strike);
 
+  // ATM IV computation
+  const atmCall = filteredCalls.length > 0
+    ? filteredCalls.reduce((b, c) => Math.abs(c.strike - currentPrice) < Math.abs(b.strike - currentPrice) ? c : b)
+    : null;
+  const atmPut = filteredPuts.length > 0
+    ? filteredPuts.reduce((b, p) => Math.abs(p.strike - currentPrice) < Math.abs(b.strike - currentPrice) ? p : b)
+    : null;
+  const skew = (atmCall && atmPut) ? atmPut.iv - atmCall.iv : null;
+
+  const skewInfo = skew === null
+    ? null
+    : skew > 0.03
+      ? { label: 'Bearish Skew', color: 'text-red-400', bg: 'bg-red-500/10 border-red-500/20' }
+      : skew < -0.03
+        ? { label: 'Bullish Skew', color: 'text-emerald-400', bg: 'bg-emerald-500/10 border-emerald-500/20' }
+        : { label: 'Flat', color: 'text-slate-400', bg: 'bg-slate-700/20 border-slate-600/30' };
+
   if (filteredCalls.length < 2 && filteredPuts.length < 2) {
     return (
       <div className="rounded-2xl border border-slate-700/50 bg-slate-800/20 p-4">
@@ -117,13 +134,41 @@ export function IVSkewChart({
   return (
     <div className="rounded-2xl border border-slate-700/50 bg-slate-800/20 overflow-hidden">
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/40">
-        <h3 className="text-sm font-semibold text-white">IV Skew</h3>
+        <div>
+          <h3 className="text-sm font-semibold text-white">IV Skew by Strike</h3>
+          <p className="text-slate-500 text-xs">ATM ±20% range</p>
+        </div>
         {expiration && <span className="text-xs text-slate-500">{expiration}</span>}
         <div className="flex items-center gap-3">
           <span className="text-xs text-emerald-400 flex items-center gap-1"><span className="w-3 h-0.5 bg-emerald-400 inline-block" />Calls</span>
           <span className="text-xs text-red-400 flex items-center gap-1"><span className="w-3 h-0.5 bg-red-400 inline-block" />Puts</span>
         </div>
       </div>
+
+      {/* ATM IV summary strip */}
+      {(atmCall || atmPut) && (
+        <div className="grid grid-cols-3 gap-2 px-4 py-2 border-b border-slate-700/30">
+          <div className="text-center">
+            <p className="text-[10px] text-slate-500 uppercase tracking-wide">ATM Call IV</p>
+            <p className="text-xs font-bold text-emerald-400">
+              {atmCall ? `${(atmCall.iv * 100).toFixed(0)}%` : '—'}
+            </p>
+          </div>
+          <div className="text-center">
+            <p className="text-[10px] text-slate-500 uppercase tracking-wide">ATM Put IV</p>
+            <p className="text-xs font-bold text-red-400">
+              {atmPut ? `${(atmPut.iv * 100).toFixed(0)}%` : '—'}
+            </p>
+          </div>
+          <div className={`text-center rounded px-1 py-0.5 border ${skewInfo?.bg ?? 'bg-slate-700/20 border-slate-600/30'}`}>
+            <p className="text-[10px] text-slate-500 uppercase tracking-wide">Skew</p>
+            <p className={`text-xs font-bold ${skewInfo?.color ?? 'text-slate-400'}`}>
+              {skew !== null ? `${skew >= 0 ? '+' : ''}${(skew * 100).toFixed(0)}% ${skewInfo?.label ?? ''}` : '—'}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="relative px-2 pb-2">
         <svg
           ref={svgRef}
@@ -198,6 +243,17 @@ export function IVSkewChart({
           </div>
         )}
       </div>
+
+      {/* Skew interpretation */}
+      {skew !== null && (
+        <p className="text-xs text-slate-400 px-4 pb-3">
+          {skew > 0.03
+            ? `Put IV is ${(skew * 100).toFixed(0)}% above call IV — traders are paying more for downside protection.`
+            : skew < -0.03
+              ? `Call IV is ${(Math.abs(skew) * 100).toFixed(0)}% above put IV — elevated upside speculation in options market.`
+              : 'Put and call IV are balanced at-the-money — no strong directional bias.'}
+        </p>
+      )}
     </div>
   );
 }

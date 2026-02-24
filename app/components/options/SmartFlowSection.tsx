@@ -287,6 +287,15 @@ export function SmartFlowSection({
   const net = bullish - bearish;
   const total = bullish + bearish;
 
+  const bullCount = activities.filter(a =>
+    a.sentiment === 'BULLISH' || a.type?.toLowerCase() === 'call'
+  ).length;
+  const bearCount = activities.filter(a =>
+    a.sentiment === 'BEARISH' || a.type?.toLowerCase() === 'put'
+  ).length;
+  const totalCount = bullCount + bearCount;
+  const netCount = bullCount - bearCount;
+
   const displayed = activities.slice(0, 8);
 
   return (
@@ -317,7 +326,7 @@ export function SmartFlowSection({
         </div>
 
         {/* Aggregate sentiment bar */}
-        {total > 0 && (
+        {total > 0 ? (
           <div className="space-y-1.5">
             <div className="grid grid-cols-3 gap-2 text-center">
               <div className="px-2 py-1.5 rounded-lg bg-emerald-500/8 border border-emerald-500/20">
@@ -353,6 +362,44 @@ export function SmartFlowSection({
                 style={{ width: `${(bearish / total) * 100}%` }}
               />
             </div>
+          </div>
+        ) : (
+          <div className="space-y-1.5">
+            <div className="grid grid-cols-3 gap-2 text-center">
+              <div className="px-2 py-1.5 rounded-lg bg-emerald-500/8 border border-emerald-500/20">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide">Call Flow</p>
+                <p className="text-xs font-bold text-emerald-400">↑ {bullCount} Call</p>
+              </div>
+              <div className="px-2 py-1.5 rounded-lg bg-red-500/8 border border-red-500/20">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide">Put Flow</p>
+                <p className="text-xs font-bold text-red-400">↓ {bearCount} Put</p>
+              </div>
+              <div className={`px-2 py-1.5 rounded-lg border ${
+                netCount > 0
+                  ? 'bg-emerald-500/8 border-emerald-500/20'
+                  : netCount < 0
+                    ? 'bg-red-500/8 border-red-500/20'
+                    : 'bg-slate-700/20 border-slate-600/30'
+              }`}>
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide">Net</p>
+                <p className={`text-xs font-bold ${netCount > 0 ? 'text-emerald-400' : netCount < 0 ? 'text-red-400' : 'text-slate-400'}`}>
+                  {netCount >= 0 ? '+' : ''}{netCount}
+                </p>
+              </div>
+            </div>
+            {totalCount > 0 && (
+              <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden flex">
+                <div
+                  className="h-full bg-emerald-500 transition-all duration-500"
+                  style={{ width: `${(bullCount / totalCount) * 100}%` }}
+                />
+                <div
+                  className="h-full bg-red-500 transition-all duration-500"
+                  style={{ width: `${(bearCount / totalCount) * 100}%` }}
+                />
+              </div>
+            )}
+            <p className="text-[10px] text-slate-600">Signal counts · Premium data unavailable</p>
           </div>
         )}
       </div>
