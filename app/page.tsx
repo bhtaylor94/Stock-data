@@ -494,17 +494,21 @@ function OptionsTab({
   }
 
   // Key stats derived from options data
-  const avgIV = data.metrics?.avgIV;
+  const ivRank = data.metrics?.ivRank;          // 0–100
   const putCallRatio = data.metrics?.putCallRatio;
   const maxPain = data.metrics?.maxPain;
-  const hv20 = data.historicalVolatility?.hv20;
+  const hv20 = data.historicalVolatility?.hv20; // already in %, e.g. 25.3
 
-  const ivColor = avgIV != null
-    ? avgIV >= 0.6 ? 'text-red-400' : avgIV >= 0.3 ? 'text-amber-400' : 'text-emerald-400'
+  const ivRankColor = ivRank != null
+    ? ivRank >= 70 ? 'text-red-400' : ivRank >= 40 ? 'text-amber-400' : 'text-emerald-400'
     : 'text-slate-400';
+  // < 0.8 = calls dominating (bullish) = green; > 1.2 = puts dominating (bearish) = red
   const pcColor = putCallRatio != null
-    ? putCallRatio >= 1.2 ? 'text-red-400' : putCallRatio <= 0.7 ? 'text-emerald-400' : 'text-white'
+    ? putCallRatio >= 1.2 ? 'text-red-400' : putCallRatio <= 0.8 ? 'text-emerald-400' : 'text-slate-300'
     : 'text-slate-400';
+  const pcLabel = putCallRatio != null
+    ? putCallRatio <= 0.8 ? 'Calls' : putCallRatio >= 1.2 ? 'Puts' : null
+    : null;
 
   const optDs = (data.dataSource ?? '') as string;
   const optResponseMs = data.meta?.responseTimeMs as number | undefined;
@@ -540,18 +544,19 @@ function OptionsTab({
         />
 
         {/* Key stats 2×2 grid */}
-        {(avgIV != null || putCallRatio != null || maxPain != null || hv20 != null) && (
+        {(ivRank != null || putCallRatio != null || maxPain != null || hv20 != null) && (
           <div className="grid grid-cols-2 gap-2">
-            {avgIV != null && (
+            {ivRank != null && (
               <div className="p-3 rounded-xl border border-slate-700/40 bg-slate-800/20 text-center">
                 <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">IV Rank</p>
-                <p className={`text-sm font-bold ${ivColor}`}>{(avgIV * 100).toFixed(0)}%</p>
+                <p className={`text-sm font-bold ${ivRankColor}`}>{ivRank}%</p>
               </div>
             )}
             {putCallRatio != null && (
               <div className="p-3 rounded-xl border border-slate-700/40 bg-slate-800/20 text-center">
                 <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">P/C Ratio</p>
                 <p className={`text-sm font-bold ${pcColor}`}>{putCallRatio.toFixed(2)}</p>
+                {pcLabel && <p className={`text-[9px] font-semibold mt-0.5 ${pcColor}`}>{pcLabel}</p>}
               </div>
             )}
             {maxPain != null && (
@@ -563,7 +568,7 @@ function OptionsTab({
             {hv20 != null && (
               <div className="p-3 rounded-xl border border-slate-700/40 bg-slate-800/20 text-center">
                 <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">HV20</p>
-                <p className="text-sm font-bold text-slate-300">{(hv20 * 100).toFixed(0)}%</p>
+                <p className="text-sm font-bold text-slate-300">{hv20.toFixed(1)}%</p>
               </div>
             )}
           </div>
