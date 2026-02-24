@@ -1,15 +1,25 @@
 import React from 'react';
-import { Bookmark, BarChart2 } from 'lucide-react';
+import { Bookmark, BarChart2, CheckCircle2, Clock } from 'lucide-react';
 import { COMPANY_NAMES } from '@/lib/companyNames';
+import Badge from '@/app/components/core/Badge';
 
-export function OptionsDecisionHero({ 
+type BadgeVariant = 'bullish' | 'bearish' | 'neutral' | 'info';
+
+function actionVariant(action: string): BadgeVariant {
+  if (action === 'BUY' || action === 'CALL') return 'bullish';
+  if (action === 'SELL' || action === 'PUT') return 'bearish';
+  if (action === 'NO_TRADE') return 'neutral';
+  return 'info';
+}
+
+export function OptionsDecisionHero({
   ticker,
   currentPrice,
   meta,
   suggestions,
   onViewEvidence,
-  priceChange
-}: { 
+  priceChange,
+}: {
   ticker: string;
   currentPrice?: number;
   meta: any;
@@ -19,101 +29,78 @@ export function OptionsDecisionHero({
 }) {
   const action = meta?.tradeDecision?.action || 'NO_TRADE';
   const confidence = meta?.tradeDecision?.confidence || 0;
-  const rationale = meta?.tradeDecision?.rationale || [];
   const companyName = COMPANY_NAMES[ticker] || ticker;
-  
   const topSuggestion = suggestions?.[0];
-  const strategy = topSuggestion?.strategy || 'No clear setup';
-  
+  const strategy = topSuggestion?.strategy || '';
+  const isStale = meta?.isStale;
+
   return (
-    <div className="sticky top-0 z-10 p-5 rounded-2xl bg-gradient-to-br from-slate-800/95 to-slate-900/95 backdrop-blur-sm border border-slate-700/50 shadow-xl">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-4">
-        <div className="flex-1">
-          {/* Ticker - Large and Bold */}
-          <h1 className="text-4xl font-bold text-white leading-tight">{ticker}</h1>
-          {/* Company Name - Smaller, underneath ticker */}
-          <p className="text-sm text-slate-400 mt-1 mb-3">{companyName}</p>
-          {/* Price - Balanced size with percentage change */}
-          {currentPrice && (
-            <div className="flex items-baseline gap-3">
-              <p className="text-4xl font-bold text-emerald-400 leading-tight">
-                ${currentPrice.toFixed(2)}
-              </p>
-              {/* Percentage Change - Green if up, Red if down */}
-              {priceChange !== undefined && priceChange !== null && (
-                <span className={`text-xl font-semibold ${
-                  priceChange >= 0 ? 'text-emerald-400' : 'text-red-400'
-                }`}>
-                  {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)}%
-                </span>
-              )}
-            </div>
-          )}
-          <p className="text-xs text-slate-500 mt-1">
-            Options • {meta?.asOf && new Date(meta.asOf).toLocaleTimeString()} • {meta?.responseTimeMs}ms
-          </p>
+    <div className="p-4 rounded-2xl bg-gradient-to-br from-slate-800/95 to-slate-900/95 backdrop-blur-sm border border-slate-700/50 shadow-xl">
+
+      {/* Row 1: Ticker + company + live badge */}
+      <div className="flex items-center justify-between mb-1">
+        <div className="flex items-baseline gap-2 min-w-0">
+          <h1 className="text-2xl font-bold text-white leading-tight flex-shrink-0">{ticker}</h1>
+          <p className="text-xs text-slate-400 truncate">{companyName}</p>
         </div>
-        
-        {/* Live Badge */}
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-xs text-emerald-400 font-medium">LIVE DATA</span>
+        <div className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-lg border flex-shrink-0 ${
+          isStale
+            ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+            : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+        }`}>
+          {isStale ? <Clock size={9} /> : <CheckCircle2 size={9} />}
+          {isStale ? 'Stale' : 'Live'}
         </div>
       </div>
 
-      {/* Decision */}
-      <div className={`p-4 rounded-xl border ${
-        action === 'NO_TRADE' 
-          ? 'border-slate-600/40 bg-slate-900/40' 
-          : 'border-emerald-500/30 bg-emerald-500/5'
-      }`}>
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-xs text-slate-400">Trade Decision</span>
-          {action !== 'NO_TRADE' && (
-            <span className={`text-xs px-2 py-0.5 rounded ${
-              confidence >= 75 ? 'bg-emerald-500/20 text-emerald-400' :
-              confidence >= 60 ? 'bg-blue-500/20 text-blue-400' :
-              'bg-amber-500/20 text-amber-400'
-            }`}>
-              {confidence}% Confidence
+      {/* Row 2: Price + change% + action badge + confidence */}
+      {currentPrice && (
+        <div className="flex items-center gap-2 flex-wrap mb-2">
+          <span className="text-2xl font-bold text-white leading-tight">
+            ${currentPrice.toFixed(2)}
+          </span>
+          {priceChange !== undefined && priceChange !== null && (
+            <span className={`text-sm font-semibold ${priceChange >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+              {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)}%
             </span>
           )}
-        </div>
-        
-        <p className={`text-lg font-bold mb-1 ${
-          action === 'NO_TRADE' ? 'text-slate-400' : 'text-emerald-400'
-        }`}>
-          {action === 'NO_TRADE' ? 'No Trade Recommended' : action}
-        </p>
-        
-        {action !== 'NO_TRADE' && (
-          <p className="text-sm text-slate-300">{strategy}</p>
-        )}
-      </div>
-
-      {/* Rationale (compact) */}
-      {rationale.length > 0 && (
-        <div className="mt-3 space-y-1">
-          {rationale.slice(0, 3).map((r: string, i: number) => (
-            <p key={i} className="text-xs text-slate-400">• {r}</p>
-          ))}
+          {action !== 'NO_TRADE' && (
+            <Badge text={action} variant={actionVariant(action)} />
+          )}
+          {action !== 'NO_TRADE' && confidence > 0 && (
+            <span className={`text-xs font-semibold ${
+              confidence >= 75 ? 'text-emerald-400' :
+              confidence >= 60 ? 'text-blue-400' : 'text-amber-400'
+            }`}>{confidence}% conf</span>
+          )}
         </div>
       )}
 
-      {/* Actions */}
-      {action !== 'NO_TRADE' && topSuggestion && (
-        <div className="mt-3 flex gap-2">
-          <button className="btn-primary flex-1 justify-center gap-1.5">
-            <Bookmark size={13} />Track Setup
+      {/* Row 3: Strategy name (if trade recommended) */}
+      {action !== 'NO_TRADE' && strategy && (
+        <p className="text-xs text-slate-300 mb-2 truncate">{strategy}</p>
+      )}
+
+      {/* Row 4: No-trade message or action buttons */}
+      {action === 'NO_TRADE' ? (
+        <p className="text-xs text-slate-500 mb-2">No trade recommended</p>
+      ) : topSuggestion && (
+        <div className="flex gap-1.5 mb-1">
+          <button className="btn-primary flex-1 justify-center gap-1 py-1.5 text-xs">
+            <Bookmark size={11} />Track Setup
           </button>
           {onViewEvidence && (
-            <button onClick={onViewEvidence} className="btn-ghost gap-1.5">
-              <BarChart2 size={13} />Evidence
+            <button onClick={onViewEvidence} className="btn-ghost gap-1 py-1.5 text-xs">
+              <BarChart2 size={11} />Evidence
             </button>
           )}
         </div>
       )}
+
+      {/* Options label */}
+      <p className="text-[10px] text-slate-600">
+        Options · {meta?.asOf && new Date(meta.asOf).toLocaleTimeString()} · {meta?.responseTimeMs}ms
+      </p>
     </div>
   );
 }

@@ -12,7 +12,7 @@ import { StockScoreBreakdown } from './components/stock/StockScoreBreakdown';
 import { ConsensusSourcesList } from './components/stock/ConsensusSourcesList';
 import { ChartPatternCard } from './components/stock/ChartPatternCard';
 import { OptionsDecisionHero } from './components/options/OptionsDecisionHero';
-import { UnusualActivitySection } from './components/options/UnusualActivitySection';
+import { SmartFlowSection } from './components/options/SmartFlowSection';
 import { OptionsSetupCard } from './components/options/OptionsSetupCard';
 import { FlowSetupCard } from './components/options/FlowSetupCard';
 import { EvidenceDrawer } from './components/core/EvidenceDrawer';
@@ -34,7 +34,6 @@ import { IVSkewChart } from './components/options/IVSkewChart';
 import { PositionSizingCalc } from './components/core/PositionSizingCalc';
 import { ScannerFeed } from './components/scanner/ScannerFeed';
 import { SectorHeatMap } from './components/scanner/SectorHeatMap';
-import { FlowTape } from './components/options/FlowTape';
 
 // ============================================================
 // UTILITY COMPONENTS
@@ -254,149 +253,153 @@ function StockTab({
   const { analysis, suggestions, chartPatterns, technicals, fundamentals, news, analysts } = data;
 
   return (
-    <div className="space-y-4 animate-fade-in">
-      <EarningsWidget ticker={ticker} />
+    <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 animate-fade-in">
+      {/* LEFT — sticky context column */}
+      <div className="space-y-3 lg:sticky lg:top-[100px] lg:self-start">
+        <StockDecisionHero
+          ticker={ticker}
+          price={data.price || data.quote?.c || 0}
+          analysis={{ ...analysis, changePercent: data.changePercent }}
+          meta={data.meta}
+          onTrack={() => {
+            if (suggestions?.[0] && onTrack) {
+              const sug = suggestions[0];
+              const trackData = {
+                ticker,
+                type: sug.type === 'BUY' ? 'STOCK_BUY' : 'STOCK_SELL',
+                strategy: sug.strategy,
+                entryPrice: data.price || data.quote?.c,
+                confidence: sug.confidence || 0,
+                reasoning: sug.reasoning || [],
+                evidencePacket: data,
+              };
+              fetch('/api/tracker', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(trackData),
+              }).then(res => res.json()).then(result => {
+                onTrack(result.success, result.success ? `✓ Tracking ${ticker}` : result.error);
+              });
+            }
+          }}
+          onViewEvidence={onViewEvidence}
+          onTrade={onTrade ? () => onTrade(
+            ticker,
+            data.price || data.quote?.c || 0,
+            data.meta?.tradeDecision?.action || 'BUY',
+            1
+          ) : undefined}
+        />
+        <EarningsWidget ticker={ticker} />
+        <StockScoreBreakdown analysis={analysis} />
+      </div>
 
-      <NarrativeCard
-        ticker={ticker}
-        price={data.price || 0}
-        changePercent={data.changePercent || 0}
-        analysis={analysis}
-        technicals={technicals}
-      />
+      {/* RIGHT — scrollable analysis column */}
+      <div className="space-y-4">
+        <NarrativeCard
+          ticker={ticker}
+          price={data.price || 0}
+          changePercent={data.changePercent || 0}
+          analysis={analysis}
+          technicals={technicals}
+        />
 
-      <StockDecisionHero
-        ticker={ticker}
-        price={data.price || data.quote?.c || 0}
-        analysis={{ ...analysis, changePercent: data.changePercent }}
-        meta={data.meta}
-        onTrack={() => {
-          if (suggestions?.[0] && onTrack) {
-            const sug = suggestions[0];
-            const trackData = {
-              ticker,
-              type: sug.type === 'BUY' ? 'STOCK_BUY' : 'STOCK_SELL',
-              strategy: sug.strategy,
-              entryPrice: data.price || data.quote?.c,
-              confidence: sug.confidence || 0,
-              reasoning: sug.reasoning || [],
-              evidencePacket: data,
-            };
-            fetch('/api/tracker', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(trackData),
-            }).then(res => res.json()).then(result => {
-              onTrack(result.success, result.success ? `✓ Tracking ${ticker}` : result.error);
-            });
-          }
-        }}
-        onViewEvidence={onViewEvidence}
-        onTrade={onTrade ? () => onTrade(
-          ticker,
-          data.price || data.quote?.c || 0,
-          data.meta?.tradeDecision?.action || 'BUY',
-          1
-        ) : undefined}
-      />
+        {data.portfolioContext && (
+          <PortfolioContextAlert portfolioContext={data.portfolioContext} />
+        )}
 
-      {data.portfolioContext && (
-        <PortfolioContextAlert portfolioContext={data.portfolioContext} />
-      )}
-
-      <StockScoreBreakdown analysis={analysis} />
-
-      {data?.meta?.warnings?.technicals && (
-        <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
-          <h3 className="text-sm font-semibold text-amber-300 mb-1">Limited technical data</h3>
-          <p className="text-xs text-slate-300">{data.meta.warnings.technicals}</p>
-          {data?.meta?.priceHistory && (
-            <p className="text-[11px] text-slate-400 mt-1">
-              Candles: <span className="font-mono">{data.meta.priceHistory.candles}</span> · Source: <span className="font-mono">{data.meta.priceHistory.source}</span>
-            </p>
-          )}
-        </div>
-      )}
-
-      {(!news?.headlines || news.headlines.length === 0) && data?.meta?.warnings?.news && (
-        <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
-          <h3 className="text-sm font-semibold text-amber-300 mb-1">News unavailable</h3>
-          <p className="text-xs text-slate-300">{data.meta.warnings.news}</p>
-          <p className="text-xs text-slate-400 mt-1">Set <span className="font-mono">FINNHUB_API_KEY</span> in Vercel and redeploy.</p>
-        </div>
-      )}
-
-      {news?.headlines?.length > 0 && (
-        <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-white">Recent News</h3>
-            <button onClick={onViewEvidence} className="text-xs text-slate-300 hover:text-white underline underline-offset-2">
-              View in Evidence
-            </button>
+        {data?.meta?.warnings?.technicals && (
+          <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
+            <h3 className="text-sm font-semibold text-amber-300 mb-1">Limited technical data</h3>
+            <p className="text-xs text-slate-300">{data.meta.warnings.technicals}</p>
+            {data?.meta?.priceHistory && (
+              <p className="text-[11px] text-slate-400 mt-1">
+                Candles: <span className="font-mono">{data.meta.priceHistory.candles}</span> · Source: <span className="font-mono">{data.meta.priceHistory.source}</span>
+              </p>
+            )}
           </div>
-          <div className="space-y-2">
-            {news.headlines.slice(0, 8).map((item: any, i: number) => (
-              <div key={i} className="p-3 rounded-xl bg-slate-900/40 border border-slate-700/40">
-                <div className="text-sm text-white">{item.headline || item.title || 'Headline'}</div>
-                <div className="mt-1 text-xs text-slate-400 flex items-center gap-2">
-                  <span>{item.source || ''}</span>
-                  <span className="opacity-50">·</span>
-                  <span>{(() => {
-                    const dt = item.datetime;
-                    if (!dt) return '';
-                    if (typeof dt === 'number') return new Date(dt * 1000).toLocaleDateString();
-                    const d = new Date(dt);
-                    return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
-                  })()}</span>
-                  {item.url && (
-                    <>
-                      <span className="opacity-50">·</span>
-                      <a className="underline underline-offset-2 hover:text-white" href={item.url} target="_blank" rel="noreferrer">Open</a>
-                    </>
-                  )}
+        )}
+
+        {(!news?.headlines || news.headlines.length === 0) && data?.meta?.warnings?.news && (
+          <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
+            <h3 className="text-sm font-semibold text-amber-300 mb-1">News unavailable</h3>
+            <p className="text-xs text-slate-300">{data.meta.warnings.news}</p>
+            <p className="text-xs text-slate-400 mt-1">Set <span className="font-mono">FINNHUB_API_KEY</span> in Vercel and redeploy.</p>
+          </div>
+        )}
+
+        {news?.headlines?.length > 0 && (
+          <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-white">Recent News</h3>
+              <button onClick={onViewEvidence} className="text-xs text-slate-300 hover:text-white underline underline-offset-2">
+                View in Evidence
+              </button>
+            </div>
+            <div className="space-y-2">
+              {news.headlines.slice(0, 8).map((item: any, i: number) => (
+                <div key={i} className="p-3 rounded-xl bg-slate-900/40 border border-slate-700/40">
+                  <div className="text-sm text-white">{item.headline || item.title || 'Headline'}</div>
+                  <div className="mt-1 text-xs text-slate-400 flex items-center gap-2">
+                    <span>{item.source || ''}</span>
+                    <span className="opacity-50">·</span>
+                    <span>{(() => {
+                      const dt = item.datetime;
+                      if (!dt) return '';
+                      if (typeof dt === 'number') return new Date(dt * 1000).toLocaleDateString();
+                      const d = new Date(dt);
+                      return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+                    })()}</span>
+                    {item.url && (
+                      <>
+                        <span className="opacity-50">·</span>
+                        <a className="underline underline-offset-2 hover:text-white" href={item.url} target="_blank" rel="noreferrer">Open</a>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <ConsensusSourcesList
-        fundamentals={fundamentals}
-        technicals={technicals}
-        news={news}
-        analysts={analysts}
-        chartPatterns={chartPatterns}
-      />
+        <ConsensusSourcesList
+          fundamentals={fundamentals}
+          technicals={technicals}
+          news={news}
+          analysts={analysts}
+          chartPatterns={chartPatterns}
+        />
 
-      <ChartPatternCard chartPatterns={chartPatterns} />
+        <ChartPatternCard chartPatterns={chartPatterns} />
 
-      {suggestions && suggestions.length > 0 && (
-        <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
-          <h3 className="text-sm font-semibold text-white mb-3">Recommendations</h3>
-          <div className="space-y-2">
-            {suggestions.slice(0, 3).map((sug: any, i: number) => (
-              <div key={i} className={`p-3 rounded-xl border ${
-                sug.type === 'BUY' ? 'border-emerald-500/30 bg-emerald-500/5' :
-                sug.type === 'SELL' ? 'border-red-500/30 bg-red-500/5' :
-                'border-amber-500/30 bg-amber-500/5'
-              } transition-all duration-200`}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium text-white">{sug.strategy}</span>
-                  {sug.confidence && (
-                    <span className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">
-                      {sug.confidence}% confidence
-                    </span>
-                  )}
+        {suggestions && suggestions.length > 0 && (
+          <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
+            <h3 className="text-sm font-semibold text-white mb-3">Recommendations</h3>
+            <div className="space-y-2">
+              {suggestions.slice(0, 3).map((sug: any, i: number) => (
+                <div key={i} className={`p-3 rounded-xl border ${
+                  sug.type === 'BUY' ? 'border-emerald-500/30 bg-emerald-500/5' :
+                  sug.type === 'SELL' ? 'border-red-500/30 bg-red-500/5' :
+                  'border-amber-500/30 bg-amber-500/5'
+                } transition-all duration-200`}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-medium text-white">{sug.strategy}</span>
+                    {sug.confidence && (
+                      <span className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">
+                        {sug.confidence}% confidence
+                      </span>
+                    )}
+                  </div>
+                  {sug.reasoning?.slice(0, 2).map((r: string, j: number) => (
+                    <p key={j} className="text-xs text-slate-400">• {r}</p>
+                  ))}
                 </div>
-                {sug.reasoning?.slice(0, 2).map((r: string, j: number) => (
-                  <p key={j} className="text-xs text-slate-400">• {r}</p>
-                ))}
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -440,197 +443,239 @@ function OptionsTab({
     );
   }
 
+  // Key stats derived from options data
+  const avgIV = data.metrics?.avgIV;
+  const putCallRatio = data.metrics?.putCallRatio;
+  const maxPain = data.metrics?.maxPain;
+  const hv20 = data.historicalVolatility?.hv20;
+
+  const ivColor = avgIV != null
+    ? avgIV >= 0.6 ? 'text-red-400' : avgIV >= 0.3 ? 'text-amber-400' : 'text-emerald-400'
+    : 'text-slate-400';
+  const pcColor = putCallRatio != null
+    ? putCallRatio >= 1.2 ? 'text-red-400' : putCallRatio <= 0.7 ? 'text-emerald-400' : 'text-white'
+    : 'text-slate-400';
+
   return (
-    <div className="space-y-4 animate-fade-in">
-      {/* Options Decision Hero */}
-      <OptionsDecisionHero
-        ticker={ticker}
-        currentPrice={data.currentPrice}
-        meta={data.meta}
-        suggestions={data.suggestions}
-        onViewEvidence={onViewEvidence}
-      />
+    <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 animate-fade-in">
 
-      <EarningsWidget ticker={ticker} />
+      {/* LEFT — sticky decision + setups */}
+      <div className="space-y-3 lg:sticky lg:top-[100px] lg:self-start lg:max-h-[calc(100vh-108px)] lg:overflow-y-auto">
+        <OptionsDecisionHero
+          ticker={ticker}
+          currentPrice={data.currentPrice}
+          meta={data.meta}
+          suggestions={data.suggestions}
+          onViewEvidence={onViewEvidence}
+        />
 
-      {/* Options Flow Tape */}
-      <FlowTape activities={data.unusualActivity || []} />
+        {/* Key stats 2×2 grid */}
+        {(avgIV != null || putCallRatio != null || maxPain != null || hv20 != null) && (
+          <div className="grid grid-cols-2 gap-2">
+            {avgIV != null && (
+              <div className="p-3 rounded-xl border border-slate-700/40 bg-slate-800/20 text-center">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">IV Rank</p>
+                <p className={`text-sm font-bold ${ivColor}`}>{(avgIV * 100).toFixed(0)}%</p>
+              </div>
+            )}
+            {putCallRatio != null && (
+              <div className="p-3 rounded-xl border border-slate-700/40 bg-slate-800/20 text-center">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">P/C Ratio</p>
+                <p className={`text-sm font-bold ${pcColor}`}>{putCallRatio.toFixed(2)}</p>
+              </div>
+            )}
+            {maxPain != null && (
+              <div className="p-3 rounded-xl border border-slate-700/40 bg-slate-800/20 text-center">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">Max Pain</p>
+                <p className="text-sm font-bold text-white">${maxPain}</p>
+              </div>
+            )}
+            {hv20 != null && (
+              <div className="p-3 rounded-xl border border-slate-700/40 bg-slate-800/20 text-center">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">HV20</p>
+                <p className="text-sm font-bold text-slate-300">{(hv20 * 100).toFixed(0)}%</p>
+              </div>
+            )}
+          </div>
+        )}
 
-      {/* Named Flow Setups — Phase C results */}
-      {data.optionsSetups?.length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-white px-1">Flow Setups</h3>
-          {data.optionsSetups.slice(0, 4).map((setup: any, i: number) => (
-            <FlowSetupCard
-              key={i}
-              setup={setup}
-              onTrack={() => {
-                if (!onTrack || !setup.recommendedContract) return;
-                const rc = setup.recommendedContract;
-                const optType = setup.recommendedStructure?.type === 'PUT' ? 'PUT' : 'CALL';
-                fetch('/api/tracker', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    ticker,
-                    type: optType,
-                    strategy: setup.name,
-                    entryPrice: rc.ask || rc.mark || 1.00,
-                    confidence: setup.confluenceScore || 0,
-                    reasoning: setup.criteriaHit || [],
-                    evidencePacket: data,
-                    optionContract: {
-                      strike: rc.strike,
-                      expiration: rc.expiration,
-                      dte: rc.dte,
-                      delta: rc.delta,
-                      entryAsk: rc.ask || rc.mark || 1.00,
-                      optionType: optType,
-                    },
-                  }),
-                }).then(res => res.json()).then(result => {
-                  onTrack(result.success, result.message || result.error);
-                }).catch(() => {
-                  onTrack(false, 'Failed to track position');
-                });
-              }}
-            />
-          ))}
-        </div>
-      )}
+        <EarningsWidget ticker={ticker} />
 
-      {/* Unusual Options Activity - ALWAYS VISIBLE */}
-      <UnusualActivitySection
-        activities={data.unusualActivity || []}
-        onTrack={(activity) => {
-          if (!onTrack) return;
-
-          const optionType = activity.type?.toUpperCase() === 'PUT' ? 'PUT' : 'CALL';
-          fetch('/api/tracker', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ticker,
-              type: optionType,
-              strategy: `${activity.alertType ?? 'UOA'}: $${activity.strike} ${optionType} (${activity.tradeType ?? 'UOA'})`,
-              entryPrice: 1.00,
-              confidence: activity.uoaScore ?? activity.confidence ?? 70,
-              reasoning: activity.signals || [],
-              evidencePacket: data,
-              optionContract: {
-                strike: activity.strike,
-                expiration: activity.expiration ?? 'N/A',
-                dte: activity.dte,
-                delta: activity.delta ?? 0.5,
-                entryAsk: 1.00,
-                optionType,
-              },
-            }),
-          }).then(res => res.json()).then(result => {
-            onTrack(result.success, result.message || result.error);
-          }).catch(() => {
-            onTrack(false, 'Failed to track position');
-          });
-        }}
-      />
-      
-      {/* Trade Setups - Compact & Expandable */}
-      {data.suggestions?.filter((s: any) => s.type !== 'ALERT' && s.type !== 'NO_TRADE').length > 0 && (
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-white px-1">Trade Setups</h3>
-          {data.suggestions
-            .filter((s: any) => s.type !== 'ALERT' && s.type !== 'NO_TRADE')
-            .slice(0, 4)
-            .map((setup: any, i: number) => (
-              <OptionsSetupCard 
+        {/* Named Flow Setups — up to 3 */}
+        {data.optionsSetups?.length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-slate-400 px-1 uppercase tracking-wide">Flow Setups</h3>
+            {data.optionsSetups.slice(0, 3).map((setup: any, i: number) => (
+              <FlowSetupCard
                 key={i}
                 setup={setup}
                 onTrack={() => {
-                  if (!onTrack) return;
-                  
-                  // CRITICAL FIX: Check if contract exists before accessing properties
-                  if (!setup.contract) {
-                    onTrack(false, 'Invalid setup: missing contract data');
-                    return;
-                  }
-                  
+                  if (!onTrack || !setup.recommendedContract) return;
+                  const rc = setup.recommendedContract;
+                  const optType = setup.recommendedStructure?.type === 'PUT' ? 'PUT' : 'CALL';
                   fetch('/api/tracker', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                       ticker,
-                      type: setup.type,
-                      strategy: setup.strategy,
-                      entryPrice: setup.contract?.ask || 1.00,
-                      confidence: setup.confidence || 0,
-                      reasoning: setup.reasoning || [],
+                      type: optType,
+                      strategy: setup.name,
+                      entryPrice: rc.ask || rc.mark || 1.00,
+                      confidence: setup.confluenceScore || 0,
+                      reasoning: setup.criteriaHit || [],
                       evidencePacket: data,
                       optionContract: {
-                        strike: setup.contract.strike,
-                        expiration: setup.contract.expiration,
-                        dte: setup.contract.dte,
-                        delta: setup.contract.delta,
-                        entryAsk: setup.contract.ask,
-                        optionType: setup.type === 'PUT' ? 'PUT' : 'CALL',
+                        strike: rc.strike,
+                        expiration: rc.expiration,
+                        dte: rc.dte,
+                        delta: rc.delta,
+                        entryAsk: rc.ask || rc.mark || 1.00,
+                        optionType: optType,
                       },
                     }),
                   }).then(res => res.json()).then(result => {
                     onTrack(result.success, result.message || result.error);
-                  }).catch(err => {
+                  }).catch(() => {
                     onTrack(false, 'Failed to track position');
                   });
                 }}
               />
             ))}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
-      {/* Expiration selector */}
-      {data.expirations?.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap pt-2">
-          <span className="text-xs text-slate-500">Expiration:</span>
-          {data.expirations.slice(0, 6).map((exp: string) => (
-            <button
-              key={exp}
-              onClick={() => setSelectedExp(exp)}
-              className={`text-xs px-2.5 py-0.5 rounded-md border transition-all font-mono ${
-                selectedExp === exp
-                  ? 'border-blue-500/50 bg-blue-500/15 text-blue-400'
-                  : 'border-slate-700/40 text-slate-400 hover:text-white hover:border-slate-600'
-              }`}
-            >
-              {exp}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {/* IV Skew Chart */}
-      {data.byExpiration && selectedExp && data.byExpiration[selectedExp] && (
-        <IVSkewChart
-          calls={data.byExpiration[selectedExp].calls}
-          puts={data.byExpiration[selectedExp].puts}
-          currentPrice={data.currentPrice}
-          expiration={selectedExp}
+      {/* RIGHT — flow + chain */}
+      <div className="space-y-4">
+        {/* SmartFlowSection: merged FlowTape + UnusualActivitySection */}
+        <SmartFlowSection
+          activities={data.unusualActivity || []}
+          onTrack={(activity) => {
+            if (!onTrack) return;
+            const optionType = activity.type?.toUpperCase() === 'PUT' ? 'PUT' : 'CALL';
+            fetch('/api/tracker', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                ticker,
+                type: optionType,
+                strategy: `${activity.alertType ?? 'UOA'}: $${activity.strike} ${optionType} (${activity.tradeType ?? 'UOA'})`,
+                entryPrice: 1.00,
+                confidence: activity.uoaScore ?? activity.confidence ?? 70,
+                reasoning: activity.signals || [],
+                evidencePacket: data,
+                optionContract: {
+                  strike: activity.strike,
+                  expiration: activity.expiration ?? 'N/A',
+                  dte: activity.dte,
+                  delta: activity.delta ?? 0.5,
+                  entryAsk: 1.00,
+                  optionType,
+                },
+              }),
+            }).then(res => res.json()).then(result => {
+              onTrack(result.success, result.message || result.error);
+            }).catch(() => {
+              onTrack(false, 'Failed to track position');
+            });
+          }}
         />
-      )}
 
-      {/* Full Options Chain Table */}
-      {data.byExpiration && selectedExp && data.byExpiration[selectedExp] && (
-        <OptionsChainTable
-          calls={data.byExpiration[selectedExp].calls}
-          puts={data.byExpiration[selectedExp].puts}
-          currentPrice={data.currentPrice}
-          onSelectContract={(c) => setSelectedContractAsk(c.ask)}
+        {/* Trade Setups */}
+        {data.suggestions?.filter((s: any) => s.type !== 'ALERT' && s.type !== 'NO_TRADE').length > 0 && (
+          <div className="space-y-2">
+            <h3 className="text-sm font-semibold text-white px-1">Trade Setups</h3>
+            {data.suggestions
+              .filter((s: any) => s.type !== 'ALERT' && s.type !== 'NO_TRADE')
+              .slice(0, 4)
+              .map((setup: any, i: number) => (
+                <OptionsSetupCard
+                  key={i}
+                  setup={setup}
+                  onTrack={() => {
+                    if (!onTrack) return;
+                    if (!setup.contract) {
+                      onTrack(false, 'Invalid setup: missing contract data');
+                      return;
+                    }
+                    fetch('/api/tracker', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        ticker,
+                        type: setup.type,
+                        strategy: setup.strategy,
+                        entryPrice: setup.contract?.ask || 1.00,
+                        confidence: setup.confidence || 0,
+                        reasoning: setup.reasoning || [],
+                        evidencePacket: data,
+                        optionContract: {
+                          strike: setup.contract.strike,
+                          expiration: setup.contract.expiration,
+                          dte: setup.contract.dte,
+                          delta: setup.contract.delta,
+                          entryAsk: setup.contract.ask,
+                          optionType: setup.type === 'PUT' ? 'PUT' : 'CALL',
+                        },
+                      }),
+                    }).then(res => res.json()).then(result => {
+                      onTrack(result.success, result.message || result.error);
+                    }).catch(() => {
+                      onTrack(false, 'Failed to track position');
+                    });
+                  }}
+                />
+              ))}
+          </div>
+        )}
+
+        {/* Expiration selector */}
+        {data.expirations?.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap pt-1">
+            <span className="text-xs text-slate-500">Expiration:</span>
+            {data.expirations.slice(0, 6).map((exp: string) => (
+              <button
+                key={exp}
+                onClick={() => setSelectedExp(exp)}
+                className={`text-xs px-2.5 py-0.5 rounded-md border transition-all font-mono ${
+                  selectedExp === exp
+                    ? 'border-blue-500/50 bg-blue-500/15 text-blue-400'
+                    : 'border-slate-700/40 text-slate-400 hover:text-white hover:border-slate-600'
+                }`}
+              >
+                {exp}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* IV Skew Chart */}
+        {data.byExpiration && selectedExp && data.byExpiration[selectedExp] && (
+          <IVSkewChart
+            calls={data.byExpiration[selectedExp].calls}
+            puts={data.byExpiration[selectedExp].puts}
+            currentPrice={data.currentPrice}
+            expiration={selectedExp}
+          />
+        )}
+
+        {/* Full Options Chain Table */}
+        {data.byExpiration && selectedExp && data.byExpiration[selectedExp] && (
+          <OptionsChainTable
+            calls={data.byExpiration[selectedExp].calls}
+            puts={data.byExpiration[selectedExp].puts}
+            currentPrice={data.currentPrice}
+            onSelectContract={(c) => setSelectedContractAsk(c.ask)}
+          />
+        )}
+
+        {/* Position Sizing Calculator */}
+        <PositionSizingCalc
+          ticker={ticker}
+          setup={data.optionsSetups?.[0]}
+          contractAsk={selectedContractAsk || data.optionsSetups?.[0]?.recommendedContract?.ask}
         />
-      )}
-
-      {/* Position Sizing Calculator */}
-      <PositionSizingCalc
-        ticker={ticker}
-        setup={data.optionsSetups?.[0]}
-        contractAsk={selectedContractAsk || data.optionsSetups?.[0]?.recommendedContract?.ask}
-      />
+      </div>
     </div>
   );
 }
