@@ -1,7 +1,7 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Sparkles, BarChart2, Layers, Activity, BookOpen,
+  Sparkles, BarChart2, Layers, Activity, BookOpen, Newspaper,
   CheckCircle2, AlertCircle, AlertTriangle,
   Search, ChevronDown,
 } from 'lucide-react';
@@ -34,6 +34,7 @@ import { SectorHeatMap } from './components/scanner/SectorHeatMap';
 import { ExpirationFlowBar } from './components/options/ExpirationFlowBar';
 import { TopFlowFeed } from './components/ai-suggestions/TopFlowFeed';
 import { Glossary } from './components/learn/Glossary';
+import { NewsFeedPanel } from './components/news/NewsFeedPanel';
 
 // ============================================================
 // UTILITY COMPONENTS
@@ -850,6 +851,7 @@ export default function TradingDashboard() {
     { id: 'stock',   label: 'Stocks',   Icon: BarChart2 },
     { id: 'options', label: 'Options',  Icon: Layers    },
     { id: 'scanner', label: 'Scanner',  Icon: Activity  },
+    { id: 'news',    label: 'News',     Icon: Newspaper },
     { id: 'learn',   label: 'Learn',    Icon: BookOpen  },
   ] as const;
 
@@ -857,7 +859,7 @@ export default function TradingDashboard() {
 
   const [ticker, setTicker] = useState('');
   const [showMoreTickers, setShowMoreTickers] = useState(false);
-  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'scanner' | 'learn'>('feed');
+  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'scanner' | 'news' | 'learn'>('feed');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
   const [stockLoading, setStockLoading] = useState(false);
@@ -1151,6 +1153,16 @@ export default function TradingDashboard() {
             
             {activeTab === 'scanner' && (
               <ScannerTab
+                onSelectTicker={(t) => {
+                  setTicker(t);
+                  handleSearch(t);
+                  setActiveTab('options');
+                }}
+              />
+            )}
+
+            {activeTab === 'news' && (
+              <NewsFeedPanel
                 onSelectTicker={(t) => {
                   setTicker(t);
                   handleSearch(t);
