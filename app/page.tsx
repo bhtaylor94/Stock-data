@@ -34,6 +34,7 @@ import { IVSkewChart } from './components/options/IVSkewChart';
 import { PositionSizingCalc } from './components/core/PositionSizingCalc';
 import { ScannerFeed } from './components/scanner/ScannerFeed';
 import { SectorHeatMap } from './components/scanner/SectorHeatMap';
+import { ExpirationFlowBar } from './components/options/ExpirationFlowBar';
 
 // ============================================================
 // UTILITY COMPONENTS
@@ -459,7 +460,23 @@ function OptionsTab({
 
   useEffect(() => {
     if (data?.expirations?.length > 0 && !selectedExp) {
-      setSelectedExp(data.expirations[0]);
+      const exps: string[] = data.expirations;
+      const byExp = data.byExpiration ?? {};
+      // Auto-select the expiration with the most unusual activity + volume
+      const scored = exps.map((exp: string) => {
+        const { calls = [], puts = [] } = byExp[exp] ?? {};
+        const unusual = [...calls, ...puts].filter(
+          (c: any) => c.isUnusual || (c.volumeOIRatio ?? 0) > 2
+        ).length;
+        const vol = [...calls, ...puts].reduce((s: number, c: any) => s + (c.volume || 0), 0);
+        return { exp, score: unusual * 15 + Math.min(vol / 200, 15) };
+      });
+      const hottest = scored.reduce(
+        (a: { exp: string; score: number }, b: { exp: string; score: number }) =>
+          b.score > a.score ? b : a,
+        scored[0]
+      );
+      setSelectedExp(hottest.exp);
     }
   }, [data, selectedExp]);
 
@@ -683,24 +700,14 @@ function OptionsTab({
           </div>
         )}
 
-        {/* Expiration selector */}
-        {data.expirations?.length > 0 && (
-          <div className="flex items-center gap-2 flex-wrap pt-1">
-            <span className="text-xs text-slate-500">Expiration:</span>
-            {data.expirations.slice(0, 6).map((exp: string) => (
-              <button
-                key={exp}
-                onClick={() => setSelectedExp(exp)}
-                className={`text-xs px-2.5 py-0.5 rounded-md border transition-all font-mono ${
-                  selectedExp === exp
-                    ? 'border-blue-500/50 bg-blue-500/15 text-blue-400'
-                    : 'border-slate-700/40 text-slate-400 hover:text-white hover:border-slate-600'
-                }`}
-              >
-                {exp}
-              </button>
-            ))}
-          </div>
+        {/* Expiration Flow Scanner — all expirations with per-exp flow stats */}
+        {data.expirations?.length > 0 && data.byExpiration && (
+          <ExpirationFlowBar
+            expirations={data.expirations}
+            byExpiration={data.byExpiration}
+            selectedExp={selectedExp}
+            onSelect={setSelectedExp}
+          />
         )}
 
         {/* IV Skew Chart */}
