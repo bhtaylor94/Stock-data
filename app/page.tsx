@@ -35,6 +35,7 @@ import { ExpirationFlowBar } from './components/options/ExpirationFlowBar';
 import { TopFlowFeed } from './components/ai-suggestions/TopFlowFeed';
 import { LearnTab } from './components/learn/LearnTab';
 import { NewsFeedPanel } from './components/news/NewsFeedPanel';
+import { StocksTab } from './components/stocks/StocksTab';
 
 // ============================================================
 // UTILITY COMPONENTS
@@ -1131,13 +1132,17 @@ export default function TradingDashboard() {
             )}
             
             {activeTab === 'stock' && (
-              <StockTab 
+              <StocksTab
                 data={stockData}
                 loading={stockLoading}
                 ticker={ticker}
                 onTrack={handleTrack}
                 onViewEvidence={() => handleViewEvidence(stockData)}
                 onTrade={handleTrade}
+                onSearch={(sym) => {
+                  setTicker(sym);
+                  handleSearch(sym);
+                }}
               />
             )}
             

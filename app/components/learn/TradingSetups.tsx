@@ -1422,8 +1422,8 @@ function SectionLabel({ label }: { label: string }) {
 
 // ── Main export ────────────────────────────────────────────────────────────────
 
-export function TradingSetups() {
-  const [assetFilter, setAssetFilter] = useState<FilterType>('all');
+export function TradingSetups({ initialAsset = 'all' }: { initialAsset?: 'stock' | 'options' | 'all' }) {
+  const [assetFilter, setAssetFilter] = useState<FilterType>(initialAsset);
   const [subFilter, setSubFilter]     = useState<FilterType | null>(null);
   const [search, setSearch]           = useState('');
 
@@ -1497,18 +1497,20 @@ export function TradingSetups() {
         )}
       </div>
 
-      {/* Asset type filter row */}
-      <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5">
-        {ASSET_FILTERS.map(f => (
-          <button
-            key={f.id}
-            onClick={() => { setAssetFilter(f.id); setSubFilter(null); }}
-            className={pillClass(assetFilter === f.id)}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
+      {/* Asset type filter row — hidden when pre-filtered via initialAsset */}
+      {initialAsset === 'all' && (
+        <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5">
+          {ASSET_FILTERS.map(f => (
+            <button
+              key={f.id}
+              onClick={() => { setAssetFilter(f.id); setSubFilter(null); }}
+              className={pillClass(assetFilter === f.id)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Sub-filter row (outlook / difficulty) */}
       <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none pb-0.5">

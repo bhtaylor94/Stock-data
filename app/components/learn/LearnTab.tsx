@@ -1,18 +1,19 @@
 'use client';
 import React, { useState } from 'react';
-import { BookOpen, Target, type LucideIcon } from 'lucide-react';
+import { BookOpen, BarChart2, Settings2, type LucideIcon } from 'lucide-react';
 import { Glossary } from './Glossary';
 import { TradingSetups } from './TradingSetups';
 
-type SubTab = 'glossary' | 'setups';
+type SubTab = 'swings' | 'options' | 'glossary';
 
 const TABS: { id: SubTab; label: string; Icon: LucideIcon }[] = [
-  { id: 'glossary', label: 'Glossary',       Icon: BookOpen },
-  { id: 'setups',   label: 'Trading Setups', Icon: Target   },
+  { id: 'swings',  label: 'Stock Swings', Icon: BarChart2  },
+  { id: 'options', label: 'Options',      Icon: Settings2  },
+  { id: 'glossary',label: 'Glossary',     Icon: BookOpen   },
 ];
 
 export function LearnTab() {
-  const [activeTab, setActiveTab] = useState<SubTab>('setups');
+  const [activeTab, setActiveTab] = useState<SubTab>('swings');
 
   return (
     <div className="space-y-4">
@@ -34,8 +35,9 @@ export function LearnTab() {
         ))}
       </div>
 
-      {activeTab === 'glossary' && <Glossary />}
-      {activeTab === 'setups'   && <TradingSetups />}
+      {activeTab === 'swings'  && <TradingSetups initialAsset="stock"   />}
+      {activeTab === 'options' && <TradingSetups initialAsset="options" />}
+      {activeTab === 'glossary'&& <Glossary />}
     </div>
   );
 }
