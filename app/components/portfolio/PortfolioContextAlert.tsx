@@ -95,8 +95,8 @@ export function PortfolioContextAlert({ portfolioContext }: PortfolioContextAler
             <span className="font-semibold text-amber-400">Portfolio Alerts</span>
           </div>
           <div className="space-y-2">
-            {relevantWarnings.map((warning: string, i: number) => (
-              <p key={i} className="text-sm text-slate-300 flex items-start gap-2">
+            {relevantWarnings.map((warning: string) => (
+              <p key={warning} className="text-sm text-slate-300 flex items-start gap-2">
                 <span className="text-slate-500 mt-0.5">•</span>
                 {warning}
               </p>
@@ -113,8 +113,8 @@ export function PortfolioContextAlert({ portfolioContext }: PortfolioContextAler
             <span className="font-semibold text-blue-400">Smart Recommendations</span>
           </div>
           <div className="space-y-2">
-            {relevantSuggestions.map((suggestion: string, i: number) => (
-              <p key={i} className="text-sm text-slate-300 flex items-start gap-2">
+            {relevantSuggestions.map((suggestion: string) => (
+              <p key={suggestion} className="text-sm text-slate-300 flex items-start gap-2">
                 <span className="text-blue-500 mt-0.5">→</span>
                 {suggestion}
               </p>

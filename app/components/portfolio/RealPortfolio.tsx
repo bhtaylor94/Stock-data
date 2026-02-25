@@ -210,8 +210,8 @@ export function RealPortfolio({ onAnalyze, onTrade }: RealPortfolioProps = {}) {
                 </tr>
               </thead>
               <tbody>
-                {positions.map((pos, i) => (
-                  <tr key={i} className="border-b border-slate-800 hover:bg-slate-700/20">
+                {positions.map((pos) => (
+                  <tr key={pos.symbol} className="border-b border-slate-800 hover:bg-slate-700/20">
                     <td className="py-3">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-white">{pos.symbol}</span>

@@ -115,8 +115,8 @@ export function FlowSetupCard({
           {setup.criteriaHit?.length > 0 && (
             <div className="space-y-1">
               <p className="stat-label">Setup Criteria</p>
-              {setup.criteriaHit.map((c: string, i: number) => (
-                <div key={i} className="flex items-start gap-1.5">
+              {setup.criteriaHit.map((c: string) => (
+                <div key={c} className="flex items-start gap-1.5">
                   <CheckCircle2 size={11} className="text-emerald-400 mt-0.5 flex-shrink-0" />
                   <span className="text-xs text-slate-300">{c}</span>
                 </div>

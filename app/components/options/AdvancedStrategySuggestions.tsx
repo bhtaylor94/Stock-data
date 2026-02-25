@@ -130,9 +130,9 @@ export function AdvancedStrategySuggestions({
 
       {/* Strategy Cards */}
       <div className="space-y-4">
-        {filteredStrategies.map((strategy, i) => (
+        {filteredStrategies.map((strategy) => (
           <div
-            key={i}
+            key={strategy.name}
             className="p-5 rounded-xl border border-slate-700/50 bg-slate-800/30 hover:border-indigo-500/30 transition"
           >
             {/* Strategy Header */}

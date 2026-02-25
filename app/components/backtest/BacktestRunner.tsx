@@ -248,7 +248,7 @@ export function BacktestRunner() {
                 </thead>
                 <tbody>
                   {results.trades.map((trade: any, i: number) => (
-                    <tr key={i} className="border-b border-slate-800 hover:bg-slate-700/20">
+                    <tr key={`${trade.entryDate}-${trade.exitDate}-${i}`} className="border-b border-slate-800 hover:bg-slate-700/20">
                       <td className="py-2 px-2 text-slate-300">{new Date(trade.entryDate).toLocaleDateString()}</td>
                       <td className="py-2 px-2 text-slate-300">{new Date(trade.exitDate).toLocaleDateString()}</td>
                       <td className="text-right py-2 px-2 text-slate-300">{trade.daysHeld}</td>

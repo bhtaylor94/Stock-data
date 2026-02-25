@@ -4,6 +4,7 @@ import { detectUnusualActivity } from '@/lib/unusualActivityDetector';
 import { getRedis, isRedisAvailable } from '@/lib/redis';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 const CACHE_DURATION = 30000; // 30 seconds
 const REDIS_CACHE_KEY = 'cache:suggestions';
@@ -112,8 +113,8 @@ async function fetchSchwabMovers(token: string): Promise<string[]> {
   const results: string[] = [];
   try {
     const [spxRes, ndxRes] = await Promise.all([
-      fetch('https://api.schwabapi.com/marketdata/v1/movers/%24SPX?sort=VOLUME&frequency=0', { headers }),
-      fetch('https://api.schwabapi.com/marketdata/v1/movers/%24NDX?sort=PERCENT_CHANGE_UP&frequency=0', { headers }),
+      fetch('https://api.schwabapi.com/marketdata/v1/movers/%24SPX?sort=VOLUME&frequency=0', { headers, signal: AbortSignal.timeout(8000) }),
+      fetch('https://api.schwabapi.com/marketdata/v1/movers/%24NDX?sort=PERCENT_CHANGE_UP&frequency=0', { headers, signal: AbortSignal.timeout(8000) }),
     ]);
     for (const res of [spxRes, ndxRes]) {
       if (!res.ok) continue;
@@ -174,7 +175,9 @@ async function scanMarketForSuggestions(): Promise<Suggestion[]> {
 async function analyzeStock(symbol: string, token: string): Promise<Suggestion | null> {
   try {
     // Fetch stock data from our existing endpoint
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'http://localhost:3000'}/api/stock/${symbol}`);
+    const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL || 'https://localhost:3000'}/api/stock/${symbol}`, {
+      signal: AbortSignal.timeout(15000),
+    });
     const data = await res.json();
 
     if (!data.success) return null;

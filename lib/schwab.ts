@@ -80,7 +80,7 @@ export async function getSchwabAccessToken(
       console.error('╔═══════════════════════════════════════════════════════════════╗');
       console.error('║ 🔑 SCHWAB RETURNED A NEW REFRESH TOKEN - SAVE THIS NOW!     ║');
       console.error('╠═══════════════════════════════════════════════════════════════╣');
-      console.error('║ New Token:', data.refresh_token);
+      console.error('║ New Token:', data.refresh_token.slice(0, 8) + '...[REDACTED]');
       console.error('║ ⚠️  Update SCHWAB_REFRESH_TOKEN in Vercel env vars           ║');
       console.error('║ ⚠️  Redeploy after updating to avoid 401 errors              ║');
       console.error('║ ⚠️  This token is valid for 7 days from now                  ║');

@@ -48,7 +48,6 @@ export async function GET(req: NextRequest) {
     }
 
     // Step 1: Get account hash values
-    console.log('[Schwab Accounts] Fetching account numbers...');
     const accountsResult = await schwabFetchJson<any[]>(
       tokenResult.token,
       'https://api.schwabapi.com/trader/v1/accounts/accountNumbers',
@@ -79,8 +78,6 @@ export async function GET(req: NextRequest) {
     // Get first account (most users have one)
     const accountHash = accountsResult.data[0].hashValue;
     const accountNumber = accountsResult.data[0].accountNumber;
-
-    console.log('[Schwab Accounts] Fetching account details for hash:', accountHash.substring(0, 8) + '...');
 
     // Step 2: Get full account details with positions
     const accountDetailsResult = await schwabFetchJson<any>(

@@ -1018,6 +1018,7 @@ export default function TradingDashboard() {
                 onChange={(e) => setTicker(e.target.value.toUpperCase())}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                 placeholder="Search ticker…"
+                maxLength={10}
                 className="w-full pl-8 pr-16 py-1.5 rounded-lg text-sm bg-surface-2/60 border text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 style={{ borderColor: 'var(--border)' }}
               />

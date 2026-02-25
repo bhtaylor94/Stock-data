@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSchwabAccessToken } from '@/lib/schwab';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 // ============================================================
 // COMPREHENSIVE STOCK ANALYSIS API
@@ -118,10 +119,11 @@ function buildNoTrade(reason: string[], asOfIso: string) {
 async function fetchSchwabQuote(token: string, symbol: string) {
   try {
     const res = await fetch(`https://api.schwabapi.com/marketdata/v1/quotes?symbols=${symbol}&indicative=false`, {
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${token}`,
         ...SCHWAB_HEADERS, // CRITICAL: Add headers for Akamai/Schwab
       },
+      signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -132,10 +134,11 @@ async function fetchSchwabQuote(token: string, symbol: string) {
 async function fetchSchwabPriceHistory(token: string, symbol: string): Promise<{ open: number; close: number; high: number; low: number; volume: number }[]> {
   try {
     const res = await fetch(`https://api.schwabapi.com/marketdata/v1/pricehistory?symbol=${symbol}&periodType=year&period=1&frequencyType=daily&frequency=1`, {
-      headers: { 
+      headers: {
         'Authorization': `Bearer ${token}`,
         ...SCHWAB_HEADERS, // CRITICAL: Add headers for Akamai/Schwab
       },
+      signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) return [];
     const data = await res.json();
@@ -149,7 +152,9 @@ async function fetchSchwabPriceHistory(token: string, symbol: string): Promise<{
 async function fetchFinnhubData(endpoint: string) {
   if (!FINNHUB_KEY) return null;
   try {
-    const res = await fetch(`https://finnhub.io/api/v1/${endpoint}&token=${FINNHUB_KEY}`);
+    const res = await fetch(`https://finnhub.io/api/v1/${endpoint}&token=${FINNHUB_KEY}`, {
+      signal: AbortSignal.timeout(8000),
+    });
     if (!res.ok) return null;
     return await res.json();
   } catch { return null; }
@@ -212,7 +217,9 @@ async function getFinnhubCandles(symbol: string) : Promise<{ open: number; close
   // ~540 calendar days gives enough daily candles for SMA200 even with holidays/weekends
   const fromSec = toSec - (540 * 24 * 60 * 60);
   try {
-    const res = await fetch(`https://finnhub.io/api/v1/stock/candle?symbol=${symbol}&resolution=D&from=${fromSec}&to=${toSec}&token=${FINNHUB_KEY}`);
+    const res = await fetch(`https://finnhub.io/api/v1/stock/candle?symbol=${symbol}&resolution=D&from=${fromSec}&to=${toSec}&token=${FINNHUB_KEY}`, {
+      signal: AbortSignal.timeout(8000),
+    });
     if (!res.ok) return [];
     const data: any = await res.json();
     if (!data || data.s !== 'ok' || !Array.isArray(data.c)) return [];
@@ -1611,7 +1618,8 @@ export async function GET(
   let portfolioContext: any = null;
   try {
     const contextResponse = await fetch(`${request.url.split('/api/')[0]}/api/portfolio/context?symbol=${ticker}`, {
-      headers: { 'Cookie': request.headers.get('Cookie') || '' }
+      headers: { 'Cookie': request.headers.get('Cookie') || '' },
+      signal: AbortSignal.timeout(5000),
     });
     if (contextResponse.ok) {
       const contextData = await contextResponse.json();

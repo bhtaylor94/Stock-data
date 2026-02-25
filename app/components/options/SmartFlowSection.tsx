@@ -136,8 +136,8 @@ function ExpandedDetail({
       {/* Signal chips */}
       {activity.signals && activity.signals.length > 0 && (
         <div className="flex flex-wrap gap-1">
-          {activity.signals.slice(0, 5).map((sig, i) => (
-            <span key={i} className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/50">
+          {activity.signals.slice(0, 5).map((sig) => (
+            <span key={sig} className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/50">
               {sig}
             </span>
           ))}
@@ -161,8 +161,8 @@ function ExpandedDetail({
           <p className="text-xs text-red-400 font-medium mb-1 flex items-center gap-1.5">
             <AlertTriangle size={10} /> Insider Probability: {activity.insiderProbability}
           </p>
-          {activity.insiderSignals.slice(0, 2).map((sig, i) => (
-            <p key={i} className="text-xs text-slate-400">• {sig}</p>
+          {activity.insiderSignals.slice(0, 2).map((sig) => (
+            <p key={sig} className="text-xs text-slate-400">• {sig}</p>
           ))}
         </div>
       )}
@@ -408,7 +408,7 @@ export function SmartFlowSection({
       <div className="divide-y divide-slate-800/60">
         {displayed.map((activity, i) => (
           <TapeRow
-            key={i}
+            key={`${activity.type}-${activity.strike}-${activity.expiration}`}
             activity={activity}
             expanded={expandedIndex === i}
             onToggle={() => setExpandedIndex(expandedIndex === i ? null : i)}

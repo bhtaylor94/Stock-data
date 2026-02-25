@@ -155,8 +155,8 @@ function UnusualActivityCard({
       {/* Signals */}
       {activity.signals?.length > 0 && (
         <div className="flex flex-wrap gap-1 px-4 pb-3">
-          {activity.signals.slice(0, 4).map((sig: string, i: number) => (
-            <span key={i} className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/50">
+          {activity.signals.slice(0, 4).map((sig: string) => (
+            <span key={sig} className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700/50">
               {sig}
             </span>
           ))}
@@ -169,8 +169,8 @@ function UnusualActivityCard({
           <p className="text-xs text-red-400 font-medium mb-1 flex items-center gap-1.5">
             <AlertTriangle size={10} /> Insider Probability: {activity.insiderProbability}
           </p>
-          {activity.insiderSignals.slice(0, 2).map((sig: string, i: number) => (
-            <p key={i} className="text-xs text-slate-400">• {sig}</p>
+          {activity.insiderSignals.slice(0, 2).map((sig: string) => (
+            <p key={sig} className="text-xs text-slate-400">• {sig}</p>
           ))}
         </div>
       )}
@@ -227,8 +227,8 @@ export function UnusualActivitySection({
       </div>
 
       <div className="space-y-3">
-        {activities.slice(0, 5).map((activity, i) => (
-          <UnusualActivityCard key={i} activity={activity} onTrack={onTrack} />
+        {activities.slice(0, 5).map((activity) => (
+          <UnusualActivityCard key={activity.optionSymbol} activity={activity} onTrack={onTrack} />
         ))}
       </div>
     </div>

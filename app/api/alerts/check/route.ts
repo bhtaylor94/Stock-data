@@ -163,8 +163,7 @@ export async function POST(request: NextRequest) {
     // SEND NOTIFICATIONS
     // ============================================================
     for (const alert of triggered) {
-      // TODO: Actually send emails/SMS/push notifications
-      console.log(`ALERT: ${alert.message}`);
+      // TODO: Implement email/SMS/push notification delivery
     }
 
     return NextResponse.json({

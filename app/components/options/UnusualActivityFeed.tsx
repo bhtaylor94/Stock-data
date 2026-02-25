@@ -134,9 +134,9 @@ export function UnusualActivityFeed({ ticker }: { ticker: string }) {
         </div>
       ) : (
         <div className="space-y-3">
-          {filteredAlerts.map((alert, i) => (
+          {filteredAlerts.map((alert) => (
             <div
-              key={i}
+              key={`${alert.symbol}-${alert.activityType}-${alert.timestamp}`}
               className={`p-4 rounded-xl border ${getSeverityColor(alert.severity)}`}
             >
               {/* Alert Header */}

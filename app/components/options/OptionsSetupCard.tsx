@@ -60,8 +60,8 @@ export function OptionsSetupCard({
 
       {/* Evidence Badges */}
       <div className="flex flex-wrap gap-1 mb-2">
-        {setup.reasoning?.slice(0, 3).map((reason: string, i: number) => (
-          <span key={i} className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">
+        {setup.reasoning?.slice(0, 3).map((reason: string) => (
+          <span key={reason} className="text-xs px-2 py-0.5 rounded bg-slate-700 text-slate-300">
             {reason}
           </span>
         ))}
@@ -93,8 +93,8 @@ export function OptionsSetupCard({
           {/* All Reasoning */}
           {setup.reasoning?.length > 3 && (
             <div className="space-y-1">
-              {setup.reasoning.slice(3).map((reason: string, i: number) => (
-                <p key={i} className="text-xs text-slate-400">• {reason}</p>
+              {setup.reasoning.slice(3).map((reason: string) => (
+                <p key={reason} className="text-xs text-slate-400">• {reason}</p>
               ))}
             </div>
           )}

@@ -32,7 +32,7 @@ export function FlowTape({ activities }: { activities: FlowEntry[] }) {
       <h3 className="text-sm font-semibold text-white px-1">Options Flow Tape</h3>
       <div className="rounded-xl border border-slate-700/40 overflow-hidden">
         <div className="max-h-[280px] overflow-y-auto divide-y divide-slate-800/60">
-          {activities.map((a, i) => {
+          {activities.map((a) => {
             const isCall = a.type?.toLowerCase() === 'call';
             const alertType = a.alertType ?? 'UNUSUAL_VOLUME';
             const alertLabel = alertType.replace(/_/g, ' ');
@@ -42,7 +42,7 @@ export function FlowTape({ activities }: { activities: FlowEntry[] }) {
               : 'text-slate-500';
             return (
               <div
-                key={i}
+                key={`${a.type}-${a.strike}-${a.expiration}`}
                 className={`flex items-center gap-2.5 px-3 py-2 transition-colors ${
                   isCall ? 'hover:bg-emerald-500/5' : 'hover:bg-red-500/5'
                 }`}

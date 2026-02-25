@@ -182,8 +182,8 @@ export function PortfolioGreeksDashboard() {
         <div className="p-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10">
           <h3 className="text-lg font-semibold text-white mb-4">🎯 Hedging Suggestions</h3>
           <div className="space-y-3">
-            {greeks.hedgingSuggestions.map((suggestion, i) => (
-              <div key={i} className="p-4 rounded-lg bg-slate-900/50 border border-slate-700/50">
+            {greeks.hedgingSuggestions.map((suggestion) => (
+              <div key={suggestion.action} className="p-4 rounded-lg bg-slate-900/50 border border-slate-700/50">
                 <div className="flex items-start justify-between mb-2">
                   <div>
                     <p className="font-semibold text-white">{suggestion.action}</p>
@@ -215,8 +215,8 @@ export function PortfolioGreeksDashboard() {
               </tr>
             </thead>
             <tbody>
-              {greeks.positionBreakdown.map((pos, i) => (
-                <tr key={i} className="border-b border-slate-800/50 hover:bg-slate-700/20">
+              {greeks.positionBreakdown.map((pos) => (
+                <tr key={pos.symbol} className="border-b border-slate-800/50 hover:bg-slate-700/20">
                   <td className="py-2 px-2 font-mono font-medium text-white">{pos.symbol}</td>
                   <td className="text-right py-2 px-2 font-mono text-slate-300">{pos.quantity}</td>
                   <td className={`text-right py-2 px-2 font-mono font-bold ${pos.contribution.delta > 0 ? 'text-emerald-400' : 'text-red-400'}`}>

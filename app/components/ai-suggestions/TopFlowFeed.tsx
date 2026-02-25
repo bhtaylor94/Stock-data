@@ -168,10 +168,10 @@ export function TopFlowFeed({
 
       {!loading && signals.length > 0 && (
         <div className="divide-y divide-slate-800/50">
-          {signals.map((s, i) => {
+          {signals.map((s) => {
             const bar = scoreBar(s.score);
             return (
-              <div key={i} className="px-4 py-3 hover:bg-slate-800/30 transition-colors">
+              <div key={`${s.ticker}-${s.type}-${s.strike}-${s.expiration}`} className="px-4 py-3 hover:bg-slate-800/30 transition-colors">
                 <div className="flex items-start justify-between gap-3">
                   {/* Left: ticker + contract */}
                   <div className="flex-1 min-w-0">

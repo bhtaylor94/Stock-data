@@ -139,9 +139,9 @@ function PlaybookCard({
         <div>
           <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">Trading Strategies</p>
           <div className="space-y-2">
-            {playbook.strategies.map((s, i) => (
+            {playbook.strategies.map((s) => (
               <div
-                key={i}
+                key={s.name}
                 className={`rounded-lg border-l-2 px-3 py-2 ${STRATEGY_STYLE[s.type] ?? STRATEGY_STYLE.neutral}`}
               >
                 <div className="flex items-center gap-1.5 mb-0.5">
@@ -337,7 +337,7 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
               const isSelected = selectedPlaybook?.label === e.label;
               return (
                 <button
-                  key={i}
+                  key={`${e.date}-${e.label}`}
                   onClick={() => handleEventClick(e)}
                   className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium flex-shrink-0 transition-all ${s.badge} ${
                     hasPlaybook
@@ -489,7 +489,7 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
                           const hasPlaybook = !!getPlaybook(e);
                           return (
                             <button
-                              key={i}
+                              key={`${e.date}-${e.label}`}
                               onClick={() => handleEventClick(e)}
                               className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium transition-all ${s.badge} ${hasPlaybook ? 'hover:brightness-125' : 'cursor-default'}`}
                             >
@@ -597,7 +597,7 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
 
           {/* News cards */}
           <div className="space-y-px rounded-2xl border border-slate-700/40 overflow-hidden">
-            {filteredNews.map((n, i) => {
+            {filteredNews.map((n) => {
               const sent = n.ticker === 'MARKET' ? undefined : tickerSentiment[n.ticker];
               const bar =
                 sent === 'bullish' ? 'bg-emerald-500' :
@@ -607,7 +607,7 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
 
               return (
                 <div
-                  key={i}
+                  key={n.url ?? n.headline}
                   className="flex bg-slate-800/20 hover:bg-slate-800/50 transition-colors"
                 >
                   {/* Left accent bar */}
@@ -704,7 +704,7 @@ export function NewsFeedPanel({ onSelectTicker }: { onSelectTicker?: (t: string)
                   const isExpanded = expandedCalEvent === key;
 
                   return (
-                    <div key={i}>
+                    <div key={key}>
                       <button
                         onClick={() => {
                           if (!playbook) return;

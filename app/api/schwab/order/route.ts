@@ -48,12 +48,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log('[Schwab Order] Placing order:', {
-      symbol: body.symbol,
-      quantity: body.quantity,
-      type: body.orderType,
-      instruction: body.instruction
-    });
+    // Order details intentionally not logged to avoid data leakage
 
     // Step 1: Get Schwab access token
     const tokenResult = await getSchwabAccessToken('tracker', { forceRefresh: false });
@@ -113,7 +108,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    console.log('[Schwab Order] Payload:', JSON.stringify(orderPayload, null, 2));
+    // Payload not logged to avoid exposing order details
 
     // Step 4: Place order
     const orderResponse = await fetch(
