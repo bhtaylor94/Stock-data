@@ -69,9 +69,9 @@ export function ZeroDTEAlert({ zdteFlow, currentPrice }: Props) {
         </div>
 
         {/* Top activities */}
-        {zdteFlow.activities.slice(0, 2).map((a, i) => (
+        {zdteFlow.activities.slice(0, 2).map((a) => (
           <div
-            key={i}
+            key={`${a.strike}-${a.expiration}-${a.type}`}
             className="flex items-center gap-2 p-2 rounded-lg bg-slate-800/30 border border-slate-700/30"
           >
             <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${

@@ -1,3 +1,4 @@
+'use client';
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, Bookmark, AlertTriangle, CheckCircle2, Zap } from 'lucide-react';
 import Badge from '@/app/components/core/Badge';
