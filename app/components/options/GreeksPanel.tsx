@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import { TipLabel } from '@/app/components/core/Tooltip';
 
 interface ExpGreeks {
   netDelta: number;
@@ -53,7 +54,7 @@ export function GreeksPanel({ greeksAggregation, expectedMoveByExpiration, curre
       {greeksAggregation && (
         <div className="rounded-2xl border border-slate-700/50 bg-slate-800/20 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-700/40">
-            <h3 className="text-sm font-semibold text-white">Market Greeks Exposure</h3>
+            <h3 className="text-sm font-semibold text-white"><TipLabel labelKey="NET DELTA">Market Greeks Exposure</TipLabel></h3>
             <p className="text-xs text-slate-500 mt-0.5">Aggregated OI-weighted Greeks across all expirations</p>
           </div>
 
@@ -87,8 +88,8 @@ export function GreeksPanel({ greeksAggregation, expectedMoveByExpiration, curre
                   <th className="px-3 py-1.5 text-left font-medium">Exp</th>
                   <th className="px-2 py-1.5 text-center font-medium">DTE</th>
                   <th className="px-2 py-1.5 text-center font-medium">Net Δ</th>
-                  <th className="px-2 py-1.5 text-center font-medium">θ /day</th>
-                  <th className="px-2 py-1.5 text-center font-medium">υ /1%</th>
+                  <th className="px-2 py-1.5 text-center font-medium"><TipLabel labelKey="TOTAL THETA">θ /day</TipLabel></th>
+                  <th className="px-2 py-1.5 text-center font-medium"><TipLabel labelKey="TOTAL VEGA">υ /1%</TipLabel></th>
                   <th className="px-2 py-1.5 text-center font-medium">Bias</th>
                 </tr>
               </thead>
@@ -127,7 +128,7 @@ export function GreeksPanel({ greeksAggregation, expectedMoveByExpiration, curre
       {expMoveEntries.length > 0 && (
         <div className="rounded-2xl border border-slate-700/50 bg-slate-800/20 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-700/40">
-            <h3 className="text-sm font-semibold text-white">Expected Move by Expiration</h3>
+            <h3 className="text-sm font-semibold text-white"><TipLabel labelKey="EXPECTED MOVE">Expected Move by Expiration</TipLabel></h3>
             <p className="text-xs text-slate-500 mt-0.5">ATM straddle cost as % of spot · σ₁ implied range</p>
           </div>
           <div className="overflow-x-auto">

@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import { TipLabel } from '@/app/components/core/Tooltip';
 
 interface ZDTEActivity {
   strike: number;
@@ -44,7 +45,7 @@ export function ZeroDTEAlert({ zdteFlow, currentPrice }: Props) {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-amber-500/20">
         <div className="flex items-center gap-2">
-          <span className="text-amber-400 font-bold text-sm">⚡ 0DTE FLOW DETECTED</span>
+          <span className="text-amber-400 font-bold text-sm">⚡ <TipLabel labelKey="0DTE FLOW">0DTE FLOW DETECTED</TipLabel></span>
           <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${biasColor}`}>
             {zdteFlow.netBias}
           </span>

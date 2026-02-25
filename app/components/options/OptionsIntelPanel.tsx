@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import { TipLabel } from '@/app/components/core/Tooltip';
 
 interface Props {
   ivAnalysis: {
@@ -34,15 +35,21 @@ function StatTile({
   value,
   sub,
   valueColor,
+  tipKey,
 }: {
   label: string;
   value: string;
   sub?: string;
   valueColor?: string;
+  tipKey?: string;
 }) {
   return (
     <div className="p-3 rounded-xl border border-slate-700/40 bg-slate-800/20 text-center">
-      <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5 leading-tight">{label}</p>
+      <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5 leading-tight flex items-center justify-center gap-1">
+        {tipKey ? (
+          <TipLabel labelKey={tipKey} iconClassName="inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/70 text-slate-400 text-[8px] leading-none">{label}</TipLabel>
+        ) : label}
+      </p>
       <p className={`text-sm font-bold ${valueColor || 'text-white'}`}>{value}</p>
       {sub && (
         <p className={`text-[10px] font-semibold mt-0.5 ${valueColor || 'text-slate-400'}`}>{sub}</p>
@@ -111,45 +118,53 @@ export function OptionsIntelPanel({
           value={premiumPC != null ? premiumPC.toFixed(2) : '—'}
           sub={premSentiment}
           valueColor={premPCColor}
+          tipKey="PREM P/C"
         />
         <StatTile
           label="25D Risk Rev"
           value={rr25 != null ? `${rr25 >= 0 ? '+' : ''}${rr25.toFixed(1)}` : '—'}
           sub={skewBias}
           valueColor={skewColor}
+          tipKey="25D RISK REV"
         />
         <StatTile
           label="IV Rank"
           value={ivRank != null ? `${ivRank}` : '—'}
           sub={ivAnalysis?.ivSignal}
           valueColor={ivRankColor}
+          tipKey="IV RANK"
         />
         <StatTile
           label="ATM IV"
           value={atmIV ? `${atmIV.toFixed(1)}%` : '—'}
           valueColor="text-white"
+          tipKey="ATM IV"
         />
         <StatTile
           label="IV vs HV20"
           value={ivVsHV != null ? `${ivVsHV.toFixed(2)}×` : '—'}
           sub={ivVsHVLabel}
           valueColor={ivVsHVColor}
+          tipKey="IV VS HV"
         />
         <StatTile
           label="Skew Bias"
           value={skewBias ?? '—'}
           valueColor={skewColor}
+          tipKey="SKEW BIAS"
         />
         <StatTile
           label="GEX Regime"
           value={gexRegime ?? '—'}
           valueColor={gexColor}
+          tipKey="GEX REGIME"
         />
         <StatTile
           label="Exp Move"
           value={nearestMovePct != null ? `±${nearestMovePct.toFixed(1)}%` : '—'}
           sub={nearestExp ? `${nearestExp[1].dte}DTE` : undefined}
           valueColor="text-white"
+          tipKey="EXPECTED MOVE"
         />
       </div>
     </div>

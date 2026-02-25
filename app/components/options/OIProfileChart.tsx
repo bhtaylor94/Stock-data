@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import { TipLabel } from '@/app/components/core/Tooltip';
 
 interface OIStrike {
   strike: number;
@@ -59,7 +60,7 @@ export function OIProfileChart({ oiProfile, gex, maxPain, currentPrice }: Props)
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/40">
         <div>
-          <h3 className="text-sm font-semibold text-white">Open Interest Profile</h3>
+          <h3 className="text-sm font-semibold text-white"><TipLabel labelKey="OI PROFILE">Open Interest Profile</TipLabel></h3>
           <p className="text-xs text-slate-500 mt-0.5">Call vs put OI by strike · ±20% from spot</p>
         </div>
         <div className="flex items-center gap-2">

@@ -1,6 +1,7 @@
 'use client';
 import React, { useState, useEffect } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { TipLabel } from '@/app/components/core/Tooltip';
 
 import { OptionsDecisionHero } from './OptionsDecisionHero';
 import { SmartFlowSection } from './SmartFlowSection';
@@ -141,26 +142,34 @@ export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: O
             <div className="grid grid-cols-2 gap-2">
               {ivRank != null && (
                 <div className="p-3 rounded-xl border border-slate-700/40 bg-slate-800/20 text-center">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">IV Rank</p>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5 flex items-center justify-center gap-1">
+                    <TipLabel labelKey="IV RANK" iconClassName="inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/70 text-slate-400 text-[8px] leading-none">IV Rank</TipLabel>
+                  </p>
                   <p className={`text-sm font-bold ${ivRankColor}`}>{ivRank}%</p>
                 </div>
               )}
               {putCallRatio != null && (
                 <div className="p-3 rounded-xl border border-slate-700/40 bg-slate-800/20 text-center">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">P/C Ratio</p>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5 flex items-center justify-center gap-1">
+                    <TipLabel labelKey="P/C RATIO" iconClassName="inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/70 text-slate-400 text-[8px] leading-none">P/C Ratio</TipLabel>
+                  </p>
                   <p className={`text-sm font-bold ${pcColor}`}>{putCallRatio.toFixed(2)}</p>
                   {pcLabel && <p className={`text-[9px] font-semibold mt-0.5 ${pcColor}`}>{pcLabel}</p>}
                 </div>
               )}
               {maxPain != null && (
                 <div className="p-3 rounded-xl border border-slate-700/40 bg-slate-800/20 text-center">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">Max Pain</p>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5 flex items-center justify-center gap-1">
+                    <TipLabel labelKey="MAX PAIN" iconClassName="inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/70 text-slate-400 text-[8px] leading-none">Max Pain</TipLabel>
+                  </p>
                   <p className="text-sm font-bold text-white">${maxPain}</p>
                 </div>
               )}
               {hv20 != null && (
                 <div className="p-3 rounded-xl border border-slate-700/40 bg-slate-800/20 text-center">
-                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5">HV20</p>
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wide mb-0.5 flex items-center justify-center gap-1">
+                    <TipLabel labelKey="HV20" iconClassName="inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/70 text-slate-400 text-[8px] leading-none">HV20</TipLabel>
+                  </p>
                   <p className="text-sm font-bold text-slate-300">{hv20.toFixed(1)}%</p>
                 </div>
               )}

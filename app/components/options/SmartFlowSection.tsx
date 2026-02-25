@@ -5,6 +5,7 @@ import {
   Bookmark, AlertTriangle, RefreshCw,
 } from 'lucide-react';
 import Badge from '@/app/components/core/Badge';
+import { TipLabel } from '@/app/components/core/Tooltip';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type AlertType = 'GOLDEN_SWEEP' | 'SWEEP' | 'BLOCK' | 'UNUSUAL_VOLUME' | 'REPEATED_HIT';
@@ -305,7 +306,7 @@ export function SmartFlowSection({
         {/* Title row */}
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-sm font-semibold text-white">Smart Money Flow</h2>
+            <h2 className="text-sm font-semibold text-white"><TipLabel labelKey="SMART MONEY FLOW">Smart Money Flow</TipLabel></h2>
             <p className="text-xs text-slate-400 mt-0.5">
               {activities.length} signal{activities.length !== 1 ? 's' : ''}
               {extremeCount > 0 && ` · ${extremeCount} high-conviction`}

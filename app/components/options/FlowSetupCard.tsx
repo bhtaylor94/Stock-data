@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, Bookmark, AlertTriangle, CheckCircle2, Zap } from 'lucide-react';
 import Badge from '@/app/components/core/Badge';
+import { TipLabel } from '@/app/components/core/Tooltip';
 
 type IVContext = 'FAVORABLE' | 'ACCEPTABLE' | 'CAUTION' | 'AVOID';
 type ConfidenceLabel = 'EXTREME' | 'VERY_HIGH' | 'HIGH' | 'MEDIUM' | 'WATCH';
@@ -84,7 +85,12 @@ export function FlowSetupCard({
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-3 px-4 py-3 hover:bg-slate-700/20 transition-colors"
       >
-        <ConfluenceRing score={confluenceScore} />
+        <div className="flex flex-col items-center gap-0.5 flex-shrink-0">
+          <ConfluenceRing score={confluenceScore} />
+          <TipLabel labelKey="CONFLUENCE SCORE" iconClassName="inline-flex items-center justify-center w-3 h-3 rounded-full bg-slate-700/70 text-slate-400 text-[8px] leading-none">
+            <span className="text-[9px] text-slate-600 uppercase tracking-wide">SCORE</span>
+          </TipLabel>
+        </div>
 
         <div className="flex-1 min-w-0 text-left">
           <div className="flex items-center gap-2 flex-wrap mb-1">

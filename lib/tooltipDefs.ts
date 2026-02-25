@@ -73,6 +73,28 @@ export const TOOLTIP_DEFS: Record<string, TooltipDef> = {
   MARKETCAP: { title: 'Market Cap', body: 'Company size: share price × shares outstanding.' },
   FLOAT: { title: 'Float', body: 'Shares available to the public. Lower float can increase volatility.' },
   SHORTINTEREST: { title: 'Short Interest', body: 'Percent of shares sold short. High short interest can signal bearish bets or squeeze potential.' },
+
+  // Options — institutional intel
+  'PREM P/C': { title: 'Premium P/C Ratio', body: 'Dollar-weighted put/call ratio. Below 0.8 = more dollars flowing into calls (bullish). Above 1.2 = more dollars in puts (bearish). Stronger signal than volume P/C — large traders reveal conviction through size.' },
+  '25D RISK REV': { title: '25Δ Risk Reversal', body: 'IV difference between 25-delta puts and 25-delta calls. Positive = puts cost more (fear/hedging demand). Negative = calls cost more (greed/upside speculation). Hedge funds watch this daily.' },
+  'SKEW BIAS': { title: 'Skew Bias', body: 'Summary of which side of the options market is paying up. FEAR = expensive OTM puts (downside protection). GREED = expensive OTM calls (upside chasing). NEUTRAL = balanced pricing.' },
+  'GEX REGIME': { title: 'GEX Regime', body: 'Gamma Exposure regime. POSITIVE = dealers net long gamma — they dampen moves by selling rallies and buying dips. NEGATIVE = dealers net short gamma — they amplify moves by chasing price in both directions.' },
+  'EXPECTED MOVE': { title: 'Expected Move', body: '1-sigma implied move derived from the ATM straddle price (call ask + put ask). The market\'s consensus range for this expiration. Statistically, price stays within ±1σ ~68% of the time.' },
+  'OI PROFILE': { title: 'OI Profile', body: 'Open interest distribution across strikes. Large call walls often act as upside price magnets or resistance. Large put walls act as support. Max pain = the strike where most contracts expire worthless — price gravitates here near expiration.' },
+  'SMART MONEY FLOW': { title: 'Smart Money Flow', body: 'Unusual options activity filtered for institutional footprints: large premium ($100K+), high Vol/OI ratio (fresh positions), directional delta. These signals suggest informed positioning ahead of a move.' },
+  '0DTE FLOW': { title: '0DTE Flow Alert', body: 'Options expiring today with institutional-size premium. Extreme gamma — small price moves create outsized gains/losses. Sophisticated traders use these for intraday directional bets. Very high risk, not suitable for beginners.' },
+  'FLOW SETUPS': { title: 'Flow Setups', body: 'Named trading setups that combine technical signals with unusual options flow. A setup fires when multiple criteria align — e.g., breakout + large call sweep + favorable IV. Higher confluence score = more factors agree.' },
+  'CONFLUENCE SCORE': { title: 'Confluence Score', body: '0–100 score combining UOA signal strength, technical setup quality, and IV environment. Think of it as "how many things agree." ≥80 = EXTREME conviction. ≥65 = VERY HIGH. ≥50 = HIGH. ≥35 = MEDIUM.' },
+  'OVERNIGHT OI': { title: 'Overnight OI Changes', body: 'Difference in open interest vs the prior session snapshot. Large new positions (>25% OI increase) signal fresh institutional entries — not just rolling existing positions. Call vs put bias shows net directional intent.' },
+  'NET DELTA': { title: 'Net Market Delta', body: 'Sum of all contract deltas weighted by open interest × 100 shares. Positive = overall bullish positioning. Negative = net bearish. Large absolute values indicate strong directional bias in the market.' },
+  'TOTAL THETA': { title: 'Total Theta $/Day', body: 'Aggregate daily time decay across all open contracts for this expiration. Options sellers collect this each day. Options buyers pay it. Large negative values mean significant premium is eroding daily.' },
+  'TOTAL VEGA': { title: 'Total Vega $/1% IV', body: 'Aggregate sensitivity to volatility for this expiration. A $5,000 total vega means the combined positions gain/lose $5,000 for every 1% change in IV. High before earnings, low after.' },
+  'MAX PAIN': { title: 'Max Pain', body: 'The strike price where the total payout to all options holders is minimized. Stock often drifts toward max pain near expiration because market makers hedge their books in that direction.' },
+  HV20: { title: 'HV20', body: '20-day Historical Volatility — how much the stock actually moved over the past 20 trading sessions, annualized. The "realized" vol benchmark. Compare to IV: if IV > HV20, options are pricing in more vol than recently realized.' },
+  'IV VS HV': { title: 'IV vs HV20', body: 'Ratio of implied to historical volatility. Above 1.2× = options are expensive relative to recent moves — favor selling premium or using spreads. Below 0.85× = options are cheap — favor buying premium or long strategies.' },
+  'ATM IV': { title: 'ATM IV', body: 'At-the-money implied volatility — the market\'s annualized volatility estimate embedded in nearest-to-spot options. The single most important options pricing input. Drives all premium levels across the chain.' },
+  'P/C RATIO': { title: 'Put/Call Ratio', body: 'Volume of put options divided by call volume. Below 0.7 = heavy call activity (bullish signal). Above 1.2 = heavy put activity (bearish signal). Watch for extremes — contrarian when very high or very low.' },
+  'IV RANK': { title: 'IV Rank', body: 'Implied volatility rank (0–100) showing where current IV sits relative to its 52-week range. Below 30 = historically cheap — favor buying premium or long strategies. Above 70 = historically expensive — favor selling premium or using spreads.' },
 };
 
 export function tooltipForKey(rawKey: string): TooltipDef | null {

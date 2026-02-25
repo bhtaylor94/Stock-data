@@ -28,6 +28,12 @@ export interface FlowSignal {
   score: number;
   reasons: string[];
   alertLabel: string;
+  tickerContext?: {
+    oiDominance: 'CALLS' | 'PUTS' | 'BALANCED';
+    premiumSentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+    gexRegime: 'POSITIVE' | 'NEGATIVE';
+    skewBias: 'FEAR' | 'GREED' | 'NEUTRAL' | null;
+  };
 }
 
 // ── Strong Buy Scoring ─────────────────────────────────────────────────────────
@@ -192,6 +198,8 @@ async function scanTicker(token: string, ticker: string): Promise<FlowSignal[]> 
   if (!currentPrice) return [];
 
   const signals: FlowSignal[] = [];
+  const allCalls: any[] = [];
+  const allPuts: any[] = [];
 
   // Process calls
   const callMap = chainData.callExpDateMap ?? {};
@@ -199,6 +207,7 @@ async function scanTicker(token: string, ticker: string): Promise<FlowSignal[]> 
     const expDate = (expKey as string).split(':')[0];
     for (const [strikeStr, contracts] of Object.entries(strikes as Record<string, any[]>)) {
       if (!contracts || contracts.length === 0) continue;
+      allCalls.push(contracts[0]);
       const signal = scoreContract(contracts[0], strikeStr, expDate, ticker, currentPrice, 'call');
       if (signal) signals.push(signal);
     }
@@ -210,12 +219,42 @@ async function scanTicker(token: string, ticker: string): Promise<FlowSignal[]> 
     const expDate = (expKey as string).split(':')[0];
     for (const [strikeStr, contracts] of Object.entries(strikes as Record<string, any[]>)) {
       if (!contracts || contracts.length === 0) continue;
+      allPuts.push(contracts[0]);
       const signal = scoreContract(contracts[0], strikeStr, expDate, ticker, currentPrice, 'put');
       if (signal) signals.push(signal);
     }
   }
 
-  return signals;
+  // ── Ticker context (institutional backdrop) ──────────────────────────────
+  const totalCallOI = allCalls.reduce((s, c) => s + (c.openInterest || 0), 0);
+  const totalPutOI  = allPuts.reduce((s, p) => s + (p.openInterest || 0), 0);
+  const oiRatio = (totalCallOI + totalPutOI) > 0 ? totalCallOI / (totalCallOI + totalPutOI) : 0.5;
+  const oiDominance = oiRatio > 0.6 ? 'CALLS' : oiRatio < 0.4 ? 'PUTS' : 'BALANCED';
+
+  const callPrem = allCalls.reduce((s, c) => s + (c.ask || 0) * (c.totalVolume || 0) * 100, 0);
+  const putPrem  = allPuts.reduce((s, p) => s + (p.ask || 0) * (p.totalVolume || 0) * 100, 0);
+  const premPC = callPrem > 0 ? putPrem / callPrem : 1;
+  const premiumSentiment = premPC < 0.8 ? 'BULLISH' : premPC > 1.2 ? 'BEARISH' : 'NEUTRAL';
+
+  const netGEX = [...allCalls.map(c => ({ ...c, _type: 'call' })), ...allPuts.map(p => ({ ...p, _type: 'put' }))].reduce((s, c) => {
+    const g = (c.gamma || 0) * (c.openInterest || 0) * 100;
+    return s + (c._type === 'call' ? g : -g);
+  }, 0);
+  const gexRegime = netGEX >= 0 ? 'POSITIVE' : 'NEGATIVE';
+
+  const c25 = allCalls.filter(c => (c.delta || 0) > 0).reduce<any>((b, c) => !b || Math.abs(Math.abs(c.delta || 0) - 0.25) < Math.abs(Math.abs(b.delta || 0) - 0.25) ? c : b, null);
+  const p25 = allPuts.filter(p => (p.delta || 0) < 0).reduce<any>((b, p) => !b || Math.abs(Math.abs(p.delta || 0) - 0.25) < Math.abs(Math.abs(b.delta || 0) - 0.25) ? p : b, null);
+  const rr25 = c25 && p25 ? (p25.volatility || 0) - (c25.volatility || 0) : null;
+  const skewBias = rr25 == null ? null : rr25 > 3 ? 'FEAR' : rr25 < -3 ? 'GREED' : 'NEUTRAL';
+
+  const tickerContext = {
+    oiDominance: oiDominance as 'CALLS' | 'PUTS' | 'BALANCED',
+    premiumSentiment: premiumSentiment as 'BULLISH' | 'BEARISH' | 'NEUTRAL',
+    gexRegime: gexRegime as 'POSITIVE' | 'NEGATIVE',
+    skewBias: skewBias as 'FEAR' | 'GREED' | 'NEUTRAL' | null,
+  };
+
+  return signals.map(s => ({ ...s, tickerContext }));
 }
 
 export async function GET(req: NextRequest) {

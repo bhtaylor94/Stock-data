@@ -1,5 +1,6 @@
 'use client';
 import React from 'react';
+import { TipLabel } from '@/app/components/core/Tooltip';
 
 interface Props {
   skewAnalytics: {
@@ -46,7 +47,7 @@ export function SkewAnalyticsCard({ skewAnalytics }: Props) {
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/40">
         <div>
-          <h3 className="text-sm font-semibold text-white">Volatility Skew Analytics</h3>
+          <h3 className="text-sm font-semibold text-white"><TipLabel labelKey="25D RISK REV">Volatility Skew Analytics</TipLabel></h3>
           <p className="text-xs text-slate-500 mt-0.5">25-delta risk reversal · put vs call skew</p>
         </div>
         <span className={`text-[11px] px-2 py-0.5 rounded-full border font-semibold ${biasColor}`}>
@@ -81,7 +82,7 @@ export function SkewAnalyticsCard({ skewAnalytics }: Props) {
               <p className="text-sm font-bold text-emerald-400">{delta25CallIV.toFixed(1)}%</p>
             </div>
             <div className="p-2 rounded-lg bg-slate-800/40">
-              <p className="text-[10px] text-slate-500 mb-0.5">25Δ RR</p>
+              <p className="text-[10px] text-slate-500 mb-0.5"><TipLabel labelKey="25D RISK REV">25Δ RR</TipLabel></p>
               <p className={`text-sm font-bold ${riskReversal25 > 0 ? 'text-red-400' : 'text-emerald-400'}`}>
                 {riskReversal25 >= 0 ? '+' : ''}{riskReversal25.toFixed(1)}
               </p>

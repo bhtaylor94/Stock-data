@@ -19,6 +19,12 @@ interface FlowSignal {
   score: number;
   reasons: string[];
   alertLabel: string;
+  tickerContext?: {
+    oiDominance: 'CALLS' | 'PUTS' | 'BALANCED';
+    premiumSentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+    gexRegime: 'POSITIVE' | 'NEGATIVE';
+    skewBias: 'FEAR' | 'GREED' | 'NEUTRAL' | null;
+  };
 }
 
 function fmtPremium(p: number): string {
@@ -51,6 +57,21 @@ function scoreBar(score: number): { width: string; color: string } {
     score >= 40 ? 'bg-emerald-400' :
     'bg-slate-500';
   return { width: `${pct}%`, color };
+}
+
+function scoreGrade(score: number): string {
+  if (score >= 80) return 'VERY HIGH';
+  if (score >= 60) return 'HIGH';
+  if (score >= 40) return 'MODERATE';
+  return 'WATCH';
+}
+
+function backdropChipCls(value: string): string {
+  const bullish = ['CALLS', 'BULLISH', 'GREED', 'POSITIVE'];
+  const bearish = ['PUTS', 'BEARISH', 'FEAR', 'NEGATIVE'];
+  if (bullish.includes(value)) return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+  if (bearish.includes(value)) return 'text-red-400 bg-red-500/10 border-red-500/20';
+  return 'text-slate-400 bg-slate-700/20 border-slate-600/30';
 }
 
 function fmtExp(exp: string): string {
@@ -170,6 +191,9 @@ export function TopFlowFeed({
         <div className="divide-y divide-slate-800/50">
           {signals.map((s) => {
             const bar = scoreBar(s.score);
+            const grade = scoreGrade(s.score);
+            const ctx = s.tickerContext;
+            const firstReason = s.reasons[0] ? s.reasons[0].slice(0, 60) + (s.reasons[0].length > 60 ? '…' : '') : null;
             return (
               <div key={`${s.ticker}-${s.type}-${s.strike}-${s.expiration}`} className="px-4 py-3 hover:bg-slate-800/30 transition-colors">
                 <div className="flex items-start justify-between gap-3">
@@ -208,26 +232,56 @@ export function TopFlowFeed({
                       <span>IV {(s.iv * 100).toFixed(0)}%</span>
                     </div>
 
-                    {/* Top 2 reasons */}
-                    <div className="mt-1.5 space-y-0.5">
-                      {s.reasons.slice(0, 2).map((r, ri) => (
-                        <p key={ri} className="text-[11px] text-slate-500">· {r}</p>
-                      ))}
+                    {/* Backdrop chips — institutional context */}
+                    {ctx && (
+                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${backdropChipCls(ctx.oiDominance)}`}>
+                          OI: {ctx.oiDominance === 'CALLS' ? 'CALLS ↑' : ctx.oiDominance === 'PUTS' ? 'PUTS ↑' : 'BALANCED'}
+                        </span>
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${backdropChipCls(ctx.premiumSentiment)}`}>
+                          PREM: {ctx.premiumSentiment}
+                        </span>
+                        {ctx.skewBias != null && (
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${backdropChipCls(ctx.skewBias)}`}>
+                            SKEW: {ctx.skewBias}
+                          </span>
+                        )}
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${backdropChipCls(ctx.gexRegime)}`}>
+                          GEX: {ctx.gexRegime === 'POSITIVE' ? 'POS' : 'NEG'}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Action callout */}
+                    <div className="mt-2 p-2 rounded-lg border border-slate-700/50 bg-slate-900/40">
+                      <p className="text-[11px] font-semibold text-white">
+                        Follow {s.type} flow → Buy ${s.strike} {s.type.toUpperCase()} · {s.dte} DTE
+                      </p>
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        δ{s.delta.toFixed(2)} · IV {(s.iv * 100).toFixed(0)}% · {fmtPremium(s.premium)} premium
+                      </p>
+                      {firstReason && (
+                        <p className="text-[10px] text-slate-500 mt-0.5 italic">"{firstReason}"</p>
+                      )}
                     </div>
                   </div>
 
-                  {/* Right: score */}
+                  {/* Right: score grade */}
                   <div className="flex flex-col items-center gap-1 flex-shrink-0">
                     <span className={`text-base font-bold ${
                       s.score >= 80 ? 'text-amber-400' :
                       s.score >= 60 ? 'text-blue-400' :
                       'text-emerald-400'
                     }`}>{s.score}</span>
-                    <span className="text-[9px] text-slate-600 uppercase tracking-wide">score</span>
+                    <span className={`text-[9px] font-semibold uppercase tracking-wide ${
+                      s.score >= 80 ? 'text-amber-500' :
+                      s.score >= 60 ? 'text-blue-500' :
+                      'text-emerald-600'
+                    }`}>{grade}</span>
                     <div className="w-10 h-1 bg-slate-800 rounded-full overflow-hidden">
                       <div className={`h-full ${bar.color} rounded-full`} style={{ width: bar.width }} />
                     </div>
-                    <div className="flex items-center gap-0.5">
+                    <div className="flex items-center gap-0.5 mt-0.5">
                       {s.type === 'call'
                         ? <TrendingUp size={9} className="text-emerald-400" />
                         : <TrendingDown size={9} className="text-red-400" />}
