@@ -106,6 +106,11 @@ export function FlowSetupCard({
                 <Zap size={9} />UOA Confirmed
               </span>
             )}
+            {setup.regimeAdjusted && setup.regimeMultiplier > 1 && (
+              <span className="inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-400 border border-violet-500/25 font-semibold">
+                REGIME ↑
+              </span>
+            )}
           </div>
         </div>
 

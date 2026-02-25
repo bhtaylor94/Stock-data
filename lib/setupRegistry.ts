@@ -6,7 +6,7 @@
 // 2) Evidence-first: each setup emits explicit datapoints and rule checks
 // 3) Stable typing so errors are caught at build time
 
-export type MarketRegime = 'TREND' | 'RANGE' | 'HIGH_VOL';
+export type MarketRegime = 'TREND' | 'RANGE' | 'HIGH_VOL' | 'BULLISH_TREND' | 'BEARISH_TREND' | 'WEAK_TREND';
 export type SetupDirection = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
 export type PatternStatus = 'CONFIRMED' | 'FORMING' | 'CONFLICT' | 'NONE';
 
@@ -68,6 +68,9 @@ export interface SetupResult {
   targets?: string[];
   invalidation?: string;
   requiredEvidenceKeys: string[];
+  setupCategory?: string;
+  regimeAdjusted?: boolean;
+  regimeMultiplier?: number;
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -606,6 +609,30 @@ function setupFailedBreakdownBull(ctx: StockSetupContext): SetupResult {
   };
 }
 
+const REGIME_SCORE_MULTIPLIERS: Record<string, Partial<Record<string, number>>> = {
+  BULLISH_TREND: { BREAKOUT: 1.20, MOMENTUM: 1.15, CONTINUATION: 1.10, REVERSAL: 0.65, MEAN_REVERSION: 0.70 },
+  BEARISH_TREND: { BREAKOUT: 0.70, MOMENTUM: 0.75, REVERSAL: 1.15, MEAN_REVERSION: 1.10, CONTINUATION: 0.80 },
+  RANGE:         { BREAKOUT: 0.60, MOMENTUM: 0.65, REVERSAL: 1.20, MEAN_REVERSION: 1.25, CONTINUATION: 0.70 },
+  HIGH_VOL:      { BREAKOUT: 0.80, MOMENTUM: 0.85, REVERSAL: 0.90, MEAN_REVERSION: 1.10, CONTINUATION: 0.90 },
+  WEAK_TREND:    { BREAKOUT: 0.90, MOMENTUM: 0.90, REVERSAL: 1.00, MEAN_REVERSION: 1.05, CONTINUATION: 0.90 },
+};
+
+const SETUP_CATEGORIES: Record<string, string> = {
+  trend_continuation_bull: 'CONTINUATION',
+  trend_continuation_bear: 'CONTINUATION',
+  trend_pullback_bull: 'CONTINUATION',
+  trend_pullback_bear: 'CONTINUATION',
+  range_reversion_bull: 'MEAN_REVERSION',
+  range_reversion_bear: 'MEAN_REVERSION',
+  break_retest_bull: 'BREAKOUT',
+  break_retest_bear: 'BREAKOUT',
+  failed_breakout_bear: 'REVERSAL',
+  failed_breakdown_bull: 'REVERSAL',
+  bollinger_squeeze_breakout: 'BREAKOUT',
+  bollinger_squeeze_breakdown: 'BREAKOUT',
+  pattern_confirmed: 'MOMENTUM',
+};
+
 export function evaluateStockSetups(ctx: StockSetupContext): {
   best: SetupResult | null;
   passed: SetupResult[];
@@ -628,7 +655,17 @@ export function evaluateStockSetups(ctx: StockSetupContext): {
     setupPatternConfirmed(ctx),
   ];
 
-  const passed = setups.filter(s => s.passed).sort((a, b) => b.score - a.score);
+  // Apply regime-adaptive scoring
+  const regime = ctx.regime as string;
+  const regimeMults = REGIME_SCORE_MULTIPLIERS[regime] ?? {};
+  const adjustedSetups = setups.map(s => {
+    const cat = SETUP_CATEGORIES[s.id] ?? '';
+    const mult = regimeMults[cat] ?? 1.0;
+    if (mult === 1.0) return { ...s, setupCategory: cat, regimeAdjusted: false, regimeMultiplier: 1.0 };
+    const adjusted = Math.min(10, Math.round(s.score * mult));
+    return { ...s, score: adjusted, setupCategory: cat, regimeAdjusted: true, regimeMultiplier: mult };
+  });
+  const passed = adjustedSetups.filter(s => s.passed).sort((a, b) => b.score - a.score);
   if (passed.length === 0) {
     return { best: null, passed: [], conflicts: false, conflictReason: null };
   }

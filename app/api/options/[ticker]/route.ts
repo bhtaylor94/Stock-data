@@ -1611,6 +1611,24 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   const resistance = closes.length > 0 ? Math.max(...closes.slice(-20)) : currentPrice * 1.05;
 
   // New computations
+  // Add flowSide to each contract in byExpiration
+  const addFlowSide = <T extends { bid: number; ask: number; last: number }>(contracts: T[]): (T & { flowSide: 'ASK' | 'BID' | 'MID' })[] => {
+    return contracts.map(c => {
+      const mid = (c.bid + c.ask) / 2;
+      const flowSide: 'ASK' | 'BID' | 'MID' =
+        c.last > mid * 1.02 ? 'ASK' :
+        c.last < mid * 0.98 ? 'BID' : 'MID';
+      return { ...c, flowSide };
+    });
+  };
+  const enrichedByExpiration: typeof byExpiration = {};
+  for (const [exp, { calls: ec, puts: ep }] of Object.entries(byExpiration)) {
+    enrichedByExpiration[exp] = {
+      calls: addFlowSide(ec),
+      puts: addFlowSide(ep),
+    };
+  }
+
   const allContracts = [...calls, ...puts];
   const gex = calculateGEX(allContracts, currentPrice);
   const ivTermStructure = calculateIVTermStructure(byExpiration, currentPrice);
@@ -1724,7 +1742,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     meta: { asOf: new Date().toISOString(), calibrationVersion: 'v1.0-conservative', tradeDecision },
     expirations,
     selectedExpiration: firstExp,
-    byExpiration,
+    byExpiration: enrichedByExpiration,
     gex,
     ivTermStructure,
     earningsImpliedMove,
@@ -1754,6 +1772,15 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       putPremium: premiumWeightedPC.putPremium,
       premiumWeightedPC: premiumWeightedPC.premiumWeightedPC,
       premiumSentiment: premiumWeightedPC.premiumSentiment,
+      aggFlowBias: (() => {
+        const all = [...calls, ...puts].map(c => {
+          const mid = (c.bid + c.ask) / 2;
+          return c.last > mid * 1.02 ? 'ASK' : c.last < mid * 0.98 ? 'BID' : 'MID';
+        });
+        const askCount = all.filter(s => s === 'ASK').length;
+        const bidCount = all.filter(s => s === 'BID').length;
+        return askCount + bidCount > 0 ? Math.round((askCount / (askCount + bidCount)) * 100) : null;
+      })(),
     },
     // IV context label for frontend
     ivContext: getIVContext(ivAnalysis.ivRank),

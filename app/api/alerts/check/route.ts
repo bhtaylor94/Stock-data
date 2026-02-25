@@ -1,6 +1,7 @@
 // app/api/alerts/check/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getSchwabAccessToken } from '@/lib/schwab';
+import Anthropic from '@anthropic-ai/sdk';
 
 export async function POST(request: NextRequest) {
   try {
@@ -151,10 +152,33 @@ export async function POST(request: NextRequest) {
 
       // Add to triggered list
       if (shouldTrigger) {
+        let explanation: string | undefined;
+        try {
+          const anthropic = new Anthropic();
+          const price = alert.assetType === 'STOCK'
+            ? (await (await fetch(
+                `https://api.schwabapi.com/marketdata/v1/quotes?symbols=${alert.ticker}`,
+                { headers: { 'Authorization': `Bearer ${accessToken}` } }
+              )).json())[alert.ticker]?.quote?.lastPrice
+            : null;
+          const priceStr = price != null ? ` Current price $${price}.` : '';
+          const explanationRes = await anthropic.messages.create({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 120,
+            messages: [{
+              role: 'user',
+              content: `Alert fired: ${alert.type} on ${alert.ticker}.${priceStr} Condition: ${message}. In 2 sentences max, explain the trading significance and the most important thing to watch next.`,
+            }],
+          });
+          explanation = (explanationRes.content[0] as any).text;
+        } catch {
+          // explanation is additive — alert still fires if Claude fails
+        }
         triggered.push({
           ...alert,
           triggeredAt: new Date().toISOString(),
           message,
+          explanation,
         });
       }
     }

@@ -74,9 +74,10 @@ export function OIProfileChart({ oiProfile, gex, maxPain, currentPrice }: Props)
       </div>
 
       {/* Column headers */}
-      <div className="grid grid-cols-[1fr_80px_1fr] text-[10px] text-slate-600 uppercase tracking-wide px-3 py-1.5 bg-slate-900/40 border-b border-slate-800/60">
+      <div className="grid grid-cols-[1fr_80px_40px_1fr] text-[10px] text-slate-600 uppercase tracking-wide px-3 py-1.5 bg-slate-900/40 border-b border-slate-800/60">
         <span className="text-right pr-2">Puts</span>
         <span className="text-center">Strike</span>
+        <span className="text-center">GEX</span>
         <span className="text-left pl-2">Calls</span>
       </div>
 
@@ -91,11 +92,22 @@ export function OIProfileChart({ oiProfile, gex, maxPain, currentPrice }: Props)
           const callBarPct = maxOI > 0 ? Math.min((row.callOI / maxOI) * 100, 100) : 0;
           const putBarPct = maxOI > 0 ? Math.min((row.putOI / maxOI) * 100, 100) : 0;
 
+          // Find GEX data for this strike
+          const gexStrikeData = gex?.byStrike?.find(g => g.strike === row.strike);
+          const netGEX = gexStrikeData?.netGEX ?? 0;
+          const isGEXFlip = gex?.flipPoint != null && row.strike === gex.flipPoint;
+          const maxAbsGEX = gex?.byStrike?.length
+            ? Math.max(...gex.byStrike.map(g => Math.abs(g.netGEX || 0)), 1)
+            : 1;
+          const gexBarHeightPx = Math.min(20, Math.round((Math.abs(netGEX) / maxAbsGEX) * 20));
+
           return (
             <div
               key={row.strike}
-              className={`grid grid-cols-[1fr_80px_1fr] items-center px-3 py-1 border-b border-slate-800/30 transition-colors ${
-                isATM
+              className={`grid grid-cols-[1fr_80px_40px_1fr] items-center px-3 py-1 border-b border-slate-800/30 transition-colors ${
+                isGEXFlip
+                  ? 'bg-amber-500/8 border-amber-500/20'
+                  : isATM
                   ? 'bg-blue-500/10 border-blue-500/20'
                   : isMaxPain
                   ? 'bg-amber-500/5 border-amber-500/20'
@@ -123,6 +135,25 @@ export function OIProfileChart({ oiProfile, gex, maxPain, currentPrice }: Props)
                 </span>
                 {isATM && <span className="block text-[9px] text-blue-500 leading-none mt-0.5">ATM</span>}
                 {isMaxPain && !isATM && <span className="block text-[9px] text-amber-500 leading-none mt-0.5">MAX PAIN</span>}
+              </div>
+
+              {/* GEX column */}
+              <div className="flex flex-col items-center justify-center h-full py-0.5" style={{ minHeight: 20 }}>
+                {isGEXFlip ? (
+                  <span className="text-[7px] text-amber-400 font-bold leading-none">FLIP</span>
+                ) : netGEX !== 0 ? (
+                  <div
+                    className={`w-3 rounded-sm ${netGEX > 0 ? 'bg-emerald-500/70' : 'bg-red-500/70'}`}
+                    style={{
+                      height: `${gexBarHeightPx}px`,
+                      marginTop: netGEX > 0 ? 'auto' : 0,
+                      marginBottom: netGEX > 0 ? 0 : 'auto',
+                    }}
+                    title={`Net GEX: ${(netGEX / 1e6).toFixed(1)}M`}
+                  />
+                ) : (
+                  <div className="w-3 h-px bg-slate-700" />
+                )}
               </div>
 
               {/* Call bar — grows left to right */}

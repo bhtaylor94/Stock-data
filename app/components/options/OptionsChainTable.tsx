@@ -22,6 +22,7 @@ interface Contract {
   spreadPercent: number;
   volumeOIRatio: number;
   isUnusual: boolean;
+  flowSide?: 'ASK' | 'BID' | 'MID';
 }
 
 // ── Glossary ──────────────────────────────────────────────────────────────────
@@ -212,6 +213,25 @@ export function OptionsChainTable({
         </div>
       )}
 
+      {/* ── Aggregate flow bias strip ── */}
+      {(() => {
+        const allContracts = [...calls, ...puts].filter(c => c.flowSide && c.flowSide !== 'MID');
+        const askCount = allContracts.filter(c => c.flowSide === 'ASK').length;
+        const bidCount = allContracts.filter(c => c.flowSide === 'BID').length;
+        const total = askCount + bidCount;
+        if (total === 0) return null;
+        const askPct = Math.round((askCount / total) * 100);
+        const bias = askPct >= 60 ? 'BULLISH' : askPct <= 40 ? 'BEARISH' : 'NEUTRAL';
+        const color = bias === 'BULLISH' ? 'text-emerald-400' : bias === 'BEARISH' ? 'text-red-400' : 'text-slate-400';
+        return (
+          <div className={`px-4 py-1.5 border-b border-slate-700/30 text-[10px] flex items-center gap-1.5 ${color} bg-slate-900/30`}>
+            <span className="font-semibold">Flow: {askPct}% ask-side today</span>
+            <span className="text-slate-500">→</span>
+            <span className="font-bold uppercase">{bias}</span>
+          </div>
+        );
+      })()}
+
       {/* ── Table ── */}
       <div className="overflow-auto max-h-[420px]">
         <table className="w-full text-xs">
@@ -243,6 +263,9 @@ export function OptionsChainTable({
                 <HeaderCell col="oi" label="OI" align="right" active={activeCol === 'oi'} onClick={toggleCol} />
               )}
 
+              {/* Flow dot column — calls side */}
+              <th className="px-1 py-2 text-center text-[9px] text-slate-600 font-medium">●</th>
+
               {/* Center */}
               <HeaderCell
                 col="strike"
@@ -252,6 +275,9 @@ export function OptionsChainTable({
                 onClick={toggleCol}
                 className="text-slate-300 font-bold bg-slate-800/60"
               />
+
+              {/* Flow dot column — puts side */}
+              <th className="px-1 py-2 text-center text-[9px] text-slate-600 font-medium">●</th>
 
               {/* Puts side */}
               {!compact && (
@@ -331,12 +357,40 @@ export function OptionsChainTable({
                     </td>
                   )}
 
+                  {/* Call flow dot */}
+                  <td className="px-1 py-1.5 text-center">
+                    {call?.flowSide && (
+                      <span
+                        className={`text-[10px] ${
+                          call.flowSide === 'ASK' ? 'text-emerald-400' :
+                          call.flowSide === 'BID' ? 'text-red-400' :
+                          'text-slate-600'
+                        }`}
+                        title={`Last traded ${call.flowSide}-side`}
+                      >●</span>
+                    )}
+                  </td>
+
                   {/* Strike center */}
                   <td className={`px-3 py-1.5 text-center font-bold bg-slate-800/60 ${
                     isAtm ? 'text-blue-400' : strike < currentPrice ? 'text-emerald-500' : 'text-red-400'
                   }`}>
                     ${strike}
                     {isAtm && <span className="text-xs text-blue-400 ml-1">ATM</span>}
+                  </td>
+
+                  {/* Put flow dot */}
+                  <td className="px-1 py-1.5 text-center">
+                    {put?.flowSide && (
+                      <span
+                        className={`text-[10px] ${
+                          put.flowSide === 'ASK' ? 'text-emerald-400' :
+                          put.flowSide === 'BID' ? 'text-red-400' :
+                          'text-slate-600'
+                        }`}
+                        title={`Last traded ${put.flowSide}-side`}
+                      >●</span>
+                    )}
                   </td>
 
                   {/* Puts right side */}

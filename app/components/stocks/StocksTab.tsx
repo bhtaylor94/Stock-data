@@ -14,6 +14,7 @@ import { ChartPatternCard } from '@/app/components/stock/ChartPatternCard';
 import { NarrativeCard } from '@/app/components/ai/NarrativeCard';
 import { EarningsWidget } from '@/app/components/core/EarningsWidget';
 import { PortfolioContextAlert } from '@/app/components/portfolio/PortfolioContextAlert';
+import { StockChart } from '@/app/components/stock/StockChart';
 
 // ── Setup type filters ────────────────────────────────────────────────────────
 
@@ -126,6 +127,13 @@ function DeepDiveContent({
 
         {/* RIGHT — scrollable analysis column */}
         <div className="space-y-4">
+          {/* Price chart — rendered when at least some candle data is available */}
+          {(data.priceHistory?.length > 5) && (
+            <StockChart
+              priceHistory={data.priceHistory}
+              ticker={ticker}
+            />
+          )}
           <NarrativeCard
             ticker={ticker}
             price={data.price || 0}

@@ -16,6 +16,9 @@ import { SkewAnalyticsCard } from './SkewAnalyticsCard';
 import { GreeksPanel } from './GreeksPanel';
 import { EarningsWidget } from '../core/EarningsWidget';
 import { PositionSizingCalc } from '../core/PositionSizingCalc';
+import { PLDiagram } from './PLDiagram';
+import { IVSurfaceHeatmap } from './IVSurfaceHeatmap';
+import { PortfolioGreeksDashboard } from '../portfolio/PortfolioGreeksDashboard';
 
 function LoadingSpinner() {
   return (
@@ -300,6 +303,19 @@ export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: O
             />
           )}
 
+          {/* Portfolio Greeks Dashboard */}
+          <PortfolioGreeksDashboard />
+
+          {/* IV Surface Heatmap */}
+          {data.expirations?.length > 1 && data.byExpiration && data.currentPrice && (
+            <IVSurfaceHeatmap
+              byExpiration={data.byExpiration}
+              currentPrice={data.currentPrice}
+              selectedExp={selectedExp}
+              onSelectExp={setSelectedExp}
+            />
+          )}
+
           {/* Expiration Flow Scanner */}
           {data.expirations?.length > 0 && data.byExpiration && (
             <ExpirationFlowBar
@@ -329,6 +345,22 @@ export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: O
               onSelectContract={(c) => setSelectedContractAsk(c.ask)}
             />
           )}
+
+          {/* P&L Diagram — shows for recommended contract if available */}
+          {(() => {
+            const rc = data.optionsSetups?.[0]?.recommendedContract;
+            if (!rc || !data.currentPrice) return null;
+            return (
+              <PLDiagram
+                strike={rc.strike}
+                mark={rc.ask || rc.mark || 0.5}
+                type={data.optionsSetups?.[0]?.recommendedStructure?.type?.toLowerCase().includes('put') ? 'put' : 'call'}
+                currentPrice={data.currentPrice}
+                iv={rc.iv || 0.3}
+                dte={rc.dte || 30}
+              />
+            );
+          })()}
 
           {/* Position Sizing Calculator */}
           <PositionSizingCalc

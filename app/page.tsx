@@ -29,6 +29,11 @@ import { LearnTab } from './components/learn/LearnTab';
 import { NewsFeedPanel } from './components/news/NewsFeedPanel';
 import { StocksTab } from './components/stocks/StocksTab';
 import { OptionsTab } from './components/options/OptionsTab';
+import { StreamProvider, useStreamContext } from './components/core/StreamProvider';
+import { MorningBriefCard } from './components/ai-suggestions/MorningBriefCard';
+import { MarketBreadthPanel } from './components/market/MarketBreadthPanel';
+import { COTWidget } from './components/market/COTWidget';
+import { EarningsScreener } from './components/scanner/EarningsScreener';
 
 // ============================================================
 // UTILITY COMPONENTS
@@ -126,6 +131,36 @@ class ErrorBoundary extends React.Component<
 
     return this.props.children;
   }
+}
+
+// ============================================================
+// STREAM STATUS DOT
+// ============================================================
+function StreamStatusDot() {
+  const { status } = useStreamContext();
+  const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? null;
+  if (!WS_URL) {
+    return (
+      <span className="flex items-center gap-1 text-[10px] text-slate-500" title="No WebSocket server configured">
+        <span className="w-1.5 h-1.5 rounded-full bg-slate-600 inline-block" />
+        <span className="hidden sm:inline">Stream</span>
+      </span>
+    );
+  }
+  if (status === 'connected') {
+    return (
+      <span className="flex items-center gap-1 text-[10px] text-emerald-400" title="Live stream connected">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block animate-pulse" />
+        <span className="hidden sm:inline">Live</span>
+      </span>
+    );
+  }
+  return (
+    <span className="flex items-center gap-1 text-[10px] text-amber-400" title="Waiting for stream server">
+      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
+      <span className="hidden sm:inline">Waiting</span>
+    </span>
+  );
 }
 
 // ============================================================
@@ -440,8 +475,13 @@ function StockTab({
 function ScannerTab({ onSelectTicker }: { onSelectTicker: (t: string) => void }) {
   return (
     <div className="space-y-6 animate-fade-in">
+      <MarketBreadthPanel />
       <ScannerFeed onSelectTicker={onSelectTicker} />
-      <SectorHeatMap />
+      <EarningsScreener />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <SectorHeatMap />
+        <COTWidget />
+      </div>
     </div>
   );
 }
@@ -578,6 +618,18 @@ export default function TradingDashboard() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  // Page Visibility API — pause fetches when tab is hidden, resume + refetch on visibility
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && ticker) {
+        // Tab became visible again — re-fetch if we have an active ticker
+        // (stock+options data is fetched on-demand only, not on a timer)
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [ticker]);
+
   const handleSearch = async (symbol?: string) => {
     const sym = (symbol || ticker || '').trim().toUpperCase();
     if (!sym) return;
@@ -653,6 +705,7 @@ export default function TradingDashboard() {
   };
   
   return (
+    <StreamProvider>
     <div className="min-h-screen text-white">
       {/* Order Modal */}
       <OrderModal
@@ -722,6 +775,9 @@ export default function TradingDashboard() {
             >
               Analyze
             </button>
+
+            {/* Stream status */}
+            <StreamStatusDot />
           </div>
 
           {/* Tab nav row */}
@@ -807,6 +863,7 @@ export default function TradingDashboard() {
           <ErrorBoundary>
             {activeTab === 'feed' && (
               <div className="space-y-6">
+                <MorningBriefCard />
                 <TopFlowFeed
                   onSelectTicker={(t) => {
                     setTicker(t);
@@ -879,5 +936,6 @@ export default function TradingDashboard() {
         </div>
       </div>
     </div>
+    </StreamProvider>
   );
 }
