@@ -1227,6 +1227,322 @@ function calculateHV20(priceHistory: { close: number }[]): number {
 }
 
 // ============================================================
+// NEW: OI PROFILE
+// ============================================================
+function computeOIProfile(
+  allCalls: OptionContract[],
+  allPuts: OptionContract[],
+  spot: number,
+): {
+  strikes: { strike: number; callOI: number; putOI: number; totalOI: number }[];
+  maxOI: number;
+  dominantSide: 'CALLS' | 'PUTS' | 'BALANCED';
+} {
+  const map = new Map<number, { callOI: number; putOI: number }>();
+  const lo = spot * 0.80;
+  const hi = spot * 1.20;
+
+  for (const c of allCalls) {
+    if (c.strike < lo || c.strike > hi) continue;
+    const e = map.get(c.strike) || { callOI: 0, putOI: 0 };
+    e.callOI += c.openInterest;
+    map.set(c.strike, e);
+  }
+  for (const p of allPuts) {
+    if (p.strike < lo || p.strike > hi) continue;
+    const e = map.get(p.strike) || { callOI: 0, putOI: 0 };
+    e.putOI += p.openInterest;
+    map.set(p.strike, e);
+  }
+
+  const rows = Array.from(map.entries())
+    .map(([strike, { callOI, putOI }]) => ({ strike, callOI, putOI, totalOI: callOI + putOI }))
+    .sort((a, b) => b.totalOI - a.totalOI)
+    .slice(0, 20)
+    .sort((a, b) => a.strike - b.strike);
+
+  const maxOI = rows.reduce((m, r) => Math.max(m, r.totalOI), 0);
+  const totalCallOI = rows.reduce((s, r) => s + r.callOI, 0);
+  const totalOI = rows.reduce((s, r) => s + r.totalOI, 0);
+  const callRatio = totalOI > 0 ? totalCallOI / totalOI : 0.5;
+  const dominantSide: 'CALLS' | 'PUTS' | 'BALANCED' =
+    callRatio > 0.6 ? 'CALLS' : callRatio < 0.4 ? 'PUTS' : 'BALANCED';
+
+  return { strikes: rows, maxOI, dominantSide };
+}
+
+// ============================================================
+// NEW: PREMIUM-WEIGHTED P/C
+// ============================================================
+function computePremiumWeightedPC(
+  allCalls: OptionContract[],
+  allPuts: OptionContract[],
+): { callPremium: number; putPremium: number; premiumWeightedPC: number; premiumSentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL' } {
+  const callPremium = allCalls.reduce((s, c) => s + c.ask * c.volume * 100, 0);
+  const putPremium = allPuts.reduce((s, p) => s + p.ask * p.volume * 100, 0);
+  const premiumWeightedPC = callPremium > 0 ? putPremium / callPremium : 1;
+  const premiumSentiment: 'BULLISH' | 'BEARISH' | 'NEUTRAL' =
+    premiumWeightedPC < 0.8 ? 'BULLISH' : premiumWeightedPC > 1.2 ? 'BEARISH' : 'NEUTRAL';
+  return {
+    callPremium: Math.round(callPremium),
+    putPremium: Math.round(putPremium),
+    premiumWeightedPC: Math.round(premiumWeightedPC * 100) / 100,
+    premiumSentiment,
+  };
+}
+
+// ============================================================
+// NEW: SKEW ANALYTICS (25-delta risk reversal)
+// ============================================================
+function computeSkewAnalytics(
+  allCalls: OptionContract[],
+  allPuts: OptionContract[],
+): {
+  delta25CallIV: number;
+  delta25PutIV: number;
+  riskReversal25: number;
+  delta10CallIV: number;
+  delta10PutIV: number;
+  riskReversal10: number;
+  skewBias: 'FEAR' | 'GREED' | 'NEUTRAL';
+} | null {
+  const closest = (arr: OptionContract[], targetDelta: number): OptionContract | null =>
+    arr.filter(c => c.iv > 0 && Math.abs(c.delta) > 0).reduce<OptionContract | null>(
+      (best, c) =>
+        !best || Math.abs(Math.abs(c.delta) - targetDelta) < Math.abs(Math.abs(best.delta) - targetDelta)
+          ? c
+          : best,
+      null,
+    );
+
+  const c25 = closest(allCalls.filter(c => c.delta > 0), 0.25);
+  const p25 = closest(allPuts.filter(p => p.delta < 0), 0.25);
+  const c10 = closest(allCalls.filter(c => c.delta > 0), 0.10);
+  const p10 = closest(allPuts.filter(p => p.delta < 0), 0.10);
+
+  if (!c25 || !p25) return null;
+
+  const delta25CallIV = Math.round(c25.iv * 100 * 10) / 10;
+  const delta25PutIV = Math.round(p25.iv * 100 * 10) / 10;
+  const riskReversal25 = Math.round((delta25PutIV - delta25CallIV) * 10) / 10;
+  const delta10CallIV = c10 ? Math.round(c10.iv * 100 * 10) / 10 : 0;
+  const delta10PutIV = p10 ? Math.round(p10.iv * 100 * 10) / 10 : 0;
+  const riskReversal10 = Math.round((delta10PutIV - delta10CallIV) * 10) / 10;
+  const skewBias: 'FEAR' | 'GREED' | 'NEUTRAL' =
+    riskReversal25 > 3 ? 'FEAR' : riskReversal25 < -3 ? 'GREED' : 'NEUTRAL';
+
+  return { delta25CallIV, delta25PutIV, riskReversal25, delta10CallIV, delta10PutIV, riskReversal10, skewBias };
+}
+
+// ============================================================
+// NEW: IMPLIED PROBABILITIES BY EXPIRATION
+// ============================================================
+function computeImpliedProbabilities(
+  byExpiration: Record<string, { calls: OptionContract[]; puts: OptionContract[] }>,
+  spot: number,
+): Record<string, { movePct1σ: number; movePct2σ: number; movePct3σ: number; upper1σ: number; lower1σ: number; upper2σ: number; lower2σ: number; dte: number }> {
+  const result: Record<string, any> = {};
+
+  for (const [exp, { calls, puts }] of Object.entries(byExpiration)) {
+    if (calls.length === 0 || puts.length === 0) continue;
+    const allStrikes = [...new Set([...calls.map(c => c.strike), ...puts.map(p => p.strike)])]
+      .sort((a, b) => Math.abs(a - spot) - Math.abs(b - spot));
+    const atmStrike = allStrikes[0];
+    if (!atmStrike) continue;
+    const atmCall = calls.find(c => c.strike === atmStrike);
+    const atmPut = puts.find(p => p.strike === atmStrike);
+    if (!atmCall || !atmPut) continue;
+    const straddle = (atmCall.ask || atmCall.mark || 0) + (atmPut.ask || atmPut.mark || 0);
+    if (straddle <= 0) continue;
+    const movePct1σ = Math.round((straddle / spot) * 10000) / 100;
+    result[exp] = {
+      movePct1σ,
+      movePct2σ: Math.round(movePct1σ * 2 * 100) / 100,
+      movePct3σ: Math.round(movePct1σ * 3 * 100) / 100,
+      upper1σ: Math.round((spot + straddle) * 100) / 100,
+      lower1σ: Math.round((spot - straddle) * 100) / 100,
+      upper2σ: Math.round((spot + straddle * 2) * 100) / 100,
+      lower2σ: Math.round((spot - straddle * 2) * 100) / 100,
+      dte: atmCall.dte || 0,
+    };
+  }
+  return result;
+}
+
+// ============================================================
+// NEW: GREEKS AGGREGATION BY EXPIRATION
+// ============================================================
+function computeGreeksAggregation(
+  byExpiration: Record<string, { calls: OptionContract[]; puts: OptionContract[] }>,
+  _spot: number,
+): {
+  byExpiration: Record<string, { netDelta: number; totalTheta: number; totalVega: number; totalGamma: number; dte: number }>;
+  totals: { netDelta: number; totalTheta: number; totalVega: number; totalGamma: number };
+} {
+  const expResult: Record<string, { netDelta: number; totalTheta: number; totalVega: number; totalGamma: number; dte: number }> = {};
+  let totalNetDelta = 0, totalTheta = 0, totalVega = 0, totalGamma = 0;
+
+  for (const [exp, { calls, puts }] of Object.entries(byExpiration)) {
+    let netDelta = 0, theta = 0, vega = 0, gamma = 0;
+    for (const c of calls) {
+      const mult = c.openInterest * 100;
+      netDelta += (c.delta || 0) * mult;
+      theta += (c.theta || 0) * mult;
+      vega += (c.vega || 0) * mult;
+      gamma += (c.gamma || 0) * mult;
+    }
+    for (const p of puts) {
+      const mult = p.openInterest * 100;
+      netDelta += (p.delta || 0) * mult; // put deltas are negative
+      theta += (p.theta || 0) * mult;
+      vega += (p.vega || 0) * mult;
+      gamma += (p.gamma || 0) * mult;
+    }
+    const dte = calls[0]?.dte || puts[0]?.dte || 0;
+    expResult[exp] = {
+      netDelta: Math.round(netDelta),
+      totalTheta: Math.round(theta),
+      totalVega: Math.round(vega),
+      totalGamma: Math.round(gamma * 100) / 100,
+      dte,
+    };
+    totalNetDelta += netDelta;
+    totalTheta += theta;
+    totalVega += vega;
+    totalGamma += gamma;
+  }
+
+  return {
+    byExpiration: expResult,
+    totals: {
+      netDelta: Math.round(totalNetDelta),
+      totalTheta: Math.round(totalTheta),
+      totalVega: Math.round(totalVega),
+      totalGamma: Math.round(totalGamma * 100) / 100,
+    },
+  };
+}
+
+// ============================================================
+// NEW: EXPECTED MOVE BY EXPIRATION
+// ============================================================
+function computeExpectedMoveByExpiration(
+  byExpiration: Record<string, { calls: OptionContract[]; puts: OptionContract[] }>,
+  spot: number,
+): Record<string, { straddle: number; movePct: number; upperTarget: number; lowerTarget: number; dte: number }> {
+  const result: Record<string, any> = {};
+
+  for (const [exp, { calls, puts }] of Object.entries(byExpiration)) {
+    if (calls.length === 0 || puts.length === 0) continue;
+    const allStrikes = [...new Set([...calls.map(c => c.strike), ...puts.map(p => p.strike)])]
+      .sort((a, b) => Math.abs(a - spot) - Math.abs(b - spot));
+    const atmStrike = allStrikes[0];
+    if (!atmStrike) continue;
+    const atmCall = calls.find(c => c.strike === atmStrike);
+    const atmPut = puts.find(p => p.strike === atmStrike);
+    if (!atmCall || !atmPut) continue;
+    const callAsk = atmCall.ask || atmCall.mark || 0;
+    const putAsk = atmPut.ask || atmPut.mark || 0;
+    const straddle = callAsk + putAsk;
+    if (straddle <= 0) continue;
+    result[exp] = {
+      straddle: Math.round(straddle * 100) / 100,
+      movePct: Math.round((straddle / spot) * 10000) / 100,
+      upperTarget: Math.round((spot + straddle) * 100) / 100,
+      lowerTarget: Math.round((spot - straddle) * 100) / 100,
+      dte: atmCall.dte || 0,
+    };
+  }
+  return result;
+}
+
+// ============================================================
+// NEW: 0DTE FLOW
+// ============================================================
+function computeZDTEFlow(unusualActivity: UOAResult[]): {
+  detected: true;
+  activities: UOAResult[];
+  totalPremium: number;
+  bullishPremium: number;
+  bearishPremium: number;
+  netBias: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+} | null {
+  const zdteItems = unusualActivity.filter(u => u.dte <= 1);
+  if (zdteItems.length === 0) return null;
+
+  const bullishPremium = zdteItems.filter(u => u.sentiment === 'BULLISH').reduce((s, u) => s + u.metrics.premium, 0);
+  const bearishPremium = zdteItems.filter(u => u.sentiment === 'BEARISH').reduce((s, u) => s + u.metrics.premium, 0);
+  const totalPremium = bullishPremium + bearishPremium;
+  const netBias: 'BULLISH' | 'BEARISH' | 'NEUTRAL' =
+    bullishPremium > bearishPremium * 1.5 ? 'BULLISH'
+    : bearishPremium > bullishPremium * 1.5 ? 'BEARISH'
+    : 'NEUTRAL';
+
+  return { detected: true, activities: zdteItems, totalPremium, bullishPremium, bearishPremium, netBias };
+}
+
+// ============================================================
+// NEW: OVERNIGHT OI CHANGES
+// ============================================================
+function computeOvernightOIChanges(
+  allCalls: OptionContract[],
+  allPuts: OptionContract[],
+  snapshots: any[],
+): {
+  changes: { key: string; strike: number; type: string; currentOI: number; priorOI: number; oiDelta: number; oiDeltaPct: number; isNewPosition: boolean }[];
+  totalNewCallOI: number;
+  totalNewPutOI: number;
+  netBias: 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+} | null {
+  // Find most recent snapshot with oiByStrike payload
+  const snapWithOI = snapshots.find(s => s.payload?.oiByStrike);
+  if (!snapWithOI) return null;
+
+  const priorOIMap: Record<string, number> = snapWithOI.payload.oiByStrike;
+
+  // Build current OI map
+  const currentMap: Record<string, number> = {};
+  for (const c of allCalls) currentMap[`${c.strike}_call`] = (currentMap[`${c.strike}_call`] || 0) + c.openInterest;
+  for (const p of allPuts) currentMap[`${p.strike}_put`] = (currentMap[`${p.strike}_put`] || 0) + p.openInterest;
+
+  const changes: any[] = [];
+  const allKeys = new Set([...Object.keys(priorOIMap), ...Object.keys(currentMap)]);
+
+  for (const key of allKeys) {
+    const currentOI = currentMap[key] || 0;
+    const priorOI = priorOIMap[key] || 0;
+    const oiDelta = currentOI - priorOI;
+    if (Math.abs(oiDelta) < 50) continue; // noise filter
+    const oiDeltaPct = priorOI > 0 ? Math.round((oiDelta / priorOI) * 10000) / 100 : 100;
+    const parts = key.split('_');
+    const type = parts[parts.length - 1];
+    const strike = parseFloat(parts[0]);
+    changes.push({
+      key,
+      strike,
+      type,
+      currentOI,
+      priorOI,
+      oiDelta,
+      oiDeltaPct,
+      isNewPosition: oiDelta > 0 && oiDeltaPct > 25,
+    });
+  }
+
+  changes.sort((a, b) => Math.abs(b.oiDelta) - Math.abs(a.oiDelta));
+  const top10 = changes.slice(0, 10);
+
+  const totalNewCallOI = top10.filter(c => c.type === 'call' && c.oiDelta > 0).reduce((s, c) => s + c.oiDelta, 0);
+  const totalNewPutOI = top10.filter(c => c.type === 'put' && c.oiDelta > 0).reduce((s, c) => s + c.oiDelta, 0);
+  const netBias: 'BULLISH' | 'BEARISH' | 'NEUTRAL' =
+    totalNewCallOI > totalNewPutOI * 1.5 ? 'BULLISH'
+    : totalNewPutOI > totalNewCallOI * 1.5 ? 'BEARISH'
+    : 'NEUTRAL';
+
+  return { changes: top10, totalNewCallOI, totalNewPutOI, netBias };
+}
+
+// ============================================================
 // MAIN API HANDLER
 // ============================================================
 export async function GET(request: NextRequest, { params }: { params: { ticker: string } }) {
@@ -1335,6 +1651,23 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
 
   const unusualActivity = detectUnusualActivity(calls, puts, currentPrice, stockTrend, false, ticker, repeatFlowMap);
 
+  // ── New institutional intelligence computations ──────────────────────────
+  const oiProfile = computeOIProfile(calls, puts, currentPrice);
+  const premiumWeightedPC = computePremiumWeightedPC(calls, puts);
+  const skewAnalytics = computeSkewAnalytics(calls, puts);
+  const impliedProbabilities = computeImpliedProbabilities(byExpiration, currentPrice);
+  const greeksAggregation = computeGreeksAggregation(byExpiration, currentPrice);
+  const expectedMoveByExpiration = computeExpectedMoveByExpiration(byExpiration, currentPrice);
+  const zdteFlow = computeZDTEFlow(unusualActivity);
+
+  // Load snapshots for overnight OI (reuse the snaps already fetched or fetch again)
+  let recentSnapsForOI: any[] = [];
+  try {
+    const store = await getSnapshotStore();
+    recentSnapsForOI = await store.getSnapshotsByTicker(ticker, 5);
+  } catch { /* non-fatal */ }
+  const overnightOIChanges = computeOvernightOIChanges(calls, puts, recentSnapsForOI);
+
   // Phase C: named setup matching
   const optionsSetups = matchOptionsSetups({
     calls, puts, trend, rsi, sma20, sma50, support, resistance,
@@ -1369,7 +1702,14 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       setupName: optionsSetups[0]?.name ?? null,
       confidence: optionsSetups[0]?.confluenceScore ?? 0,
       evidence: null,
-      payload: { uoaContracts },
+      payload: {
+        uoaContracts,
+        oiByStrike: Object.fromEntries(
+          [...calls.map(c => [`${c.strike}_call`, c.openInterest]),
+           ...puts.map(p => [`${p.strike}_put`, p.openInterest])]
+          .reduce((map, [k, v]) => { map.set(k as string, (map.get(k as string) || 0) + (v as number)); return map; }, new Map<string, number>())
+        ),
+      },
     });
   } catch { /* non-fatal */ }
 
@@ -1409,11 +1749,24 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
       maxPain: marketMetrics.maxPain,
       avgIV: ivAnalysis.atmIV,
       ivRank: ivAnalysis.ivRank,
+      // New premium-weighted P/C
+      callPremium: premiumWeightedPC.callPremium,
+      putPremium: premiumWeightedPC.putPremium,
+      premiumWeightedPC: premiumWeightedPC.premiumWeightedPC,
+      premiumSentiment: premiumWeightedPC.premiumSentiment,
     },
     // IV context label for frontend
     ivContext: getIVContext(ivAnalysis.ivRank),
     // Named options setups (Phase C)
     optionsSetups,
+    // ── Institutional intelligence stack ──────────────────────────────────
+    oiProfile,
+    skewAnalytics,
+    impliedProbabilities,
+    greeksAggregation,
+    expectedMoveByExpiration,
+    zdteFlow,
+    overnightOIChanges,
     unusualActivity: unusualActivity.map(u => ({
       // Core identification
       optionSymbol: u.optionSymbol,
