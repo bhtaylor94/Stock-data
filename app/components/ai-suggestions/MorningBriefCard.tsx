@@ -43,6 +43,10 @@ export function MorningBriefCard() {
     try {
       if (force) await fetch('/api/briefing', { method: 'DELETE' });
       const res = await fetch('/api/briefing');
+      if (res.status === 503) {
+        setError('Add ANTHROPIC_API_KEY to .env.local to enable AI briefs.');
+        return;
+      }
       if (!res.ok) throw new Error('Failed to fetch briefing');
       setData(await res.json());
     } catch (e) {

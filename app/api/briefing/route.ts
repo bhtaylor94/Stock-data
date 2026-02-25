@@ -7,7 +7,6 @@ import { TTLCache } from '@/lib/cache';
 
 export const dynamic = 'force-dynamic';
 
-const anthropic = new Anthropic();
 const cache = new TTLCache<any>();
 const CACHE_TTL = 60 * 60 * 1000; // 60 minutes
 
@@ -55,6 +54,10 @@ async function fetchBriefingData() {
 
 export async function GET() {
   try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 503 });
+    }
+
     const cached = cache.get('morning-brief');
     if (cached) return NextResponse.json(cached);
 
@@ -70,6 +73,7 @@ export async function GET() {
 
 Each bullet starts with its emoji. Max 35 words per bullet. Be specific and actionable.`;
 
+    const anthropic = new Anthropic();
     const response = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 320,

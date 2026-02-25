@@ -131,7 +131,7 @@ async function fetchSchwabQuote(token: string, symbol: string) {
   } catch { return null; }
 }
 
-async function fetchSchwabPriceHistory(token: string, symbol: string): Promise<{ open: number; close: number; high: number; low: number; volume: number }[]> {
+async function fetchSchwabPriceHistory(token: string, symbol: string): Promise<{ time: number; open: number; close: number; high: number; low: number; volume: number }[]> {
   try {
     const res = await fetch(`https://api.schwabapi.com/marketdata/v1/pricehistory?symbol=${symbol}&periodType=year&period=1&frequencyType=daily&frequency=1`, {
       headers: {
@@ -142,7 +142,10 @@ async function fetchSchwabPriceHistory(token: string, symbol: string): Promise<{
     });
     if (!res.ok) return [];
     const data = await res.json();
-    return (data.candles || []).map((c: any) => ({ open: c.open, close: c.close, high: c.high, low: c.low, volume: c.volume }));
+    return (data.candles || []).map((c: any) => ({
+      time: c.datetime ? Math.floor(c.datetime / 1000) : 0,
+      open: c.open, close: c.close, high: c.high, low: c.low, volume: c.volume,
+    }));
   } catch { return []; }
 }
 
@@ -211,7 +214,7 @@ async function getFinnhubQuote(symbol: string) {
 
 
 // Historical candles (Finnhub fallback when Schwab pricehistory is unavailable)
-async function getFinnhubCandles(symbol: string) : Promise<{ open: number; close: number; high: number; low: number; volume: number }[]> {
+async function getFinnhubCandles(symbol: string) : Promise<{ time: number; open: number; close: number; high: number; low: number; volume: number }[]> {
   if (!FINNHUB_KEY) return [];
   const toSec = Math.floor(Date.now() / 1000);
   // ~540 calendar days gives enough daily candles for SMA200 even with holidays/weekends
@@ -223,10 +226,11 @@ async function getFinnhubCandles(symbol: string) : Promise<{ open: number; close
     if (!res.ok) return [];
     const data: any = await res.json();
     if (!data || data.s !== 'ok' || !Array.isArray(data.c)) return [];
-    const out: { open: number; close: number; high: number; low: number; volume: number }[] = [];
+    const out: { time: number; open: number; close: number; high: number; low: number; volume: number }[] = [];
     const n = data.c.length;
     for (let i = 0; i < n; i++) {
       out.push({
+        time: Number(data.t?.[i] ?? 0),
         open: Number(data.o?.[i] ?? data.c[i] ?? 0),
         close: Number(data.c?.[i] ?? 0),
         high: Number(data.h?.[i] ?? 0),
@@ -2067,6 +2071,15 @@ return NextResponse.json({
     price: Math.round(price * 100) / 100,
     change: Math.round((q.netChange || 0) * 100) / 100,
     changePercent: Math.round((q.netPercentChange || 0) * 100) / 100,
+
+    priceHistory: priceHistory.slice(-252).map(c => ({
+      time: c.time,
+      open: Math.round(c.open * 100) / 100,
+      high: Math.round(c.high * 100) / 100,
+      low: Math.round(c.low * 100) / 100,
+      close: Math.round(c.close * 100) / 100,
+      volume: c.volume,
+    })),
 
     meta: {
       asOf: freshness.asOf,

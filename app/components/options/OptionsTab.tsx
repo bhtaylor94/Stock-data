@@ -18,7 +18,6 @@ import { EarningsWidget } from '../core/EarningsWidget';
 import { PositionSizingCalc } from '../core/PositionSizingCalc';
 import { PLDiagram } from './PLDiagram';
 import { IVSurfaceHeatmap } from './IVSurfaceHeatmap';
-import { PortfolioGreeksDashboard } from '../portfolio/PortfolioGreeksDashboard';
 
 function LoadingSpinner() {
   return (
@@ -302,9 +301,6 @@ export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: O
               expirations={data.expirations || []}
             />
           )}
-
-          {/* Portfolio Greeks Dashboard */}
-          <PortfolioGreeksDashboard />
 
           {/* IV Surface Heatmap */}
           {data.expirations?.length > 1 && data.byExpiration && data.currentPrice && (

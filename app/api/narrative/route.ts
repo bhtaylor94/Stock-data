@@ -3,10 +3,12 @@ import Anthropic from '@anthropic-ai/sdk';
 
 export const runtime = 'nodejs';
 
-const client = new Anthropic();
-
 export async function POST(req: NextRequest) {
   try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 503 });
+    }
+    const client = new Anthropic();
     const body = await req.json();
     const { ticker, price, changePercent, analysis, optionsSetups, unusualActivity, technicals, ivContext } = body;
 
