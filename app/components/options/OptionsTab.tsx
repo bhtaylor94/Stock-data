@@ -183,7 +183,7 @@ export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: O
           {/* IV vs HV Premium Widget */}
           {data.ivAnalysis?.atmIV > 0 && data.historicalVolatility?.hv20 > 0 && (
             <IVHVWidget
-              atmIV={data.ivAnalysis.atmIV}
+              atmIV={data.ivAnalysis.atmIV / 100}
               hv20={data.historicalVolatility.hv20 / 100}
               ivVsHV={data.historicalVolatility.ivVsHV}
               ivRank={data.metrics?.ivRank ?? null}
