@@ -246,20 +246,49 @@ interface IVAnalysis {
   atmIV: number;
 }
 
-function analyzeIV(calls: OptionContract[], puts: OptionContract[], currentPrice: number): IVAnalysis {
+function analyzeIV(calls: OptionContract[], puts: OptionContract[], currentPrice: number, hv20: number = 30): IVAnalysis {
+  // ATM window: ±5% from spot, contracts with positive IV
   const atmCalls = calls.filter(c => Math.abs(c.strike - currentPrice) / currentPrice < 0.05 && c.iv > 0);
-  const atmPuts = puts.filter(p => Math.abs(p.strike - currentPrice) / currentPrice < 0.05 && p.iv > 0);
-  
-  const avgCallIV = atmCalls.length > 0 ? atmCalls.reduce((sum, c) => sum + c.iv, 0) / atmCalls.length : 0.30;
-  const avgPutIV = atmPuts.length > 0 ? atmPuts.reduce((sum, p) => sum + p.iv, 0) / atmPuts.length : 0.30;
-  const atmIV = (avgCallIV + avgPutIV) / 2;
-  
+  const atmPuts  = puts.filter(p => Math.abs(p.strike - currentPrice) / currentPrice < 0.05 && p.iv > 0);
+
+  // OI-weighted average IV per side — illiquid strikes with noisy IV get lower weight
+  const callOITotal = atmCalls.reduce((s, c) => s + c.openInterest, 0);
+  const putOITotal  = atmPuts.reduce((s, p) => s + p.openInterest, 0);
+
+  const hvFallback = hv20 / 100; // decimal fallback when no ATM contracts found
+
+  const avgCallIV = callOITotal > 0
+    ? atmCalls.reduce((s, c) => s + c.iv * c.openInterest, 0) / callOITotal
+    : atmCalls.length > 0 ? atmCalls.reduce((s, c) => s + c.iv, 0) / atmCalls.length : hvFallback;
+
+  const avgPutIV = putOITotal > 0
+    ? atmPuts.reduce((s, p) => s + p.iv * p.openInterest, 0) / putOITotal
+    : atmPuts.length > 0 ? atmPuts.reduce((s, p) => s + p.iv, 0) / atmPuts.length : hvFallback;
+
+  // Blend call/put IV weighted by each side's total OI (puts typically dominate OI → skew matters)
+  const totalOI = callOITotal + putOITotal;
+  const atmIV = totalOI > 0
+    ? (avgCallIV * callOITotal + avgPutIV * putOITotal) / totalOI
+    : (avgCallIV + avgPutIV) / 2;
+
   const putCallIVSkew = avgPutIV - avgCallIV;
-  const ivRank = Math.min(100, Math.max(0, ((atmIV - 0.15) / 0.50) * 100));
-  
+
+  // HV-anchored IV Rank — calibrated per stock, not a one-size-fits-all range.
+  // Assumes: suppressed IV ≈ 0.70× HV20, stressed IV ≈ 2.20× HV20.
+  // This correctly reflects that TSLA's "normal" IV range ≠ SPY's.
+  const hvDecimal = hv20 / 100;
+  const ivLow  = hvDecimal * 0.70;  // unusually cheap vol for this stock
+  const ivHigh = hvDecimal * 2.20;  // crisis/event-driven spike level
+  const ivRank = Math.min(100, Math.max(0, ((atmIV - ivLow) / (ivHigh - ivLow)) * 100));
+
+  // IV Percentile: how far current IV sits above HV20 (50 = at HV, 100 = 2× HV, 0 = ≤0.5× HV)
+  const ivPercentile = hvDecimal > 0
+    ? Math.min(100, Math.max(0, ((atmIV / hvDecimal) - 0.5) / 1.5 * 100))
+    : ivRank;
+
   let ivSignal: 'HIGH' | 'ELEVATED' | 'NORMAL' | 'LOW' = 'NORMAL';
   let recommendation: 'BUY_PREMIUM' | 'SELL_PREMIUM' | 'NEUTRAL' = 'NEUTRAL';
-  
+
   if (ivRank >= 70) {
     ivSignal = 'HIGH';
     recommendation = 'SELL_PREMIUM';
@@ -269,13 +298,13 @@ function analyzeIV(calls: OptionContract[], puts: OptionContract[], currentPrice
     ivSignal = 'LOW';
     recommendation = 'BUY_PREMIUM';
   }
-  
+
   return {
     avgCallIV: Math.round(avgCallIV * 1000) / 10,
-    avgPutIV: Math.round(avgPutIV * 1000) / 10,
+    avgPutIV:  Math.round(avgPutIV  * 1000) / 10,
     putCallIVSkew: Math.round(putCallIVSkew * 1000) / 10,
-    ivRank: Math.round(ivRank),
-    ivPercentile: Math.round(ivRank),
+    ivRank:      Math.round(ivRank),
+    ivPercentile: Math.round(ivPercentile),
     ivSignal,
     recommendation,
     atmIV: Math.round(atmIV * 1000) / 10,
@@ -1642,7 +1671,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   // Convert trend for unusual activity detection
   const stockTrend: 'UP' | 'DOWN' | 'SIDEWAYS' = trend === 'BULLISH' ? 'UP' : trend === 'BEARISH' ? 'DOWN' : 'SIDEWAYS';
 
-  const ivAnalysis = analyzeIV(calls, puts, currentPrice);
+  const ivAnalysis = analyzeIV(calls, puts, currentPrice, hv20);
   const marketMetrics = calculateMarketMetrics(calls, puts, currentPrice);
 
   // Phase E: load repeat flow map from snapshot store

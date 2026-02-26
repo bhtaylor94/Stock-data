@@ -337,12 +337,59 @@ function calculateBollingerBands(prices: number[], period = 20): { upper: number
   return { upper: sma + 2 * stdDev, middle: sma, lower: sma - 2 * stdDev };
 }
 
-function findSupportResistance(candles: { high: number; low: number }[]): { support: number; resistance: number } {
+function findSupportResistance(
+  candles: { high: number; low: number; close: number; volume: number }[],
+  currentPrice: number,
+): { support: number; resistance: number } {
   if (candles.length === 0) return { support: 0, resistance: 0 };
-  const recent = candles.slice(-20);
+
+  // 60-day lookback gives enough trading activity for meaningful clusters
+  const recent = candles.slice(-60);
+
+  const allPrices = recent.flatMap(c => [c.high, c.low, c.close]);
+  const minP = Math.min(...allPrices);
+  const maxP = Math.max(...allPrices);
+  const range = maxP - minP;
+  if (range === 0) return { support: currentPrice * 0.98, resistance: currentPrice * 1.02 };
+
+  // Build volume-at-price profile across 60 equal bins
+  const BIN_COUNT = 60;
+  const binW = range / BIN_COUNT;
+  const bins = new Float64Array(BIN_COUNT);
+
+  for (const c of recent) {
+    // Distribute candle volume uniformly over its high-low range
+    const lowBin  = Math.max(0, Math.floor((c.low  - minP) / binW));
+    const highBin = Math.min(BIN_COUNT - 1, Math.floor((c.high - minP) / binW));
+    const span = Math.max(1, highBin - lowBin + 1);
+    const volPerBin = c.volume / span;
+    for (let b = lowBin; b <= highBin; b++) bins[b] += volPerBin;
+  }
+
+  // Find local volume peaks — these are natural S/R levels
+  type Cluster = { price: number; vol: number };
+  const clusters: Cluster[] = [];
+  for (let i = 1; i < BIN_COUNT - 1; i++) {
+    if (bins[i] >= bins[i - 1] && bins[i] >= bins[i + 1] && bins[i] > 0) {
+      clusters.push({ price: minP + (i + 0.5) * binW, vol: bins[i] });
+    }
+  }
+
+  const below = clusters.filter(c => c.price < currentPrice);
+  const above = clusters.filter(c => c.price > currentPrice);
+
+  // Nearest significant cluster on each side (by price proximity, not volume)
+  const support = below.length > 0
+    ? below.reduce((best, c) => c.price > best.price ? c : best).price
+    : minP;
+
+  const resistance = above.length > 0
+    ? above.reduce((best, c) => c.price < best.price ? c : best).price
+    : maxP;
+
   return {
-    support: Math.min(...recent.map(c => c.low)),
-    resistance: Math.max(...recent.map(c => c.high)),
+    support:    Math.round(support    * 100) / 100,
+    resistance: Math.round(resistance * 100) / 100,
   };
 }
 
@@ -1140,28 +1187,75 @@ function calculateFundamentalScore(metrics: FundamentalMetrics): {
   factors: { name: string; passed: boolean; value: string; threshold: string; weight: number }[];
 } {
   const factors: { name: string; passed: boolean; value: string; threshold: string; weight: number }[] = [];
-  
-  // Profitability (3 factors)
-  factors.push({ name: 'Positive ROE', passed: metrics.roe > 0, value: `${metrics.roe?.toFixed(1) || 0}%`, threshold: '> 0%', weight: 1 });
-  factors.push({ name: 'Strong ROE (>15%)', passed: metrics.roe > 15, value: `${metrics.roe?.toFixed(1) || 0}%`, threshold: '> 15%', weight: 1 });
-  factors.push({ name: 'Positive Profit Margin', passed: metrics.profitMargin > 0, value: `${metrics.profitMargin?.toFixed(1) || 0}%`, threshold: '> 0%', weight: 1 });
-  
-  // Valuation (2 factors)
-  factors.push({ name: 'P/E under 25', passed: metrics.pe > 0 && metrics.pe < 25, value: metrics.pe?.toFixed(1) || 'N/A', threshold: '0-25', weight: 1 });
-  factors.push({ name: 'P/B under 3', passed: metrics.pb > 0 && metrics.pb < 3, value: metrics.pb?.toFixed(2) || 'N/A', threshold: '< 3', weight: 1 });
-  
-  // Financial Health (2 factors)
-  factors.push({ name: 'Low Debt (D/E < 1)', passed: metrics.debtEquity < 1, value: metrics.debtEquity?.toFixed(2) || 'N/A', threshold: '< 1.0', weight: 1 });
-  factors.push({ name: 'Current Ratio > 1', passed: metrics.currentRatio > 1, value: metrics.currentRatio?.toFixed(2) || 'N/A', threshold: '> 1.0', weight: 1 });
-  
-  // Growth (2 factors)
-  factors.push({ name: 'Revenue Growth', passed: metrics.revenueGrowth > 0, value: `${metrics.revenueGrowth?.toFixed(1) || 0}%`, threshold: '> 0%', weight: 1 });
-  factors.push({ name: 'EPS Growth', passed: metrics.epsGrowth > 0, value: `${metrics.epsGrowth?.toFixed(1) || 0}%`, threshold: '> 0%', weight: 1 });
+  const { pe, pb, roe, debtEquity, currentRatio, profitMargin, revenueGrowth, epsGrowth, fcfYield, peg, evEbitda } = metrics;
 
-  // New factors (3)
-  factors.push({ name: 'FCF Yield >2%', passed: metrics.fcfYield > 2, value: `${metrics.fcfYield?.toFixed(1) || 'N/A'}%`, threshold: '> 2%', weight: 1 });
-  factors.push({ name: 'PEG Ratio <2', passed: metrics.peg > 0 && metrics.peg < 2, value: metrics.peg?.toFixed(2) || 'N/A', threshold: '0-2', weight: 1 });
-  factors.push({ name: 'EV/EBITDA <20', passed: metrics.evEbitda > 0 && metrics.evEbitda < 20, value: metrics.evEbitda?.toFixed(1) || 'N/A', threshold: '0-20', weight: 1 });
+  // Growth regime classification — determines adaptive thresholds
+  // Bloomberg/CFA standard: growth stocks need different valuation frameworks
+  const isHighGrowth = revenueGrowth > 20;  // e.g. NVDA +120%, PLTR +25%
+  const isMidGrowth  = revenueGrowth > 10;  // e.g. MSFT +15%, AAPL +11%
+  const isHighROIC   = roe > 30;            // asset-light businesses (high P/B is justified)
+
+  // ── Profitability (3 factors) ─────────────────────────────────────────────
+  factors.push({ name: 'Positive ROE', passed: roe > 0, value: `${roe?.toFixed(1) || 0}%`, threshold: '> 0%', weight: 1 });
+  factors.push({ name: 'Strong ROE (>15%)', passed: roe > 15, value: `${roe?.toFixed(1) || 0}%`, threshold: '> 15%', weight: 1 });
+  factors.push({ name: 'Positive Profit Margin', passed: profitMargin > 0, value: `${profitMargin?.toFixed(1) || 0}%`, threshold: '> 0%', weight: 1 });
+
+  // ── Valuation (3 factors) — growth-calibrated ──────────────────────────────
+  // P/E: flat 25× fails every growth stock. True threshold scales with earnings growth rate.
+  // CFA approach: mature=25×, mid-growth=40×, high-growth=60× (P/E converges as growth slows)
+  const peThreshold = isHighGrowth ? 60 : isMidGrowth ? 40 : 25;
+  factors.push({
+    name: 'Reasonable P/E',
+    passed: pe > 0 && pe < peThreshold,
+    value: pe > 0 ? pe.toFixed(1) : 'N/A',
+    threshold: `< ${peThreshold}× ${isHighGrowth ? '(high-growth)' : isMidGrowth ? '(mid-growth)' : '(value)'}`,
+    weight: 1,
+  });
+
+  // P/B: asset-light companies with ROIC >30% can rationally trade at 10–20× book.
+  // MSFT, GOOGL, AAPL all > 10× book — not expensive given 50%+ ROE.
+  const pbThreshold = isHighROIC ? 15 : 3;
+  factors.push({
+    name: 'Reasonable P/B',
+    passed: pb > 0 && pb < pbThreshold,
+    value: pb > 0 ? pb.toFixed(2) : 'N/A',
+    threshold: `< ${pbThreshold}× ${isHighROIC ? '(high-ROIC)' : ''}`,
+    weight: 1,
+  });
+
+  // PEG: inherently growth-adjusted; no additional regime logic needed
+  factors.push({ name: 'PEG Ratio <2', passed: peg > 0 && peg < 2, value: peg > 0 ? peg.toFixed(2) : 'N/A', threshold: '< 2×', weight: 1 });
+
+  // ── Financial Health (2 factors) ─────────────────────────────────────────
+  // D/E 1.5× (relaxed from 1.0): AAPL/MSFT issue strategic debt for buybacks yet are financially robust
+  factors.push({ name: 'Manageable Leverage', passed: debtEquity < 1.5, value: debtEquity?.toFixed(2) || 'N/A', threshold: 'D/E < 1.5×', weight: 1 });
+  factors.push({ name: 'Current Ratio >1', passed: currentRatio > 1, value: currentRatio?.toFixed(2) || 'N/A', threshold: '> 1.0×', weight: 1 });
+
+  // ── Growth Quality (2 factors) ────────────────────────────────────────────
+  // Revenue growth >5%: positive but meaningful — filters stagnant businesses
+  factors.push({ name: 'Revenue Growth (>5%)', passed: revenueGrowth > 5, value: `${revenueGrowth?.toFixed(1) || 0}%`, threshold: '> 5%', weight: 1 });
+  factors.push({ name: 'EPS Growth', passed: epsGrowth > 0, value: `${epsGrowth?.toFixed(1) || 0}%`, threshold: '> 0%', weight: 1 });
+
+  // ── Cash Generation (2 factors) ───────────────────────────────────────────
+  // FCF Yield: high-growth companies reinvest FCF into growth — carveout at >0% if revGrowth >20%
+  const fcfPassed = fcfYield > 2 || (fcfYield > 0 && isHighGrowth);
+  factors.push({
+    name: 'FCF Yield',
+    passed: fcfPassed,
+    value: `${fcfYield?.toFixed(1) || 'N/A'}%`,
+    threshold: isHighGrowth ? '> 0% (growth carveout)' : '> 2%',
+    weight: 1,
+  });
+
+  // EV/EBITDA: growth companies rationally trade at 25–35×; value at 10–20×
+  const evThreshold = isHighGrowth ? 30 : 20;
+  factors.push({
+    name: 'EV/EBITDA',
+    passed: evEbitda > 0 && evEbitda < evThreshold,
+    value: evEbitda > 0 ? evEbitda.toFixed(1) : 'N/A',
+    threshold: `< ${evThreshold}× ${isHighGrowth ? '(growth)' : ''}`,
+    weight: 1,
+  });
 
   const score = factors.filter(f => f.passed).length;
   return { score, maxScore: 12, factors };
@@ -1181,8 +1275,9 @@ interface TechnicalInputs {
   previousClose: number;
   high52Week: number;
   low52Week: number;
-  avgVolume: number;
+  avgVolume20d: number;
   currentVolume: number;
+  relVol: number;        // todayVolume / avg20dVolume
   // New fields
   adx: number;
   cmf: number;
@@ -1195,28 +1290,40 @@ function calculateTechnicalScore(inputs: TechnicalInputs): {
   factors: { name: string; passed: boolean; value: string; threshold: string; weight: number }[];
 } {
   const factors: { name: string; passed: boolean; value: string; threshold: string; weight: number }[] = [];
-  const { price, sma20, sma50, sma200, rsi, macd, previousClose, high52Week, low52Week, avgVolume, currentVolume, adx, cmf, obvDivergence } = inputs;
+  const { price, sma20, sma50, sma200, rsi, macd, previousClose, high52Week, low52Week, avgVolume20d, currentVolume, relVol, adx, cmf, obvDivergence } = inputs;
 
-  // Trend (3 factors)
-  factors.push({ name: 'Above 20 SMA', passed: price > sma20, value: `$${price.toFixed(2)}`, threshold: `> $${sma20.toFixed(2)}`, weight: 1 });
-  factors.push({ name: 'Above 50 SMA', passed: price > sma50, value: `$${price.toFixed(2)}`, threshold: `> $${sma50.toFixed(2)}`, weight: 1 });
-  factors.push({ name: 'Above 200 SMA', passed: price > sma200, value: `$${price.toFixed(2)}`, threshold: `> $${sma200.toFixed(2)}`, weight: 1 });
+  // ── Trend structure (3 factors, non-correlated) ──────────────────────────────
+  // 1. Short-term trend: price above SMA20
+  factors.push({ name: 'Above 20 SMA (short trend)', passed: price > sma20, value: `$${price.toFixed(2)}`, threshold: `> $${sma20.toFixed(2)}`, weight: 1 });
+  // 2. Medium-term trend: price above SMA50
+  factors.push({ name: 'Above 50 SMA (mid trend)', passed: price > sma50, value: `$${price.toFixed(2)}`, threshold: `> $${sma50.toFixed(2)}`, weight: 1 });
+  // 3. Trend fully stacked (SMA20>50>200) — proper bull structure, not just price>200
+  factors.push({ name: 'SMAs Stacked (20>50>200)', passed: sma20 > sma50 && sma50 > sma200, value: `20:${sma20.toFixed(0)} 50:${sma50.toFixed(0)} 200:${sma200.toFixed(0)}`, threshold: 'All ascending', weight: 1 });
 
-  // Momentum (3 factors)
-  factors.push({ name: 'Golden Cross (50>200)', passed: sma50 > sma200, value: `50: $${sma50.toFixed(2)}`, threshold: `> 200: $${sma200.toFixed(2)}`, weight: 1 });
-  factors.push({ name: 'MACD Bullish', passed: macd.macd > macd.signal, value: macd.macd.toFixed(3), threshold: `> Signal`, weight: 1 });
-  factors.push({ name: 'RSI Not Overbought', passed: rsi < 70, value: rsi.toFixed(0), threshold: '< 70', weight: 1 });
+  // ── Momentum (3 factors) ─────────────────────────────────────────────────────
+  // 4. MACD crossover
+  factors.push({ name: 'MACD Bullish', passed: macd.macd > macd.signal, value: macd.macd.toFixed(3), threshold: `> Signal ${macd.signal.toFixed(3)}`, weight: 1 });
+  // 5. RSI momentum zone — not just "not extreme" but actually in bullish zone
+  factors.push({ name: 'RSI Momentum Zone (45–70)', passed: rsi >= 45 && rsi < 70, value: rsi.toFixed(0), threshold: '45–70', weight: 1 });
+  // 6. RSI not in panic (<25 oversold) or euphoria (>80 overbought) — quality check
+  factors.push({ name: 'RSI Not Extreme (<80, >25)', passed: rsi < 80 && rsi > 25, value: rsi.toFixed(0), threshold: '25–80', weight: 1 });
 
-  // Position (3 factors)
-  factors.push({ name: 'RSI Not Oversold', passed: rsi > 30, value: rsi.toFixed(0), threshold: '> 30', weight: 1 });
+  // ── Position in range (2 factors) ───────────────────────────────────────────
+  // 7. Above 52-week midpoint (medium-term strength)
   const midpoint = (high52Week + low52Week) / 2;
   factors.push({ name: 'Above 52w Midpoint', passed: price > midpoint, value: `$${price.toFixed(2)}`, threshold: `> $${midpoint.toFixed(2)}`, weight: 1 });
-  factors.push({ name: 'Near 52w High (>80%)', passed: price >= high52Week * 0.8, value: `${((price / high52Week) * 100).toFixed(0)}%`, threshold: '> 80%', weight: 1 });
+  // 8. In upper half of 52w range (leadership signal)
+  factors.push({ name: 'Upper 52w Quartile (>75%)', passed: price >= low52Week + (high52Week - low52Week) * 0.75, value: `${((price - low52Week) / Math.max(high52Week - low52Week, 1) * 100).toFixed(0)}%`, threshold: '> 75% of range', weight: 1 });
 
-  // New factors (3)
+  // ── Volume & flow (4 factors) ────────────────────────────────────────────────
+  // 9. Volume confirmation — above-average volume suggests institutional participation
+  factors.push({ name: 'Volume Confirmation (>120% avg)', passed: relVol >= 1.2, value: `${(relVol * 100).toFixed(0)}% avg`, threshold: '> 120%', weight: 1 });
+  // 10. ADX trend strength
   factors.push({ name: 'Trending Market (ADX>20)', passed: adx > 20, value: adx.toFixed(1), threshold: '> 20', weight: 1 });
-  factors.push({ name: 'Positive Money Flow (CMF)', passed: cmf > 0, value: cmf.toFixed(4), threshold: '> 0', weight: 1 });
-  factors.push({ name: 'No Bearish OBV Divergence', passed: obvDivergence !== 'BEARISH', value: obvDivergence, threshold: '≠ BEARISH', weight: 1 });
+  // 11. Chaikin Money Flow positive (buying pressure)
+  factors.push({ name: 'Positive Money Flow (CMF>0.05)', passed: cmf > 0.05, value: cmf.toFixed(4), threshold: '> 0.05', weight: 1 });
+  // 12. OBV divergence not bearish (smart money not distributing)
+  factors.push({ name: 'No OBV Distribution', passed: obvDivergence !== 'BEARISH', value: obvDivergence, threshold: '≠ BEARISH', weight: 1 });
 
   const score = factors.filter(f => f.passed).length;
   return { score, maxScore: 12, factors };
@@ -1727,12 +1834,15 @@ export async function GET(
   }));
   const chartPatterns = detectAllPatterns(patternCandles, price);
   const atr = calculateATR(priceHistory as any);
-  const { support, resistance } = findSupportResistance(priceHistory as any);
+  const { support, resistance } = findSupportResistance(priceHistory as any, price);
   // Prefer Schwab 52-week data if available, otherwise compute from candles
   const high52Week = schwab52WeekHigh > 0 ? schwab52WeekHigh : (closes.length > 0 ? Math.max(...closes) : price * 1.2);
   const low52Week = schwab52WeekLow > 0 ? schwab52WeekLow : (closes.length > 0 ? Math.min(...closes) : price * 0.7);
   const fibonacci = calculateFibonacciLevels(high52Week, low52Week, price);
-  const avgVolume = priceHistory.length > 0 ? priceHistory.reduce((sum, c) => sum + c.volume, 0) / priceHistory.length : 0;
+  // 20-day average volume (institutional standard — not lifetime average)
+  const recent20 = priceHistory.slice(-20);
+  const avgVolume20d = recent20.length > 0 ? recent20.reduce((sum, c) => sum + c.volume, 0) / recent20.length : 0;
+  const relVol = avgVolume20d > 0 ? Math.round((todayVolume / avgVolume20d) * 100) / 100 : 1;
 
   // Get fundamentals
   const metrics = financials?.metric || {};
@@ -1762,7 +1872,8 @@ export async function GET(
 
   const technicalInputs: TechnicalInputs = {
     price, sma20, sma50, sma200, ema12, ema26, rsi, macd, bbands, atr,
-    previousClose, high52Week, low52Week, avgVolume, currentVolume: todayVolume,
+    previousClose, high52Week, low52Week,
+    avgVolume20d, currentVolume: todayVolume, relVol,
     adx: adxResult.adx, cmf, obvDivergence,
   };
 
@@ -2147,6 +2258,8 @@ return NextResponse.json({
       sma20: Math.round(sma20 * 100) / 100,
       sma50: Math.round(sma50 * 100) / 100,
       sma200: Math.round(sma200 * 100) / 100,
+      avgVolume20d: Math.round(avgVolume20d),
+      relVol,
       ema12: Math.round(ema12 * 100) / 100,
       ema26: Math.round(ema26 * 100) / 100,
       rsi: Math.round(rsi),
