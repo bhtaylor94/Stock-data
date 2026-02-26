@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSchwabAccessToken, schwabFetchJson } from '@/lib/schwab';
 import { detectUnusualActivityFromChain, type UnusualActivity as UOAResult } from '@/lib/unusualActivityDetector';
 import { getSnapshotStore } from '@/lib/storage/snapshotStore';
+import { getRedis, isRedisAvailable } from '@/lib/redis';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -246,7 +247,50 @@ interface IVAnalysis {
   atmIV: number;
 }
 
-function analyzeIV(calls: OptionContract[], puts: OptionContract[], currentPrice: number, hv20: number = 30): IVAnalysis {
+// ── IV HISTORY — Redis time-series for real IV Rank ───────────────────────────
+// Stores daily ATM IV as "timestamp:decimal" entries in a Redis list per ticker.
+// After 20+ samples accumulate, IV Rank/Percentile switch from HV-anchored
+// estimates to true historical comparisons (identical to Bloomberg methodology).
+
+const IV_HISTORY_KEY = (t: string) => `iv_history:${t}`;
+const IV_MAX_DAYS = 252; // rolling ~1 year of daily readings
+
+async function getIVHistory(ticker: string): Promise<number[]> {
+  if (!isRedisAvailable()) return [];
+  try {
+    const raw = await getRedis().lrange(IV_HISTORY_KEY(ticker), 0, -1) as string[];
+    return raw.map(e => parseFloat(e.split(':')[1])).filter(v => !isNaN(v) && v > 0);
+  } catch { return []; }
+}
+
+async function storeIVSample(ticker: string, atmIVDecimal: number): Promise<void> {
+  if (!isRedisAvailable() || atmIVDecimal <= 0) return;
+  try {
+    const redis = getRedis();
+    const key = IV_HISTORY_KEY(ticker);
+    await redis.rpush(key, `${Date.now()}:${atmIVDecimal.toFixed(5)}`);
+    await redis.ltrim(key, -IV_MAX_DAYS, -1);
+    await redis.expire(key, 420 * 24 * 3600); // 420-day TTL
+  } catch { /* non-fatal */ }
+}
+
+// Returns real IV Rank + Percentile when ≥20 historical samples exist, else null.
+function computeRealIVRank(currentIV: number, history: number[]): { ivRank: number; ivPercentile: number } | null {
+  if (history.length < 20) return null;
+  const minIV = Math.min(...history);
+  const maxIV = Math.max(...history);
+  const ivRank = maxIV > minIV
+    ? Math.min(100, Math.max(0, ((currentIV - minIV) / (maxIV - minIV)) * 100))
+    : 50;
+  const belowCount = history.filter(v => v < currentIV).length;
+  return {
+    ivRank:       Math.round(ivRank),
+    ivPercentile: Math.round((belowCount / history.length) * 100),
+  };
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
+function analyzeIV(calls: OptionContract[], puts: OptionContract[], currentPrice: number, hv20: number = 30, ivHistory: number[] = []): IVAnalysis {
   // ATM window: ±5% from spot, contracts with positive IV
   const atmCalls = calls.filter(c => Math.abs(c.strike - currentPrice) / currentPrice < 0.05 && c.iv > 0);
   const atmPuts  = puts.filter(p => Math.abs(p.strike - currentPrice) / currentPrice < 0.05 && p.iv > 0);
@@ -273,18 +317,28 @@ function analyzeIV(calls: OptionContract[], puts: OptionContract[], currentPrice
 
   const putCallIVSkew = avgPutIV - avgCallIV;
 
-  // HV-anchored IV Rank — calibrated per stock, not a one-size-fits-all range.
-  // Assumes: suppressed IV ≈ 0.70× HV20, stressed IV ≈ 2.20× HV20.
-  // This correctly reflects that TSLA's "normal" IV range ≠ SPY's.
-  const hvDecimal = hv20 / 100;
-  const ivLow  = hvDecimal * 0.70;  // unusually cheap vol for this stock
-  const ivHigh = hvDecimal * 2.20;  // crisis/event-driven spike level
-  const ivRank = Math.min(100, Math.max(0, ((atmIV - ivLow) / (ivHigh - ivLow)) * 100));
+  // IV Rank / Percentile: use real 52-week history when ≥20 samples exist.
+  // Falls back to HV-anchored estimate while history accumulates (new tickers).
+  const realRank = computeRealIVRank(atmIV, ivHistory);
 
-  // IV Percentile: how far current IV sits above HV20 (50 = at HV, 100 = 2× HV, 0 = ≤0.5× HV)
-  const ivPercentile = hvDecimal > 0
-    ? Math.min(100, Math.max(0, ((atmIV / hvDecimal) - 0.5) / 1.5 * 100))
-    : ivRank;
+  let ivRank: number;
+  let ivPercentile: number;
+
+  if (realRank) {
+    // True historical rank — same methodology as Bloomberg/tastytrade
+    ivRank      = realRank.ivRank;
+    ivPercentile = realRank.ivPercentile;
+  } else {
+    // HV-anchored estimate: suppressed ≈ 0.70× HV20, stressed ≈ 2.20× HV20
+    // Adapts per stock: TSLA's "normal" range ≠ SPY's
+    const hvDecimal = hv20 / 100;
+    const ivLow  = hvDecimal * 0.70;
+    const ivHigh = hvDecimal * 2.20;
+    ivRank = Math.min(100, Math.max(0, ((atmIV - ivLow) / (ivHigh - ivLow)) * 100));
+    ivPercentile = hvDecimal > 0
+      ? Math.min(100, Math.max(0, ((atmIV / hvDecimal) - 0.5) / 1.5 * 100))
+      : ivRank;
+  }
 
   let ivSignal: 'HIGH' | 'ELEVATED' | 'NORMAL' | 'LOW' = 'NORMAL';
   let recommendation: 'BUY_PREMIUM' | 'SELL_PREMIUM' | 'NEUTRAL' = 'NEUTRAL';
@@ -1630,7 +1684,11 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   }
 
   const { calls, puts, expirations, byExpiration } = parseOptionsChain(chainData, currentPrice);
-  const priceHistory = await fetchPriceHistory(token, ticker);
+  // Fetch price history and IV history in parallel
+  const [priceHistory, ivHistory] = await Promise.all([
+    fetchPriceHistory(token, ticker),
+    getIVHistory(ticker),
+  ]);
   const closes = priceHistory.map(c => c.close);
 
   const rsi = closes.length > 14 ? calculateRSI(closes) : 50;
@@ -1671,7 +1729,9 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   // Convert trend for unusual activity detection
   const stockTrend: 'UP' | 'DOWN' | 'SIDEWAYS' = trend === 'BULLISH' ? 'UP' : trend === 'BEARISH' ? 'DOWN' : 'SIDEWAYS';
 
-  const ivAnalysis = analyzeIV(calls, puts, currentPrice, hv20);
+  const ivAnalysis = analyzeIV(calls, puts, currentPrice, hv20, ivHistory);
+  // Store today's ATM IV sample to build the rolling history (non-blocking)
+  storeIVSample(ticker, ivAnalysis.atmIV / 100).catch(() => {});
   const marketMetrics = calculateMarketMetrics(calls, puts, currentPrice);
 
   // Phase E: load repeat flow map from snapshot store
@@ -1775,7 +1835,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     gex,
     ivTermStructure,
     earningsImpliedMove,
-    historicalVolatility: { hv20, ivVsHV: ivAnalysis.atmIV > 0 && hv20 > 0 ? Math.round((ivAnalysis.atmIV / hv20) * 100) / 100 : null },
+    historicalVolatility: { hv20, ivVsHV: ivAnalysis.atmIV > 0 && hv20 > 0 ? Math.round((ivAnalysis.atmIV / hv20) * 100) / 100 : null, ivHistoryDays: ivHistory.length },
     technicals: {
       trend,
       rsi: Math.round(rsi),

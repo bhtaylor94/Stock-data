@@ -188,6 +188,7 @@ export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: O
               ivVsHV={data.historicalVolatility.ivVsHV}
               ivRank={data.metrics?.ivRank ?? null}
               ivPercentile={data.ivAnalysis?.ivPercentile ?? null}
+              ivHistoryDays={data.historicalVolatility?.ivHistoryDays ?? 0}
             />
           )}
 

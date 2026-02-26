@@ -2,11 +2,12 @@
 import React from 'react';
 
 interface IVHVWidgetProps {
-  atmIV: number;       // decimal, e.g. 0.28 = 28%
-  hv20: number;        // decimal
-  ivVsHV: number | null;  // ratio, e.g. 1.35
-  ivRank: number | null;  // 0-100
+  atmIV: number;             // decimal, e.g. 0.28 = 28%
+  hv20: number;              // decimal
+  ivVsHV: number | null;     // ratio, e.g. 1.35
+  ivRank: number | null;     // 0-100
   ivPercentile?: number | null;
+  ivHistoryDays?: number;    // how many daily samples are in Redis (≥20 = real rank)
 }
 
 function GaugeBar({ pct, color }: { pct: number; color: string }) {
@@ -20,7 +21,7 @@ function GaugeBar({ pct, color }: { pct: number; color: string }) {
   );
 }
 
-export function IVHVWidget({ atmIV, hv20, ivVsHV, ivRank, ivPercentile }: IVHVWidgetProps) {
+export function IVHVWidget({ atmIV, hv20, ivVsHV, ivRank, ivPercentile, ivHistoryDays = 0 }: IVHVWidgetProps) {
   const ivPct = Math.round(atmIV * 100 * 10) / 10;
   const hvPct = Math.round(hv20 * 100 * 10) / 10;
 
@@ -110,8 +111,20 @@ export function IVHVWidget({ atmIV, hv20, ivVsHV, ivRank, ivPercentile }: IVHVWi
             </span>
           </div>
         )}
-        <div className="ml-auto text-[10px] text-slate-500 italic">
-          {signal.sub}
+        <div className="ml-auto flex items-center gap-2">
+          {/* IV Rank confidence — Real (≥20 days) vs HV-anchored estimate */}
+          {ivHistoryDays >= 20 ? (
+            <span className="text-[9px] font-semibold text-emerald-500/70 uppercase tracking-wide">
+              {ivHistoryDays}d history
+            </span>
+          ) : ivHistoryDays > 0 ? (
+            <span className="text-[9px] text-amber-500/70 uppercase tracking-wide">
+              est. ({ivHistoryDays}d)
+            </span>
+          ) : (
+            <span className="text-[9px] text-slate-600 uppercase tracking-wide">est.</span>
+          )}
+          <span className="text-[10px] text-slate-500 italic">{signal.sub}</span>
         </div>
       </div>
     </div>
