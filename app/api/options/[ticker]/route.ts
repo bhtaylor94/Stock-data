@@ -1295,18 +1295,21 @@ function calculateEarningsImpliedMove(
 // ============================================================
 // HISTORICAL VOLATILITY (HV20)
 // ============================================================
-function calculateHV20(priceHistory: { close: number }[]): number {
-  if (priceHistory.length < 22) return 0;
+function calculateHVAtWindow(priceHistory: { close: number }[], window: number): number {
+  if (priceHistory.length < window + 2) return 0;
   const closes = priceHistory.map(c => c.close);
   const logReturns: number[] = [];
   for (let i = 1; i < closes.length; i++) {
     if (closes[i - 1] > 0) logReturns.push(Math.log(closes[i] / closes[i - 1]));
   }
-  const slice = logReturns.slice(-20);
+  const slice = logReturns.slice(-window);
   const mean = slice.reduce((a, b) => a + b, 0) / slice.length;
   const variance = slice.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / (slice.length - 1);
-  const hv20 = Math.sqrt(variance) * Math.sqrt(252) * 100;
-  return Math.round(hv20 * 10) / 10;
+  return Math.round(Math.sqrt(variance) * Math.sqrt(252) * 1000) / 10;
+}
+
+function calculateHV20(priceHistory: { close: number }[]): number {
+  return calculateHVAtWindow(priceHistory, 20);
 }
 
 // ============================================================
@@ -1721,6 +1724,13 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
   const ivTermStructure = calculateIVTermStructure(byExpiration, currentPrice);
   const earningsImpliedMove = calculateEarningsImpliedMove(byExpiration, currentPrice);
   const hv20 = calculateHV20(priceHistory);
+  const hvByWindow = {
+    hv10: calculateHVAtWindow(priceHistory, 10),
+    hv20,
+    hv30: calculateHVAtWindow(priceHistory, 30),
+    hv60: calculateHVAtWindow(priceHistory, 60),
+    hv90: calculateHVAtWindow(priceHistory, 90),
+  };
   
   let trend: 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
   if (currentPrice > sma20 && currentPrice > sma50) trend = 'BULLISH';
@@ -1835,7 +1845,7 @@ export async function GET(request: NextRequest, { params }: { params: { ticker: 
     gex,
     ivTermStructure,
     earningsImpliedMove,
-    historicalVolatility: { hv20, ivVsHV: ivAnalysis.atmIV > 0 && hv20 > 0 ? Math.round((ivAnalysis.atmIV / hv20) * 100) / 100 : null, ivHistoryDays: ivHistory.length },
+    historicalVolatility: { hv20, ivVsHV: ivAnalysis.atmIV > 0 && hv20 > 0 ? Math.round((ivAnalysis.atmIV / hv20) * 100) / 100 : null, ivHistoryDays: ivHistory.length, hvByWindow },
     technicals: {
       trend,
       rsi: Math.round(rsi),

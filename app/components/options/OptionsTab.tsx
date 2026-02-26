@@ -20,6 +20,7 @@ import { PLDiagram } from './PLDiagram';
 import { IVSurfaceHeatmap } from './IVSurfaceHeatmap';
 import { GexChart } from './GexChart';
 import { IVHVWidget } from './IVHVWidget';
+import { VolConeChart } from './VolConeChart';
 
 function LoadingSpinner() {
   return (
@@ -270,6 +271,18 @@ export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: O
           {/* GEX Chart — gamma exposure by strike */}
           {data.gex?.byStrike?.length > 0 && (
             <GexChart gex={data.gex} currentPrice={data.currentPrice} />
+          )}
+
+          {/* Vol Cone — IV term structure vs historical realized vol range */}
+          {data.ivTermStructure?.term?.length >= 2 && data.historicalVolatility?.hvByWindow && (
+            <VolConeChart
+              termStructure={data.ivTermStructure.term}
+              hvByWindow={data.historicalVolatility.hvByWindow}
+              shape={data.ivTermStructure.shape}
+              nearTermIV={data.ivTermStructure.nearTermIV}
+              longerTermIV={data.ivTermStructure.longerTermIV}
+              ivSpread={data.ivTermStructure.ivSpread}
+            />
           )}
 
           {/* SmartFlowSection: merged FlowTape + UnusualActivitySection */}
