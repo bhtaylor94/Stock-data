@@ -147,8 +147,9 @@ export function StockChart({ priceHistory, ticker }: StockChartProps) {
       smaSeries.setData(smaData);
     }
 
-    buildSMASeries(20, 'rgba(251,191,36,0.7)');  // SMA20: amber
+    buildSMASeries(20, 'rgba(251,191,36,0.7)');   // SMA20: amber
     buildSMASeries(50, 'rgba(96,165,250,0.7)');   // SMA50: blue
+    buildSMASeries(200, 'rgba(192,132,252,0.8)'); // SMA200: purple (institutional line)
 
     // Fit and handle resize
     chart.timeScale().fitContent();
@@ -180,6 +181,9 @@ export function StockChart({ priceHistory, ticker }: StockChartProps) {
           </span>
           <span className="flex items-center gap-1">
             <span className="inline-block w-5 h-px bg-blue-400/70" /> SMA 50
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="inline-block w-5 h-px bg-purple-400/80" /> SMA 200
           </span>
         </div>
       </div>

@@ -53,6 +53,12 @@ function DeepDiveContent({
   const { analysis, suggestions, chartPatterns, technicals, fundamentals, news, analysts } = data;
   const candles = data.meta?.priceHistory?.candles as number | undefined;
   const ds = (data.dataSource ?? '') as string;
+  const rs = data.relativeStrength as { rs20d: number | null; rs60d: number | null; rs252d: number | null; rating: string | null } | undefined;
+
+  function rsColor(v: number): string {
+    return v >= 5 ? 'text-emerald-400' : v >= 0 ? 'text-blue-400' : v >= -5 ? 'text-amber-400' : 'text-red-400';
+  }
+  function rsSign(v: number): string { return v >= 0 ? `+${v.toFixed(1)}` : v.toFixed(1); }
 
   return (
     <>
@@ -84,6 +90,41 @@ function DeepDiveContent({
           </span>
         )}
       </div>
+
+      {/* Relative Strength vs SPY strip */}
+      {rs && (rs.rs20d != null || rs.rs60d != null) && (
+        <div className="flex items-center gap-3 px-3 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/40 text-[11px] flex-wrap">
+          <span className="text-slate-500 font-medium">RS vs SPY</span>
+          {rs.rs20d != null && (
+            <span className="flex items-center gap-1">
+              <span className="text-slate-500">20d</span>
+              <span className={`font-mono font-semibold ${rsColor(rs.rs20d)}`}>{rsSign(rs.rs20d)}%</span>
+            </span>
+          )}
+          {rs.rs60d != null && (
+            <span className="flex items-center gap-1">
+              <span className="text-slate-500">60d</span>
+              <span className={`font-mono font-semibold ${rsColor(rs.rs60d)}`}>{rsSign(rs.rs60d)}%</span>
+            </span>
+          )}
+          {rs.rs252d != null && (
+            <span className="flex items-center gap-1">
+              <span className="text-slate-500">1yr</span>
+              <span className={`font-mono font-semibold ${rsColor(rs.rs252d)}`}>{rsSign(rs.rs252d)}%</span>
+            </span>
+          )}
+          {rs.rating && (
+            <span className={`ml-auto font-semibold tracking-wide ${
+              rs.rating === 'STRONG_LEADER' ? 'text-emerald-400' :
+              rs.rating === 'LEADER'        ? 'text-blue-400' :
+              rs.rating === 'INLINE'        ? 'text-slate-400' :
+              rs.rating === 'LAGGARD'       ? 'text-amber-400' : 'text-red-400'
+            }`}>
+              {rs.rating.replace('_', ' ')}
+            </span>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 animate-fade-in">
         {/* LEFT — sticky decision column */}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSchwabAccessToken } from '@/lib/schwab';
+import { getSchwabAccessToken, SCHWAB_HEADERS } from '@/lib/schwab';
 import { TTLCache } from '@/lib/cache';
 
 export const runtime = 'nodejs';
@@ -7,10 +7,6 @@ export const runtime = 'nodejs';
 const cache = new TTLCache<any>();
 const CACHE_TTL = 30_000; // 30 seconds
 
-const SCHWAB_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Accept': 'application/json',
-};
 
 // ~182 tickers across all sectors
 const SCAN_UNIVERSE = [

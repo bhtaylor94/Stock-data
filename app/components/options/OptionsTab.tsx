@@ -18,6 +18,8 @@ import { EarningsWidget } from '../core/EarningsWidget';
 import { PositionSizingCalc } from '../core/PositionSizingCalc';
 import { PLDiagram } from './PLDiagram';
 import { IVSurfaceHeatmap } from './IVSurfaceHeatmap';
+import { GexChart } from './GexChart';
+import { IVHVWidget } from './IVHVWidget';
 
 function LoadingSpinner() {
   return (
@@ -178,6 +180,17 @@ export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: O
             </div>
           )}
 
+          {/* IV vs HV Premium Widget */}
+          {data.ivAnalysis?.atmIV > 0 && data.historicalVolatility?.hv20 > 0 && (
+            <IVHVWidget
+              atmIV={data.ivAnalysis.atmIV}
+              hv20={data.historicalVolatility.hv20 / 100}
+              ivVsHV={data.historicalVolatility.ivVsHV}
+              ivRank={data.metrics?.ivRank ?? null}
+              ivPercentile={data.ivAnalysis?.ivPercentile ?? null}
+            />
+          )}
+
           <EarningsWidget ticker={ticker} />
 
           {/* Named Flow Setups — up to 3 */}
@@ -251,6 +264,11 @@ export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: O
               maxPain={data.metrics?.maxPain ?? data.currentPrice}
               currentPrice={data.currentPrice}
             />
+          )}
+
+          {/* GEX Chart — gamma exposure by strike */}
+          {data.gex?.byStrike?.length > 0 && (
+            <GexChart gex={data.gex} currentPrice={data.currentPrice} />
           )}
 
           {/* SmartFlowSection: merged FlowTape + UnusualActivitySection */}

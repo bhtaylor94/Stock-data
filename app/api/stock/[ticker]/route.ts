@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getSchwabAccessToken } from '@/lib/schwab';
+import { getSchwabAccessToken, SCHWAB_HEADERS } from '@/lib/schwab';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,13 +18,6 @@ export const dynamic = 'force-dynamic';
 
 const FINNHUB_KEY = process.env.FINNHUB_API_KEY;
 
-// CRITICAL FIX: Headers required for Akamai/Schwab API
-// Without User-Agent, Akamai's CDN blocks requests with 403
-const SCHWAB_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Accept': 'application/json',
-  'Accept-Language': 'en-US,en;q=0.9',
-};
 
 // ============================================================
 // Accuracy-first helpers (freshness gates, regime detection, confidence calibration)
@@ -1650,7 +1643,7 @@ export async function GET(
     }
   }
 
-  // Fetch all Finnhub data in parallel
+  // Fetch all Finnhub data + SPY relative strength history in parallel
   const [
     profile,
     financials,
@@ -1661,6 +1654,7 @@ export async function GET(
     earnings,
     insiderTx,
     finnhubQuote,
+    spyHistory,
   ] = await Promise.all([
     getCompanyProfile(ticker),
     getFinancials(ticker),
@@ -1671,6 +1665,13 @@ export async function GET(
     getEarnings(ticker),
     getInsiderTransactions(ticker),
     !quote ? getFinnhubQuote(ticker) : Promise.resolve(null),
+    // SPY history for relative strength — skip if ticker IS SPY
+    ticker.toUpperCase() === 'SPY'
+      ? Promise.resolve([] as { close: number }[])
+      : (schwabToken
+          ? fetchSchwabPriceHistory(schwabToken, 'SPY')
+          : getFinnhubCandles('SPY')
+        ).catch(() => [] as { close: number }[]),
   ]);
 
   // Use Finnhub quote as fallback
@@ -2062,6 +2063,17 @@ export async function GET(
     }
   }
 
+  // Relative Strength vs SPY
+  function computeRS(hist: { close: number }[], bench: { close: number }[], days: number): number | null {
+    if (hist.length < days + 1 || bench.length < days + 1) return null;
+    const tickerRet = (hist[hist.length - 1].close - hist[hist.length - 1 - days].close) / hist[hist.length - 1 - days].close * 100;
+    const spyRet = (bench[bench.length - 1].close - bench[bench.length - 1 - days].close) / bench[bench.length - 1 - days].close * 100;
+    return Math.round((tickerRet - spyRet) * 100) / 100;
+  }
+  const rs20d = computeRS(priceHistory, spyHistory as { close: number }[], 20);
+  const rs60d = computeRS(priceHistory, spyHistory as { close: number }[], 60);
+  const rs252d = computeRS(priceHistory, spyHistory as { close: number }[], 252);
+
 return NextResponse.json({
     ticker,
     name: profile?.name || `${ticker}`,
@@ -2080,6 +2092,19 @@ return NextResponse.json({
       close: Math.round(c.close * 100) / 100,
       volume: c.volume,
     })),
+
+    relativeStrength: {
+      rs20d,
+      rs60d,
+      rs252d,
+      // RS rating: is the stock a leader or laggard?
+      rating: rs60d == null ? null
+        : rs60d >= 10 ? 'STRONG_LEADER'
+        : rs60d >= 3  ? 'LEADER'
+        : rs60d >= -3 ? 'INLINE'
+        : rs60d >= -10 ? 'LAGGARD'
+        : 'WEAK_LAGGARD',
+    },
 
     meta: {
       asOf: freshness.asOf,
