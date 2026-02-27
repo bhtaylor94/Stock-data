@@ -1,12 +1,11 @@
 'use client';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  RefreshCw, Search, AlertTriangle, CheckCircle2,
+  RefreshCw, Search, AlertTriangle, ChevronDown,
 } from 'lucide-react';
 
 import { StockSetupCard } from './StockSetupCard';
 
-// Deep-dive sub-components (same as original StockTab in page.tsx)
 import { StockDecisionHero } from '@/app/components/stock/StockDecisionHero';
 import { StockScoreBreakdown } from '@/app/components/stock/StockScoreBreakdown';
 import { ConsensusSourcesList } from '@/app/components/stock/ConsensusSourcesList';
@@ -29,8 +28,6 @@ const SETUP_TYPES = [
   { id: 'gap-up',       label: 'Gap Up'       },
 ];
 
-// ── Small shared utilities ────────────────────────────────────────────────────
-
 function LoadingSpinner() {
   return (
     <div className="flex items-center justify-center py-12">
@@ -39,7 +36,40 @@ function LoadingSpinner() {
   );
 }
 
-// ── DeepDiveContent: mirrors the original StockTab body ──────────────────────
+/** Collapsible section wrapper for the right column */
+function Section({
+  title,
+  icon,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  icon: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="rounded-2xl border border-slate-700/50 bg-slate-800/20 overflow-hidden">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-800/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-sm">{icon}</span>
+          <span className="text-xs font-semibold text-slate-300 uppercase tracking-wide">{title}</span>
+        </div>
+        <ChevronDown
+          size={14}
+          className={`text-slate-500 transition-transform duration-200 ${open ? '' : '-rotate-90'}`}
+        />
+      </button>
+      {open && <div className="px-4 pb-4 space-y-4">{children}</div>}
+    </div>
+  );
+}
+
+// ── DeepDiveContent ───────────────────────────────────────────────────────────
 
 function DeepDiveContent({
   data, ticker, onTrack, onViewEvidence, onTrade,
@@ -50,6 +80,8 @@ function DeepDiveContent({
   onViewEvidence?: () => void;
   onTrade?: (symbol: string, price: number, action: 'BUY' | 'SELL' | 'HOLD', quantity: number) => void;
 }) {
+  const [showAllNews, setShowAllNews] = useState(false);
+
   const { analysis, suggestions, chartPatterns, technicals, fundamentals, news, analysts } = data;
   const candles = data.meta?.priceHistory?.candles as number | undefined;
   const ds = (data.dataSource ?? '') as string;
@@ -60,6 +92,9 @@ function DeepDiveContent({
     return v >= 5 ? 'text-emerald-400' : v >= 0 ? 'text-blue-400' : v >= -5 ? 'text-amber-400' : 'text-red-400';
   }
   function rsSign(v: number): string { return v >= 0 ? `+${v.toFixed(1)}` : v.toFixed(1); }
+
+  const headlines: any[] = news?.headlines ?? [];
+  const visibleHeadlines = showAllNews ? headlines : headlines.slice(0, 3);
 
   return (
     <>
@@ -94,7 +129,7 @@ function DeepDiveContent({
 
       {/* Market context strip — RS vs SPY + Relative Volume */}
       {((rs && (rs.rs20d != null || rs.rs60d != null)) || relVol != null) && (
-        <div className="flex items-center gap-3 px-3 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/40 text-[11px] flex-wrap">
+        <div className="flex items-center gap-3 px-3 py-1.5 rounded-lg bg-slate-800/40 border border-slate-700/40 text-[11px] flex-wrap mb-4">
           {rs && (rs.rs20d != null || rs.rs60d != null) && (
             <>
               <span className="text-slate-500 font-medium">RS vs SPY</span>
@@ -148,8 +183,9 @@ function DeepDiveContent({
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[320px_1fr] gap-4 animate-fade-in">
-        {/* LEFT — sticky decision column */}
+      <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4 animate-fade-in">
+
+        {/* ── LEFT — sticky decision column ───────────────────────── */}
         <div className="space-y-3 lg:sticky lg:top-[100px] lg:self-start">
           <StockDecisionHero
             ticker={ticker}
@@ -188,15 +224,15 @@ function DeepDiveContent({
           <StockScoreBreakdown analysis={analysis} />
         </div>
 
-        {/* RIGHT — scrollable analysis column */}
+        {/* ── RIGHT — scrollable analysis column ──────────────────── */}
         <div className="space-y-4">
-          {/* Price chart — rendered when at least some candle data is available */}
+
+          {/* ① CHART — see the picture first */}
           {(data.priceHistory?.length > 5) && (
-            <StockChart
-              priceHistory={data.priceHistory}
-              ticker={ticker}
-            />
+            <StockChart priceHistory={data.priceHistory} ticker={ticker} />
           )}
+
+          {/* ② AI NARRATIVE — what's the story */}
           <NarrativeCard
             ticker={ticker}
             price={data.price || 0}
@@ -205,77 +241,7 @@ function DeepDiveContent({
             technicals={technicals}
           />
 
-          {data.portfolioContext && (
-            <PortfolioContextAlert portfolioContext={data.portfolioContext} />
-          )}
-
-          {data?.meta?.warnings?.technicals && (
-            <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
-              <h3 className="text-sm font-semibold text-amber-300 mb-1">Limited technical data</h3>
-              <p className="text-xs text-slate-300">{data.meta.warnings.technicals}</p>
-              {data?.meta?.priceHistory && (
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Candles: <span className="font-mono">{data.meta.priceHistory.candles}</span> · Source: <span className="font-mono">{data.meta.priceHistory.source}</span>
-                </p>
-              )}
-            </div>
-          )}
-
-          {(!news?.headlines || news.headlines.length === 0) && data?.meta?.warnings?.news && (
-            <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
-              <h3 className="text-sm font-semibold text-amber-300 mb-1">News unavailable</h3>
-              <p className="text-xs text-slate-300">{data.meta.warnings.news}</p>
-              <p className="text-xs text-slate-400 mt-1">
-                Set <span className="font-mono">FINNHUB_API_KEY</span> in Vercel and redeploy.
-              </p>
-            </div>
-          )}
-
-          {news?.headlines?.length > 0 && (
-            <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-semibold text-white">Recent News</h3>
-                <button onClick={onViewEvidence} className="text-xs text-slate-300 hover:text-white underline underline-offset-2">
-                  View in Evidence
-                </button>
-              </div>
-              <div className="space-y-2">
-                {news.headlines.slice(0, 8).map((item: any, i: number) => (
-                  <div key={i} className="p-3 rounded-xl bg-slate-900/40 border border-slate-700/40">
-                    <div className="text-sm text-white">{item.headline || item.title || 'Headline'}</div>
-                    <div className="mt-1 text-xs text-slate-400 flex items-center gap-2">
-                      <span>{item.source || ''}</span>
-                      <span className="opacity-50">·</span>
-                      <span>{(() => {
-                        const dt = item.datetime;
-                        if (!dt) return '';
-                        if (typeof dt === 'number') return new Date(dt * 1000).toLocaleDateString();
-                        const d = new Date(dt);
-                        return isNaN(d.getTime()) ? '' : d.toLocaleDateString();
-                      })()}</span>
-                      {item.url && (
-                        <>
-                          <span className="opacity-50">·</span>
-                          <a className="underline underline-offset-2 hover:text-white" href={item.url} target="_blank" rel="noreferrer">Open</a>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <ConsensusSourcesList
-            fundamentals={fundamentals}
-            technicals={technicals}
-            news={news}
-            analysts={analysts}
-            chartPatterns={chartPatterns}
-          />
-
-          <ChartPatternCard chartPatterns={chartPatterns} />
-
+          {/* ③ RECOMMENDATIONS — what should I do (elevated from bottom) */}
           {suggestions && suggestions.length > 0 && (
             <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
               <h3 className="text-sm font-semibold text-white mb-3">Recommendations</h3>
@@ -302,6 +268,95 @@ function DeepDiveContent({
               </div>
             </div>
           )}
+
+          {/* ④ PORTFOLIO CONTEXT — if already in this position */}
+          {data.portfolioContext && (
+            <PortfolioContextAlert portfolioContext={data.portfolioContext} />
+          )}
+
+          {/* ⑤ WARNINGS — conditional, inline */}
+          {data?.meta?.warnings?.technicals && (
+            <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
+              <h3 className="text-sm font-semibold text-amber-300 mb-1">Limited technical data</h3>
+              <p className="text-xs text-slate-300">{data.meta.warnings.technicals}</p>
+              {data?.meta?.priceHistory && (
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Candles: <span className="font-mono">{data.meta.priceHistory.candles}</span> · Source: <span className="font-mono">{data.meta.priceHistory.source}</span>
+                </p>
+              )}
+            </div>
+          )}
+
+          {(!news?.headlines || news.headlines.length === 0) && data?.meta?.warnings?.news && (
+            <div className="p-4 rounded-2xl border border-amber-500/30 bg-amber-500/5">
+              <h3 className="text-sm font-semibold text-amber-300 mb-1">News unavailable</h3>
+              <p className="text-xs text-slate-300">{data.meta.warnings.news}</p>
+              <p className="text-xs text-slate-400 mt-1">
+                Set <span className="font-mono">FINNHUB_API_KEY</span> in Vercel and redeploy.
+              </p>
+            </div>
+          )}
+
+          {/* ⑥ NEWS — 3 headlines by default, expand to see all */}
+          {headlines.length > 0 && (
+            <div className="p-4 rounded-2xl border border-slate-700/50 bg-slate-800/30">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-white">
+                  Recent News
+                  <span className="ml-2 text-xs text-slate-500 font-normal">{headlines.length} articles</span>
+                </h3>
+                <button onClick={onViewEvidence} className="text-xs text-slate-400 hover:text-white underline underline-offset-2">
+                  Evidence
+                </button>
+              </div>
+              <div className="space-y-2">
+                {visibleHeadlines.map((item: any, i: number) => (
+                  <div key={i} className="p-3 rounded-xl bg-slate-900/40 border border-slate-700/40">
+                    <div className="text-sm text-white">{item.headline || item.title || 'Headline'}</div>
+                    <div className="mt-1 text-xs text-slate-400 flex items-center gap-2">
+                      <span>{item.source || ''}</span>
+                      <span className="opacity-50">·</span>
+                      <span>{(() => {
+                        const dt = item.datetime;
+                        if (!dt) return '';
+                        if (typeof dt === 'number') return new Date(dt * 1000).toLocaleDateString();
+                        const d = new Date(dt);
+                        return isNaN(d.getTime()) ? '' : d.toLocaleDateString();
+                      })()}</span>
+                      {item.url && (
+                        <>
+                          <span className="opacity-50">·</span>
+                          <a className="underline underline-offset-2 hover:text-white" href={item.url} target="_blank" rel="noreferrer">Open</a>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {headlines.length > 3 && (
+                <button
+                  onClick={() => setShowAllNews(v => !v)}
+                  className="w-full mt-2 flex items-center justify-center gap-1.5 py-1.5 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                >
+                  <ChevronDown size={12} className={`transition-transform duration-200 ${showAllNews ? '' : '-rotate-90'}`} />
+                  {showAllNews ? 'Show less' : `Show ${headlines.length - 3} more articles`}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* ⑦ DEEP RESEARCH — collapsible, for those who want to dig in */}
+          <Section title="Deep Research" icon="🔬">
+            <ConsensusSourcesList
+              fundamentals={fundamentals}
+              technicals={technicals}
+              news={news}
+              analysts={analysts}
+              chartPatterns={chartPatterns}
+            />
+            <ChartPatternCard chartPatterns={chartPatterns} />
+          </Section>
+
         </div>
       </div>
     </>
@@ -352,7 +407,6 @@ export function StocksTab({
     return () => clearInterval(interval);
   }, []);
 
-  // Pre-fill search box if a ticker is already loaded via global search
   useEffect(() => {
     if (ticker) setSearchInput(ticker);
   }, [ticker]);
@@ -375,11 +429,8 @@ export function StocksTab({
   return (
     <div className="space-y-5 animate-fade-in">
 
-      {/* ═══════════════════════════════════════════════════════════
-          SECTION 1 — SETUP SCANNER
-      ══════════════════════════════════════════════════════════ */}
+      {/* ══ SECTION 1 — SETUP SCANNER ══════════════════════════════════════ */}
 
-      {/* Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h2 className="text-base font-bold text-white">Stock Setup Scanner</h2>
@@ -397,12 +448,12 @@ export function StocksTab({
         </button>
       </div>
 
-      {/* Outlook filter */}
+      {/* Outlook + setup type filters on one row to save vertical space */}
       <div className="flex gap-2 flex-wrap">
         {[
-          { id: 'all',     label: 'All Setups' },
-          { id: 'bullish', label: '📈 Bullish'  },
-          { id: 'bearish', label: '📉 Bearish'  },
+          { id: 'all',     label: 'All'      },
+          { id: 'bullish', label: '📈 Bull'  },
+          { id: 'bearish', label: '📉 Bear'  },
         ].map(({ id, label }) => (
           <button
             key={id}
@@ -416,15 +467,14 @@ export function StocksTab({
             {label}
           </button>
         ))}
-      </div>
 
-      {/* Setup type pills */}
-      <div className="flex gap-1.5 flex-wrap">
+        <div className="w-px bg-slate-700/50 mx-1 self-stretch" />
+
         {SETUP_TYPES.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => setSetupFilter(id)}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all ${
+            className={`px-2.5 py-1.5 rounded-md text-xs font-medium transition-all ${
               setupFilter === id
                 ? 'bg-slate-600 text-white'
                 : 'text-slate-500 hover:text-slate-300'
@@ -435,7 +485,6 @@ export function StocksTab({
         ))}
       </div>
 
-      {/* Summary line */}
       {!setupsLoading && setupsData && (
         <p className="text-xs text-slate-500">
           {displayed.length} setup{displayed.length !== 1 ? 's' : ''} found
@@ -443,13 +492,10 @@ export function StocksTab({
         </p>
       )}
 
-      {/* Setup cards */}
       {setupsLoading ? (
         <LoadingSpinner />
       ) : displayed.length === 0 ? (
-        <div className="text-center py-12 text-slate-500 text-sm">
-          No setups match current filters
-        </div>
+        <div className="text-center py-12 text-slate-500 text-sm">No setups match current filters</div>
       ) : (
         <div className="space-y-2">
           {displayed.map((r: any) => (
@@ -458,9 +504,7 @@ export function StocksTab({
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════
-          DIVIDER
-      ══════════════════════════════════════════════════════════ */}
+      {/* ══ DIVIDER ══════════════════════════════════════════════════════════ */}
       <div className="relative py-2">
         <div className="absolute inset-0 flex items-center">
           <div className="w-full border-t border-slate-700/50" />
@@ -470,11 +514,8 @@ export function StocksTab({
         </div>
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════
-          SECTION 2 — DEEP DIVE
-      ══════════════════════════════════════════════════════════ */}
+      {/* ══ SECTION 2 — DEEP DIVE ════════════════════════════════════════════ */}
 
-      {/* Search bar */}
       <form onSubmit={handleDeepDiveSearch} className="flex gap-2">
         <div className="relative flex-1">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
@@ -496,7 +537,6 @@ export function StocksTab({
         </button>
       </form>
 
-      {/* Deep dive content */}
       {loading && <LoadingSpinner />}
 
       {!loading && !data && (
