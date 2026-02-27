@@ -232,18 +232,20 @@ async function analyzeOptions(symbol: string, token: string): Promise<Suggestion
 
     // Build options chain array
     const callMap = optionsData.callExpDateMap || {};
+    const putMap = optionsData.putExpDateMap || {};
     const allOptions: any[] = [];
 
     for (const expDate in callMap) {
       for (const strike in callMap[expDate]) {
-        const calls = callMap[expDate][strike];
-        calls.forEach((opt: any) => {
-          allOptions.push({
-            ...opt,
-            type: 'CALL',
-            strike: parseFloat(strike),
-            expiration: expDate,
-          });
+        callMap[expDate][strike].forEach((opt: any) => {
+          allOptions.push({ ...opt, type: 'CALL', strike: parseFloat(strike), expiration: expDate });
+        });
+      }
+    }
+    for (const expDate in putMap) {
+      for (const strike in putMap[expDate]) {
+        putMap[expDate][strike].forEach((opt: any) => {
+          allOptions.push({ ...opt, type: 'PUT', strike: parseFloat(strike), expiration: expDate });
         });
       }
     }

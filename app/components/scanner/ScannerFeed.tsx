@@ -23,6 +23,7 @@ interface ScanData {
 }
 
 type SortMode = 'heat' | 'volume' | 'change';
+type DirectionFilter = 'ALL' | 'UP' | 'DOWN';
 
 function fmtVol(v: number): string {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
@@ -40,6 +41,7 @@ export function ScannerFeed({ onSelectTicker }: { onSelectTicker?: (ticker: stri
   const [now, setNow] = useState(Date.now());
 
   const [sectorFilter, setSectorFilter] = useState('ALL');
+  const [directionFilter, setDirectionFilter] = useState<DirectionFilter>('ALL');
   const [sortMode, setSortMode] = useState<SortMode>('heat');
   const [searchQuery, setSearchQuery] = useState('');
   const [showAll, setShowAll] = useState(false);
@@ -93,6 +95,9 @@ export function ScannerFeed({ onSelectTicker }: { onSelectTicker?: (ticker: stri
     if (sectorFilter !== 'ALL') {
       list = list.filter(r => r.sector === sectorFilter);
     }
+    if (directionFilter !== 'ALL') {
+      list = list.filter(r => r.direction === directionFilter);
+    }
     if (sortMode === 'volume') {
       list = [...list].sort((a, b) => (b.volRatio ?? 0) - (a.volRatio ?? 0));
     } else if (sortMode === 'change') {
@@ -102,7 +107,7 @@ export function ScannerFeed({ onSelectTicker }: { onSelectTicker?: (ticker: stri
     return list;
   }, [data, searchQuery, sectorFilter, sortMode]);
 
-  const isExpanded = showAll || sectorFilter !== 'ALL' || !!searchQuery;
+  const isExpanded = showAll || sectorFilter !== 'ALL' || directionFilter !== 'ALL' || !!searchQuery;
   const displayList = isExpanded ? filtered : filtered.slice(0, DISPLAY_LIMIT);
 
   const ageSeconds = scannedAt ? Math.floor((now - new Date(scannedAt).getTime()) / 1000) : null;
@@ -139,7 +144,7 @@ export function ScannerFeed({ onSelectTicker }: { onSelectTicker?: (ticker: stri
         </button>
       </div>
 
-      {/* Controls row: search + sort modes */}
+      {/* Controls row: search + direction + sort modes */}
       <div className="px-3 pt-2.5 pb-1.5 border-b border-slate-800/40 flex items-center gap-2 flex-wrap">
         <input
           type="text"
@@ -148,11 +153,36 @@ export function ScannerFeed({ onSelectTicker }: { onSelectTicker?: (ticker: stri
           onChange={e => setSearchQuery(e.target.value)}
           className="flex-1 min-w-[120px] px-3 py-1.5 text-xs rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
         />
+        {/* Direction filter */}
+        <div className="flex items-center gap-1">
+          {([
+            { dir: 'ALL' as DirectionFilter, label: 'All' },
+            { dir: 'UP' as DirectionFilter, label: '↑ Bull' },
+            { dir: 'DOWN' as DirectionFilter, label: '↓ Bear' },
+          ] as const).map(({ dir, label }) => (
+            <button
+              key={dir}
+              onClick={() => { setDirectionFilter(dir); setShowAll(false); }}
+              className={`px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-colors whitespace-nowrap ${
+                directionFilter === dir
+                  ? dir === 'UP'
+                    ? 'bg-emerald-600 border-emerald-500 text-white'
+                    : dir === 'DOWN'
+                    ? 'bg-red-600 border-red-500 text-white'
+                    : 'bg-blue-600 border-blue-500 text-white'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {/* Sort modes */}
         <div className="flex items-center gap-1">
           {([
             { mode: 'heat' as SortMode, label: '🔥 Heat' },
-            { mode: 'volume' as SortMode, label: '📊 Vol Surge' },
-            { mode: 'change' as SortMode, label: '📈 % Move' },
+            { mode: 'volume' as SortMode, label: '📊 Vol' },
+            { mode: 'change' as SortMode, label: '% Move' },
           ] as const).map(({ mode, label }) => (
             <button
               key={mode}

@@ -170,6 +170,8 @@ export async function GET(req: NextRequest) {
         const avgVol10d = f.avg10DaysVolume ?? 0;
         const volRatio = avgVol10d > 0 ? Math.round((volume / avgVol10d) * 10) / 10 : null;
         const heat = heatScore(q, f);
+        const high52Week = Math.round((q['52WeekHigh'] ?? f.high52Weeks ?? 0) * 100) / 100;
+        const low52Week  = Math.round((q['52WeekLow']  ?? f.low52Weeks  ?? 0) * 100) / 100;
         return {
           ticker,
           price: Math.round(price * 100) / 100,
@@ -181,6 +183,8 @@ export async function GET(req: NextRequest) {
           heat,
           sector: SECTOR_MAP[ticker] ?? 'Other',
           direction: (changePct >= 0.5 ? 'UP' : changePct <= -0.5 ? 'DOWN' : 'FLAT') as 'UP' | 'DOWN' | 'FLAT',
+          high52Week,
+          low52Week,
         };
       })
       .filter(r => r.price > 0)

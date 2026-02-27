@@ -34,6 +34,7 @@ import { MorningBriefCard } from './components/ai-suggestions/MorningBriefCard';
 import { MarketBreadthPanel } from './components/market/MarketBreadthPanel';
 import { COTWidget } from './components/market/COTWidget';
 import { EarningsScreener } from './components/scanner/EarningsScreener';
+import { FiftyTwoWeekPanel } from './components/scanner/FiftyTwoWeekPanel';
 
 // ============================================================
 // UTILITY COMPONENTS
@@ -477,6 +478,7 @@ function ScannerTab({ onSelectTicker }: { onSelectTicker: (t: string) => void })
     <div className="space-y-6 animate-fade-in">
       <MarketBreadthPanel />
       <ScannerFeed onSelectTicker={onSelectTicker} />
+      <FiftyTwoWeekPanel onSelectTicker={onSelectTicker} />
       <EarningsScreener />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SectorHeatMap />
