@@ -21,6 +21,7 @@ import { IVSurfaceHeatmap } from './IVSurfaceHeatmap';
 import { GexChart } from './GexChart';
 import { IVHVWidget } from './IVHVWidget';
 import { VolConeChart } from './VolConeChart';
+import { ContractDrillDown } from './ContractDrillDown';
 
 function LoadingSpinner() {
   return (
@@ -78,7 +79,7 @@ interface OptionsTabProps {
 
 export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: OptionsTabProps) {
   const [selectedExp, setSelectedExp] = useState<string>('');
-  const [selectedContractAsk, setSelectedContractAsk] = useState<number>(0);
+  const [selectedContract, setSelectedContract] = useState<any>(null);
   const [chainOpen, setChainOpen] = useState(false);
 
   useEffect(() => {
@@ -189,6 +190,16 @@ export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: O
 
   return (
     <>
+      {/* Contract drill-down modal */}
+      {selectedContract && (
+        <ContractDrillDown
+          contract={selectedContract}
+          ticker={ticker}
+          currentPrice={data.currentPrice}
+          onClose={() => setSelectedContract(null)}
+        />
+      )}
+
       {/* Data quality + timing strip */}
       <div className="flex items-center gap-2 flex-wrap mb-3">
         {optDs === 'schwab-live' ? (
@@ -424,7 +435,7 @@ export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: O
                       calls={data.byExpiration[selectedExp].calls}
                       puts={data.byExpiration[selectedExp].puts}
                       currentPrice={data.currentPrice}
-                      onSelectContract={(c) => setSelectedContractAsk(c.ask)}
+                      onSelectContract={(c) => setSelectedContract(c)}
                     />
                   </div>
                 )}
@@ -447,7 +458,7 @@ export function OptionsTab({ data, loading, ticker, onTrack, onViewEvidence }: O
             <PositionSizingCalc
               ticker={ticker}
               setup={data.optionsSetups?.[0]}
-              contractAsk={selectedContractAsk || data.optionsSetups?.[0]?.recommendedContract?.ask}
+              contractAsk={selectedContract?.ask || data.optionsSetups?.[0]?.recommendedContract?.ask}
             />
           </Section>
         </div>

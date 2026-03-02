@@ -11,6 +11,7 @@ interface Contract {
   bid: number;
   ask: number;
   mark: number;
+  last?: number;
   volume: number;
   openInterest: number;
   delta: number;
@@ -22,6 +23,9 @@ interface Contract {
   spreadPercent: number;
   volumeOIRatio: number;
   isUnusual: boolean;
+  unusualScore?: number;
+  intrinsicValue?: number;
+  extrinsicValue?: number;
   flowSide?: 'ASK' | 'BID' | 'MID';
 }
 
