@@ -391,9 +391,14 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
       OPTIONS_WATCHLIST[(batchStart + 2) % OPTIONS_WATCHLIST.length],
     ];
 
+    skipped.push({ ticker: 'OPTIONS_SCAN', reason: `Scanning batch: ${batch.join(', ')} (slot ${runSlot}, regime ${regime})` });
+
     await Promise.allSettled(batch.map(async (ticker) => {
       // Skip if already holding this ticker
-      if (currentOpen.some(p => p.ticker === ticker)) return;
+      if (currentOpen.some(p => p.ticker === ticker)) {
+        skipped.push({ ticker, reason: 'Options: already holding this ticker' });
+        return;
+      }
 
       try {
         // 7s hard timeout per chain fetch — keeps total options scan under 10s
@@ -433,12 +438,20 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
         const activities = detectUnusualActivity(
           filtered,
           underlyingPrice,
-          { minUOAScore: 65 },
+          { minUOAScore: 55 }, // detect at 55, log below 65 as low-conviction
           { symbol: ticker }
         );
-        if (activities.length === 0) return;
+        if (activities.length === 0) {
+          skipped.push({ ticker, reason: `Options: ${contracts.length} contracts parsed, ${filtered.length} passed filters — no UOA signals detected` });
+          return;
+        }
 
-        const best     = activities[0];
+        const best = activities[0];
+        if (best.uoaScore < 65) {
+          skipped.push({ ticker, reason: `Options: best UOA ${best.uoaScore}/100 (${best.tier}) — below 65 threshold. ${best.type} $${best.strike} exp ${best.expiration?.slice(0,10)} δ${best.delta.toFixed(2)}` });
+          return;
+        }
+
         const contract = filtered.find(c => c.optionSymbol === best.optionSymbol) ?? filtered[0];
         optionSignals.push({ ticker, contract, uoa: best, underlyingPrice });
       } catch (err: any) {
