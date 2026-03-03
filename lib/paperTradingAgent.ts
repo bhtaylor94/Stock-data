@@ -195,6 +195,8 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
 
   // ── Step 1: Schwab auth ──────────────────────────────────────────────────
   const tokenResult = await getSchwabAccessToken('stock');
+  // DEBUG: log token prefix so we can confirm a valid JWT is being obtained
+  errors.push(`DEBUG token: len=${tokenResult.token?.length ?? 0} prefix=${tokenResult.token?.slice(0, 20) ?? 'NULL'}`);
   if (!tokenResult.token) {
     const errMsg = `Auth failed: ${tokenResult.error}`;
     errors.push(errMsg);

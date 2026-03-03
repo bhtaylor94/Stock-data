@@ -50,6 +50,7 @@ export async function getSchwabAccessToken(
   try {
     const res = await fetch(url, {
       method: 'POST',
+      cache: 'no-store',
       headers: {
         Authorization: `Basic ${basic}`,
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -101,6 +102,7 @@ export async function schwabFetchJson<T>(
   try {
     const res = await fetch(url, {
       method: opts?.method || 'GET',
+      cache: 'no-store',
       headers: {
         Authorization: `Bearer ${token}`,
         ...SCHWAB_HEADERS, // CRITICAL: Add headers for Akamai/Schwab
@@ -121,6 +123,7 @@ export async function schwabFetchJson<T>(
         // Retry the request with fresh token
         const retryRes = await fetch(url, {
           method: opts?.method || 'GET',
+          cache: 'no-store',
           headers: {
             Authorization: `Bearer ${freshTokenResult.token}`,
             ...SCHWAB_HEADERS,
