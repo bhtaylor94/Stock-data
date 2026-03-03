@@ -507,7 +507,7 @@ export function PaperTradingDashboard() {
 
   const metrics  = computeMetrics(positions, equity, portfolio);
   const openPositions = positions.filter(p => p.status === 'OPEN');
-  const isActive = log.length > 0 && Date.now() - new Date(log[0].runAt).getTime() < 120_000;
+  const isActive = log.length > 0 && Date.now() - new Date(log[0].runAt).getTime() < 300_000;
 
   return (
     <div className="space-y-5 animate-fade-in">

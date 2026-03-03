@@ -14,6 +14,7 @@ export function getRedis(): Redis {
   _redis = new Redis({
     url: process.env.UPSTASH_REDIS_REST_URL!,
     token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+    cache: 'no-store', // prevent Next.js data cache from serving stale Redis reads
   });
   return _redis;
 }
