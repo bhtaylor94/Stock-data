@@ -195,8 +195,6 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
 
   // ── Step 1: Schwab auth ──────────────────────────────────────────────────
   const tokenResult = await getSchwabAccessToken('stock');
-  // DEBUG: log token prefix so we can confirm a valid JWT is being obtained
-  errors.push(`DEBUG token: len=${tokenResult.token?.length ?? 0} prefix=${tokenResult.token?.slice(0, 20) ?? 'NULL'}`);
   if (!tokenResult.token) {
     const errMsg = `Auth failed: ${tokenResult.error}`;
     errors.push(errMsg);
@@ -624,7 +622,9 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
       }
 
       // IV rank check — skip if overpaying for vol
-      const atm_iv = c?.volatility ?? c?.impliedVolatility ?? 0;
+      // Schwab returns volatility as a percentage (e.g. 17.5 = 17.5%), normalize to decimal
+      const rawIV = c?.volatility ?? c?.impliedVolatility ?? 0;
+      const atm_iv = rawIV > 1 ? rawIV / 100 : rawIV;
       const ivRank = atm_iv > 0 ? await estimateIVRank(sig.ticker, atm_iv) : 0;
       if (ivRank > 0.60) {
         skipped.push({ ticker: sig.ticker, reason: `IV rank ${(ivRank * 100).toFixed(0)}% > 60 — overpaying for vol` });
