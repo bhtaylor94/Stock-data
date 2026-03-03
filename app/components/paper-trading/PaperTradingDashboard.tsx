@@ -454,7 +454,7 @@ export function PaperTradingDashboard() {
 
   const fetchState = useCallback(async () => {
     try {
-      const res  = await fetch('/api/paper-trade');
+      const res  = await fetch('/api/paper-trade', { cache: 'no-store' });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? 'Failed to load agent state');
@@ -479,9 +479,9 @@ export function PaperTradingDashboard() {
   // Initial load
   useEffect(() => { fetchState(); }, [fetchState]);
 
-  // Auto-refresh every 60s (matches cron interval)
+  // Auto-refresh every 15s
   useEffect(() => {
-    const id = setInterval(fetchState, 60_000);
+    const id = setInterval(fetchState, 15_000);
     return () => clearInterval(id);
   }, [fetchState]);
 
@@ -505,7 +505,14 @@ export function PaperTradingDashboard() {
   }
 
   const { portfolio, positions, log, equity, redisConnected } = state;
-  if (!portfolio) return null;
+  if (!portfolio) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 size={24} className="animate-spin text-blue-400" />
+        <span className="ml-3 text-slate-400">Waiting for first agent run…</span>
+      </div>
+    );
+  }
 
   const metrics  = computeMetrics(positions, equity, portfolio);
   const openPositions = positions.filter(p => p.status === 'OPEN');
