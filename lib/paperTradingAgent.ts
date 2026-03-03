@@ -367,6 +367,8 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
         if (vixPrice > 30)      regime = 'HIGH_VOL';
         else if (spyChangePct >=  1) regime = 'BULLISH';
         else if (spyChangePct <= -1) regime = 'BEARISH';
+      } else {
+        errors.push(`Regime fetch failed: Schwab ${regimeRes.status} — ${String(regimeRes.error ?? '').slice(0, 80)}`);
       }
     } catch (err: any) {
       errors.push(`Regime fetch: ${String(err).slice(0, 80)}`);
