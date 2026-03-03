@@ -402,10 +402,10 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
 
       try {
         // 7s hard timeout per chain fetch — keeps total options scan under 10s
-        // Note: no range=OTM — that clips delta 0.35-0.55 strikes we need
+        // range=ALL matches the working options route (omitting range causes Schwab 401)
         const chainFetch = schwabFetchJson<any>(
           token,
-          `https://api.schwabapi.com/marketdata/v1/chains?symbol=${ticker}&contractType=ALL&strikeCount=15&includeUnderlyingQuote=true`,
+          `https://api.schwabapi.com/marketdata/v1/chains?symbol=${ticker}&contractType=ALL&strikeCount=20&includeUnderlyingQuote=true&range=ALL`,
           { scope: 'options' }
         );
         const timeoutP = new Promise<null>(resolve => setTimeout(() => resolve(null), 7000));
@@ -416,7 +416,8 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
           return;
         }
         if (!chainRes.ok) {
-          skipped.push({ ticker, reason: `Options: Schwab API ${(chainRes as any).status ?? '?'} — ${String((chainRes as any).error ?? '').slice(0, 80)}` });
+          const rawText = String((chainRes as any).text ?? '').slice(0, 120);
+          skipped.push({ ticker, reason: `Options: Schwab API ${(chainRes as any).status ?? '?'} — ${String((chainRes as any).error ?? '').slice(0, 60)} | ${rawText}` });
           return;
         }
 
