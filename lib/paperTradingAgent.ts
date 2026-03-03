@@ -402,17 +402,29 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
 
       try {
         // 7s hard timeout per chain fetch — keeps total options scan under 10s
+        // Note: no range=OTM — that clips delta 0.35-0.55 strikes we need
         const chainFetch = schwabFetchJson<any>(
           token,
-          `https://api.schwabapi.com/marketdata/v1/chains?symbol=${ticker}&contractType=ALL&strikeCount=10&includeUnderlyingQuote=true&range=OTM`,
+          `https://api.schwabapi.com/marketdata/v1/chains?symbol=${ticker}&contractType=ALL&strikeCount=15&includeUnderlyingQuote=true`,
           { scope: 'options' }
         );
-        const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), 7000));
-        const chainRes = await Promise.race([chainFetch, timeout]);
-        if (!chainRes || !chainRes.ok) return;
+        const timeoutP = new Promise<null>(resolve => setTimeout(() => resolve(null), 7000));
+        const chainRes = await Promise.race([chainFetch, timeoutP]);
+
+        if (!chainRes) {
+          skipped.push({ ticker, reason: 'Options: chain fetch timed out (>7s)' });
+          return;
+        }
+        if (!chainRes.ok) {
+          skipped.push({ ticker, reason: `Options: Schwab API ${(chainRes as any).status ?? '?'} — ${String((chainRes as any).error ?? '').slice(0, 80)}` });
+          return;
+        }
 
         const { contracts, underlyingPrice } = parseChainForUOA(chainRes.data);
-        if (underlyingPrice === 0 || contracts.length === 0) return;
+        if (underlyingPrice === 0 || contracts.length === 0) {
+          skipped.push({ ticker, reason: `Options: empty chain response (${contracts.length} contracts, underlying=$${underlyingPrice})` });
+          return;
+        }
 
         // Direction filter: calls in BULLISH/NEUTRAL/HIGH_VOL, puts in BEARISH
         const allowCalls = regime !== 'BEARISH';
