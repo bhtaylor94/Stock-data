@@ -130,8 +130,10 @@ const KEYS = {
 export async function acquireLock(): Promise<boolean> {
   if (!isRedisAvailable()) return true; // local dev: no contention
   try {
-    const result = await getRedis().set(KEYS.lock, '1', { nx: true, ex: 50 });
-    return result === 'OK';
+    // Upstash returns 'OK' (string) when set, null when key already exists
+    // Use !== null to be safe across SDK versions
+    const result = await getRedis().set(KEYS.lock, '1', { nx: true, ex: 45 });
+    return result !== null;
   } catch {
     return false;
   }

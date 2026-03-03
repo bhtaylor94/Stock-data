@@ -378,24 +378,33 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
   const optionCount = currentOpen.filter(p => p.positionType === 'OPTIONS').length;
   const stockCount  = currentOpen.filter(p => p.positionType === 'STOCK').length;
 
-  // ── Step 11: Scan options (rotate 5 of 10 per run) ──────────────────────
+  // ── Step 11: Scan options (rotate 3 of 10 per run, 7s timeout each) ─────
   const optionSignals: { ticker: string; contract: any; uoa: any; underlyingPrice: number }[] = [];
 
   if (!haltEntries && optionCount < MAX_OPTIONS_POSITIONS) {
-    const runSlot   = Math.floor(Date.now() / 60_000) % 2;
-    const batch     = OPTIONS_WATCHLIST.slice(runSlot * 5, runSlot * 5 + 5);
+    // Rotate through 3-ticker batches: slots 0-2 cover all 10 tickers over ~3 min
+    const runSlot = Math.floor(Date.now() / 60_000) % 4;
+    const batchStart = (runSlot * 3) % OPTIONS_WATCHLIST.length;
+    const batch = [
+      OPTIONS_WATCHLIST[batchStart % OPTIONS_WATCHLIST.length],
+      OPTIONS_WATCHLIST[(batchStart + 1) % OPTIONS_WATCHLIST.length],
+      OPTIONS_WATCHLIST[(batchStart + 2) % OPTIONS_WATCHLIST.length],
+    ];
 
     await Promise.allSettled(batch.map(async (ticker) => {
       // Skip if already holding this ticker
       if (currentOpen.some(p => p.ticker === ticker)) return;
 
       try {
-        const chainRes = await schwabFetchJson<any>(
+        // 7s hard timeout per chain fetch — keeps total options scan under 10s
+        const chainFetch = schwabFetchJson<any>(
           token,
-          `https://api.schwabapi.com/marketdata/v1/chains?symbol=${ticker}&contractType=ALL&strikeCount=20&includeUnderlyingQuote=true&range=OTM`,
+          `https://api.schwabapi.com/marketdata/v1/chains?symbol=${ticker}&contractType=ALL&strikeCount=10&includeUnderlyingQuote=true&range=OTM`,
           { scope: 'options' }
         );
-        if (!chainRes.ok) return;
+        const timeout = new Promise<null>(resolve => setTimeout(() => resolve(null), 7000));
+        const chainRes = await Promise.race([chainFetch, timeout]);
+        if (!chainRes || !chainRes.ok) return;
 
         const { contracts, underlyingPrice } = parseChainForUOA(chainRes.data);
         if (underlyingPrice === 0 || contracts.length === 0) return;
