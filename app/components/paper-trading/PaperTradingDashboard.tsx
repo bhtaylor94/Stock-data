@@ -443,10 +443,11 @@ interface State {
   positions: PaperPosition[];
   log: AgentLogEntry[];
   equity: EquitySnapshot[];
+  redisConnected: boolean;
 }
 
 export function PaperTradingDashboard() {
-  const [state, setState]     = useState<State>({ portfolio: null, positions: [], log: [], equity: [] });
+  const [state, setState]     = useState<State>({ portfolio: null, positions: [], log: [], equity: [], redisConnected: true });
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
@@ -460,10 +461,11 @@ export function PaperTradingDashboard() {
         return;
       }
       setState({
-        portfolio: data.portfolio ?? null,
-        positions: data.positions ?? [],
-        log:       data.log ?? [],
-        equity:    data.equity ?? [],
+        portfolio:      data.portfolio ?? null,
+        positions:      data.positions ?? [],
+        log:            data.log ?? [],
+        equity:         data.equity ?? [],
+        redisConnected: data.redisConnected ?? false,
       });
       setError(null);
       setLastFetch(new Date());
@@ -502,7 +504,7 @@ export function PaperTradingDashboard() {
     );
   }
 
-  const { portfolio, positions, log, equity } = state;
+  const { portfolio, positions, log, equity, redisConnected } = state;
   if (!portfolio) return null;
 
   const metrics  = computeMetrics(positions, equity, portfolio);
@@ -511,6 +513,20 @@ export function PaperTradingDashboard() {
 
   return (
     <div className="space-y-5 animate-fade-in">
+
+      {/* ── Redis warning ────────────────────────────────────────────────────── */}
+      {!redisConnected && (
+        <div className="p-4 rounded-2xl border border-red-500/40 bg-red-500/8">
+          <p className="text-sm font-semibold text-red-400 flex items-center gap-2 mb-1">
+            <AlertTriangle size={14} /> Redis not connected — agent state cannot be saved
+          </p>
+          <p className="text-xs text-slate-400">
+            Add <code className="bg-slate-700 px-1 rounded">UPSTASH_REDIS_REST_URL</code> and{' '}
+            <code className="bg-slate-700 px-1 rounded">UPSTASH_REDIS_REST_TOKEN</code> to your
+            Vercel environment variables, then redeploy. All agent runs are silently discarded until this is fixed.
+          </p>
+        </div>
+      )}
 
       {/* ── Header Card ─────────────────────────────────────────────────────── */}
       <div className="p-5 rounded-2xl border border-slate-700/50 bg-slate-800/30">

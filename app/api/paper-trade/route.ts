@@ -6,6 +6,7 @@ import {
   loadEquity,
   resetPaperTrading,
 } from '@/lib/paperTradingStore';
+import { isRedisAvailable } from '@/lib/redis';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -19,7 +20,7 @@ export async function GET() {
       loadLog(),
       loadEquity(),
     ]);
-    return NextResponse.json({ portfolio, positions, log, equity });
+    return NextResponse.json({ portfolio, positions, log, equity, redisConnected: isRedisAvailable() });
   } catch (err: any) {
     console.error('[paper-trade] GET error:', err);
     return NextResponse.json({ error: String(err?.message ?? err) }, { status: 500 });
