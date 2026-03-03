@@ -14,13 +14,23 @@ import {
   SkippedTrade,
   PositionDirection,
   ExitReason,
+  TradeMemory,
   loadPortfolio,
   savePortfolio,
   loadPositions,
   savePositions,
   appendLog,
   appendEquitySnapshot,
+  loadTradeMemory,
+  appendTradeMemory,
 } from './paperTradingStore';
+import {
+  claudeAssessPortfolio,
+  claudeEvaluateTrade,
+  claudeEvaluateExit,
+  PortfolioAssessment,
+  computeStats,
+} from './paperTradingAI';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIG
@@ -47,6 +57,12 @@ const ENTRY_SLIP_OPTIONS = 1.015;   // mid + 1.5%
 const EXIT_SLIP_OPTIONS  = 0.985;   // mid − 1.5%
 const SLIP_STOCK         = 0.001;   // 0.1% each way
 const COMMISSION_OPTION  = 0.65;    // $0.65/contract
+
+// Hard safety floors — Claude cannot override these
+const HARD_MAX_POSITION_PCT = 0.20;  // single position ≤ 20% of portfolio
+const HARD_STOP_FLOOR_PCT   = -0.60; // stop no worse than -60%
+const HARD_MIN_CASH_PCT     = 0.10;  // never below 10% cash (red line)
+const HARD_MAX_POSITIONS    = 12;    // absolute ceiling
 
 const OPTIONS_WATCHLIST = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMZN', 'META', 'AMD', 'SPY', 'QQQ', 'GOOGL'];
 const STOCK_WATCHLIST   = ['NVDA', 'AAPL', 'TSLA', 'MSFT', 'AMZN', 'META', 'AMD', 'GOOGL', 'SPY', 'QQQ'];
@@ -273,7 +289,14 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
     ? (portfolio.totalValue - portfolio.peakValue) / portfolio.peakValue
     : 0;
 
+  // Declare regime vars early — Step 9 fetches real values; Step 6 fallback uses defaults
+  let regime: 'BULLISH' | 'BEARISH' | 'HIGH_VOL' | 'NEUTRAL' = 'NEUTRAL';
+  let spyChangePct = 0;
+  let vixLevel = 20;
+
   // ── Step 6: Process exits ────────────────────────────────────────────────
+  // 6a: Hard stop / target / DTE checks (rule-based, synchronous)
+  const dangerZonePositions: PaperPosition[] = [];
   for (const pos of openPositions) {
     let exitReason: ExitReason | null = null;
 
@@ -283,6 +306,8 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
       if (pnlPct >= OPTIONS_TAKE_PROFIT_PCT) exitReason = 'TARGET_HIT';
       else if (pnlPct <= OPTIONS_STOP_LOSS_PCT) exitReason = 'STOP_HIT';
       else if (currentDTE <= OPTIONS_DTE_EXIT) exitReason = 'DTE_STOP';
+      // Danger zone: -15% to -33%
+      else if (pnlPct <= -0.15) dangerZonePositions.push(pos);
     } else {
       const pnlPct   = pos.unrealizedPnlPct ?? 0;
       const peak     = pos.peakPriceSinceEntry ?? pos.entryPrice;
@@ -291,6 +316,8 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
       if (pnlPct >= STOCK_TARGET_PCT) exitReason = 'TARGET_HIT';
       else if (pos.currentPrice <= trailing) exitReason = 'STOP_HIT';
       else if (daysHeld >= STOCK_TIME_STOP_DAYS && pnlPct < STOCK_TIME_STOP_MIN) exitReason = 'TIME_STOP';
+      // Danger zone: -15% to -33%
+      else if (pnlPct <= -0.15) dangerZonePositions.push(pos);
     }
 
     if (!exitReason) continue;
@@ -307,6 +334,7 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
     const proceeds       = exitGross - exitCommission;
     const realizedPnl    = proceeds - pos.totalCost;
     const realizedPnlPct = realizedPnl / pos.totalCost;
+    const daysHeldExit   = daysBetween(pos.entryDate, new Date().toISOString());
 
     pos.status       = 'CLOSED';
     pos.exitDate     = new Date().toISOString();
@@ -317,7 +345,35 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
     portfolio.cash  += proceeds;
 
     exited.push({ ticker: pos.ticker, direction: pos.direction, exitReason, realizedPnl, realizedPnlPct });
+
+    // Append to trade memory (fire-and-forget)
+    appendTradeMemory({
+      tradeId: pos.id,
+      ticker: pos.ticker,
+      direction: pos.direction,
+      positionType: pos.positionType,
+      entrySignal: {
+        uoaScore: pos.signal.uoaScore ?? 0,
+        alertType: pos.signal.alertType ?? 'UNKNOWN',
+        regime,
+        ivRank: 0,
+      },
+      claudeEntry: {
+        conviction: pos.signal.claudeConviction ?? 0,
+        riskMultiplier: pos.signal.claudeRiskMultiplier ?? 1,
+        reasoning: pos.signal.reasoning,
+      },
+      outcome: {
+        realizedPnlPct,
+        exitReason,
+        daysHeld: daysHeldExit,
+        won: realizedPnlPct > 0,
+      },
+      closedAt: new Date().toISOString(),
+    }).catch(() => { /* non-fatal */ });
   }
+
+  // (6b Claude danger-zone exits run after Step 9.6 where regime + tradeMemory are available)
 
   // Recompute portfolio after exits
   const remainingOpenValue = positions
@@ -353,7 +409,6 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
   }
 
   // ── Step 9: Market regime ────────────────────────────────────────────────
-  let regime: 'BULLISH' | 'BEARISH' | 'HIGH_VOL' | 'NEUTRAL' = 'NEUTRAL';
   if (!haltEntries) {
     try {
       const regimeRes = await schwabFetchJson<Record<string, any>>(
@@ -362,9 +417,9 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
         { scope: 'stock' }
       );
       if (regimeRes.ok) {
-        const vixPrice  = regimeRes.data['$VIX.X']?.quote?.lastPrice ?? regimeRes.data['$VIX.X']?.quote?.mark ?? 15;
-        const spyChangePct = regimeRes.data['SPY']?.quote?.netPercentChangeInDouble ?? 0;
-        if (vixPrice > 30)      regime = 'HIGH_VOL';
+        vixLevel     = regimeRes.data['$VIX.X']?.quote?.lastPrice ?? regimeRes.data['$VIX.X']?.quote?.mark ?? 20;
+        spyChangePct = regimeRes.data['SPY']?.quote?.netPercentChangeInDouble ?? 0;
+        if (vixLevel > 30)       regime = 'HIGH_VOL';
         else if (spyChangePct >=  1) regime = 'BULLISH';
         else if (spyChangePct <= -1) regime = 'BEARISH';
       } else {
@@ -372,6 +427,119 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
       }
     } catch (err: any) {
       errors.push(`Regime fetch: ${String(err).slice(0, 80)}`);
+    }
+  }
+
+  // ── Step 9.5: Load trade memory + compute stats ──────────────────────────
+  const tradeMemory = await loadTradeMemory();
+  const { winRate, profitFactor } = computeStats(tradeMemory);
+
+  // ── Step 9.6: Claude portfolio assessment ───────────────────────────────
+  const DEFAULT_ASSESSMENT: PortfolioAssessment = {
+    maxPositions: 8, cashFloorPct: 0.25, riskBiasPct: 0.02,
+    regimeTake: 'NORMAL', avoidSectors: [], reasoning: 'rule-based fallback',
+  };
+  const assessment = (!haltEntries
+    ? await claudeAssessPortfolio({
+        portfolioValue: portfolio.totalValue,
+        cash: portfolio.cash,
+        drawdownPct: drawdownFrac * 100,
+        openPositions: positions
+          .filter(p => p.status === 'OPEN')
+          .map(p => ({ ticker: p.ticker, positionType: p.positionType, unrealizedPnlPct: p.unrealizedPnlPct, sector: p.sector })),
+        regime,
+        spyChangePct,
+        vixLevel,
+        tradeMemory,
+        winRate,
+        profitFactor,
+      })
+    : null) ?? DEFAULT_ASSESSMENT;
+
+  const runMaxPositions = Math.min(HARD_MAX_POSITIONS, Math.max(4, assessment.maxPositions));
+  const runCashFloor    = Math.min(0.35, Math.max(HARD_MIN_CASH_PCT, assessment.cashFloorPct));
+  const runRiskBase     = Math.min(0.05, Math.max(0.01, assessment.riskBiasPct));
+  const runAvoidSectors = new Set(assessment.avoidSectors);
+
+  // ── Step 9.7: Claude danger-zone exit evaluation ─────────────────────────
+  if (dangerZonePositions.length > 0) {
+    const exitDecisions = await Promise.allSettled(
+      dangerZonePositions.map(pos => claudeEvaluateExit({
+        ticker: pos.ticker,
+        direction: pos.direction,
+        positionType: pos.positionType,
+        unrealizedPnlPct: pos.unrealizedPnlPct ?? 0,
+        daysHeld: daysBetween(pos.entryDate, new Date().toISOString()),
+        entryPrice: pos.entryPrice,
+        currentPrice: pos.currentPrice,
+        stopPrice: pos.stopPrice,
+        targetPrice: pos.targetPrice,
+        regime,
+        vixLevel,
+        tickerMemory: tradeMemory.filter(m => m.ticker === pos.ticker).slice(0, 5),
+      }))
+    );
+
+    for (let i = 0; i < dangerZonePositions.length; i++) {
+      const pos = dangerZonePositions[i];
+      if (pos.status === 'CLOSED') continue;
+
+      const decisionResult = exitDecisions[i];
+      const decision = decisionResult.status === 'fulfilled' ? decisionResult.value : null;
+      if (!decision) continue;
+
+      if (decision.action === 'EXIT') {
+        const exitSlipped = pos.positionType === 'OPTIONS'
+          ? pos.currentPrice * EXIT_SLIP_OPTIONS
+          : pos.currentPrice * (1 - SLIP_STOCK);
+        const exitGross = pos.positionType === 'OPTIONS'
+          ? exitSlipped * 100 * pos.quantity
+          : exitSlipped * pos.quantity;
+        const exitCommission = pos.positionType === 'OPTIONS' ? pos.quantity * COMMISSION_OPTION : 0;
+        const proceeds       = exitGross - exitCommission;
+        const realizedPnl    = proceeds - pos.totalCost;
+        const realizedPnlPct = realizedPnl / pos.totalCost;
+        const daysHeldExit   = daysBetween(pos.entryDate, new Date().toISOString());
+        const exitReason: ExitReason = 'AI_EXIT';
+
+        pos.status         = 'CLOSED';
+        pos.exitDate       = new Date().toISOString();
+        pos.exitPrice      = exitSlipped;
+        pos.realizedPnl    = realizedPnl;
+        pos.realizedPnlPct = realizedPnlPct;
+        pos.exitReason     = exitReason;
+        portfolio.cash    += proceeds;
+
+        exited.push({ ticker: pos.ticker, direction: pos.direction, exitReason, realizedPnl, realizedPnlPct });
+
+        appendTradeMemory({
+          tradeId: pos.id,
+          ticker: pos.ticker,
+          direction: pos.direction,
+          positionType: pos.positionType,
+          entrySignal: {
+            uoaScore: pos.signal.uoaScore ?? 0,
+            alertType: pos.signal.alertType ?? 'UNKNOWN',
+            regime,
+            ivRank: 0,
+          },
+          claudeEntry: {
+            conviction: pos.signal.claudeConviction ?? 0,
+            riskMultiplier: pos.signal.claudeRiskMultiplier ?? 1,
+            reasoning: pos.signal.reasoning,
+          },
+          outcome: { realizedPnlPct, exitReason, daysHeld: daysHeldExit, won: realizedPnlPct > 0 },
+          closedAt: new Date().toISOString(),
+        }).catch(() => { /* non-fatal */ });
+
+      } else if (decision.action === 'TIGHTEN_STOP' && decision.newStopPct !== undefined) {
+        // Only tighten — never loosen; apply hard floor
+        const rawNewStop = pos.entryPrice * (1 + Math.max(HARD_STOP_FLOOR_PCT, decision.newStopPct));
+        if (rawNewStop > pos.stopPrice) {
+          pos.stopPrice = rawNewStop;
+        }
+      }
+      // HOLD: no change
     }
   }
 
@@ -441,8 +609,8 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
           const absDelta = Math.abs(c.delta ?? 0);
           const bid      = c.bid ?? 0;
           const ask      = c.ask ?? 0;
-          if (dte < 30 || dte > 60) return false;
-          if (absDelta < 0.35 || absDelta > 0.55) return false;
+          if (dte < 20 || dte > 90) return false;
+          if (absDelta < 0.25 || absDelta > 0.75) return false;
           if (bid <= 0 || ask <= 0) return false;
           const mid    = (bid + ask) / 2;
           const spread = (ask - bid) / mid;
@@ -535,14 +703,29 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
       quantity: number,
       optDetails: any | null,
       signal: PaperPosition['signal'],
+      targetPct?: number,
+      stopPct?: number,
     ): void {
       const sector    = SECTOR_MAP[ticker] ?? 'Other';
+
+      if (runAvoidSectors.has(sector)) {
+        skipped.push({ ticker, reason: `Claude: avoid sector ${sector}` });
+        return;
+      }
+
       const entryGross = positionType === 'OPTIONS'
         ? entryPrice * 100 * quantity
         : entryPrice * quantity;
       const commission  = positionType === 'OPTIONS' ? quantity * COMMISSION_OPTION : 0;
       const totalCost   = entryGross + commission;
-      const cashFloor   = portfolio.totalValue * CASH_FLOOR_PCT;
+
+      // Hard ceiling: single position ≤ 20% of portfolio
+      if (totalCost > portfolio.totalValue * HARD_MAX_POSITION_PCT) {
+        skipped.push({ ticker, reason: `Position size $${totalCost.toFixed(0)} exceeds 20% hard limit` });
+        return;
+      }
+
+      const cashFloor   = portfolio.totalValue * runCashFloor;
 
       if (portfolio.cash - totalCost < cashFloor) {
         skipped.push({ ticker, reason: `Cash floor: need $${cashFloor.toFixed(0)}, have $${portfolio.cash.toFixed(0)}` });
@@ -556,18 +739,20 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
         return;
       }
 
-      if (positions.filter(p => p.status === 'OPEN').length >= MAX_TOTAL_POSITIONS) {
-        skipped.push({ ticker, reason: `Max ${MAX_TOTAL_POSITIONS} total positions reached` });
+      if (positions.filter(p => p.status === 'OPEN').length >= runMaxPositions) {
+        skipped.push({ ticker, reason: `Max ${runMaxPositions} total positions reached` });
         return;
       }
 
-      const now        = new Date().toISOString();
-      const targetPrice = positionType === 'OPTIONS'
-        ? entryPrice * (1 + OPTIONS_TAKE_PROFIT_PCT)
-        : entryPrice * (1 + STOCK_TARGET_PCT);
-      const stopPrice  = positionType === 'OPTIONS'
-        ? entryPrice * (1 + OPTIONS_STOP_LOSS_PCT)
-        : entryPrice * (1 - STOCK_TRAILING_PCT);
+      // Resolve target/stop — use Claude values if provided, else defaults
+      const resolvedTargetPct = targetPct ?? (positionType === 'OPTIONS' ? OPTIONS_TAKE_PROFIT_PCT : STOCK_TARGET_PCT);
+      const resolvedStopPct   = stopPct   ?? (positionType === 'OPTIONS' ? OPTIONS_STOP_LOSS_PCT   : -STOCK_TRAILING_PCT);
+      // Apply hard stop floor
+      const clampedStopPct    = Math.max(HARD_STOP_FLOOR_PCT, resolvedStopPct);
+
+      const now         = new Date().toISOString();
+      const targetPrice = entryPrice * (1 + resolvedTargetPct);
+      const stopPrice   = entryPrice * (1 + clampedStopPct);
 
       const newPos: PaperPosition = {
         id:                 nanoid(),
@@ -606,11 +791,62 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
       entered.push({ ticker, direction, cost: totalCost, reasoning: signal.reasoning });
     }
 
+    // ── Concurrent Claude evaluation for all signals ────────────────────────
+    // Pre-compute ivRank for each option signal (needed for prompt)
+    const optionIvRanks = await Promise.all(optionSignals.map(async sig => {
+      const c = sig.contract;
+      const rawIV = c?.volatility ?? c?.impliedVolatility ?? 0;
+      const atm_iv = rawIV > 1 ? rawIV / 100 : rawIV;
+      return atm_iv > 0 ? await estimateIVRank(sig.ticker, atm_iv) : 0;
+    }));
+
+    const claudeOptionDecisions = await Promise.allSettled(
+      optionSignals.map((sig, i) => {
+        const relevantMemory = tradeMemory.filter(m => m.ticker === sig.ticker).slice(0, 5);
+        return claudeEvaluateTrade({
+          ticker: sig.ticker,
+          signalType: 'OPTIONS',
+          direction: sig.uoa.type === 'CALL' ? 'LONG_CALL' : 'LONG_PUT',
+          uoaScore: sig.uoa.uoaScore,
+          alertType: sig.uoa.alertType ?? 'UNKNOWN',
+          strike: sig.contract?.strikePrice,
+          dte: sig.contract?.daysToExpiration,
+          delta: Math.abs(sig.contract?.delta ?? 0),
+          ivRank: optionIvRanks[i],
+          regime,
+          portfolioValue: portfolio.totalValue,
+          cashPct: portfolio.cash / portfolio.totalValue,
+          openCount: positions.filter(p => p.status === 'OPEN').length,
+          relevantMemory,
+        });
+      })
+    );
+
+    const claudeStockDecisions = await Promise.allSettled(
+      stockSignals.map(sig => {
+        const relevantMemory = tradeMemory.filter(m => m.ticker === sig.ticker).slice(0, 5);
+        return claudeEvaluateTrade({
+          ticker: sig.ticker,
+          signalType: 'STOCK',
+          direction: 'LONG_STOCK',
+          uoaScore: 0,
+          alertType: 'STOCK_HEAT',
+          ivRank: 0,
+          regime,
+          portfolioValue: portfolio.totalValue,
+          cashPct: portfolio.cash / portfolio.totalValue,
+          openCount: positions.filter(p => p.status === 'OPEN').length,
+          relevantMemory,
+        });
+      })
+    );
+
     // Enter option signals
-    for (const sig of optionSignals) {
+    for (let i = 0; i < optionSignals.length; i++) {
+      const sig = optionSignals[i];
       const currentOptionsOpen = positions.filter(p => p.status === 'OPEN' && p.positionType === 'OPTIONS').length;
       if (currentOptionsOpen >= MAX_OPTIONS_POSITIONS) break;
-      if (positions.filter(p => p.status === 'OPEN').length >= MAX_TOTAL_POSITIONS) break;
+      if (positions.filter(p => p.status === 'OPEN').length >= runMaxPositions) break;
 
       const c   = sig.contract;
       const bid = c?.bid ?? 0;
@@ -621,57 +857,113 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
         continue;
       }
 
-      // IV rank check — skip if overpaying for vol
-      // Schwab returns volatility as a percentage (e.g. 17.5 = 17.5%), normalize to decimal
-      const rawIV = c?.volatility ?? c?.impliedVolatility ?? 0;
-      const atm_iv = rawIV > 1 ? rawIV / 100 : rawIV;
-      const ivRank = atm_iv > 0 ? await estimateIVRank(sig.ticker, atm_iv) : 0;
-      if (ivRank > 0.60) {
+      const ivRank = optionIvRanks[i];
+
+      // Extract Claude decision (null = fallback to rules)
+      const claudeResult = claudeOptionDecisions[i];
+      const claudeDecision = claudeResult.status === 'fulfilled' ? claudeResult.value : null;
+
+      // Claude explicit SKIP
+      if (claudeDecision?.action === 'SKIP') {
+        skipped.push({ ticker: sig.ticker, reason: `Claude SKIP: ${claudeDecision.reasoning}` });
+        continue;
+      }
+
+      // Rule-based IV check (fallback or when Claude says ENTER)
+      if (!claudeDecision && ivRank > 0.60) {
         skipped.push({ ticker: sig.ticker, reason: `IV rank ${(ivRank * 100).toFixed(0)}% > 60 — overpaying for vol` });
         continue;
       }
 
+      // Apply Claude DTE/delta filters if provided
+      const dte      = c?.daysToExpiration ?? 0;
+      const absDelta = Math.abs(c?.delta ?? 0);
+      if (claudeDecision) {
+        if (dte < claudeDecision.dteLow || dte > claudeDecision.dteHigh) {
+          skipped.push({ ticker: sig.ticker, reason: `Claude DTE filter: ${dte} not in [${claudeDecision.dteLow}-${claudeDecision.dteHigh}]` });
+          continue;
+        }
+        if (absDelta < claudeDecision.deltaLow || absDelta > claudeDecision.deltaHigh) {
+          skipped.push({ ticker: sig.ticker, reason: `Claude delta filter: ${absDelta.toFixed(2)} not in [${claudeDecision.deltaLow}-${claudeDecision.deltaHigh}]` });
+          continue;
+        }
+      }
+
       const entryPrice = mid * ENTRY_SLIP_OPTIONS;
       const direction: 'LONG_CALL' | 'LONG_PUT' = sig.uoa.type === 'CALL' ? 'LONG_CALL' : 'LONG_PUT';
-      const rawContracts = sizeOptionContracts(portfolio.totalValue, entryPrice);
-      const contracts    = Math.max(1, Math.floor(rawContracts * (reduceSize ? 0.5 : 1)));
 
+      // Sizing: apply Claude risk multiplier × base, or default rules
+      const riskMult     = claudeDecision ? claudeDecision.riskMultiplier : 1.0;
+      const effectiveRisk = runRiskBase * riskMult;
+      const rawContracts  = Math.max(1, Math.floor(
+        (portfolio.totalValue * Math.min(effectiveRisk, 0.05)) / (entryPrice * 100)
+      ));
+      const contracts     = Math.max(1, Math.floor(rawContracts * (reduceSize ? 0.5 : 1)));
+
+      const targetPct = claudeDecision?.targetPct ?? OPTIONS_TAKE_PROFIT_PCT;
+      const stopPct   = claudeDecision?.stopPct   ?? OPTIONS_STOP_LOSS_PCT;
+
+      const convictionLabel = claudeDecision ? ` | Claude ENTER (conviction ${claudeDecision.conviction}/5 × ${riskMult.toFixed(1)}x)` : '';
       const reasoning = [
         `${direction === 'LONG_CALL' ? 'Call' : 'Put'} sweep on ${sig.ticker}`,
         `UOA ${sig.uoa.uoaScore}/100 (${sig.uoa.tier}) — ${sig.uoa.alertType?.replace('_', ' ')}`,
-        `Strike $${c?.strikePrice ?? '?'} exp ${c?.expirationDate?.slice(0, 10) ?? '?'} DTE=${c?.daysToExpiration ?? '?'} δ${(c?.delta ?? 0).toFixed(2)}`,
+        `Strike $${c?.strikePrice ?? '?'} exp ${c?.expirationDate?.slice(0, 10) ?? '?'} DTE=${dte} δ${(c?.delta ?? 0).toFixed(2)}`,
         `Entry mid+1.5% = $${entryPrice.toFixed(2)} × ${contracts} contracts = $${(entryPrice * 100 * contracts).toFixed(0)}`,
         sig.uoa.reasoning?.[0] ?? '',
-        `Regime: ${regime}`,
+        `Regime: ${regime}${convictionLabel}`,
+        claudeDecision?.reasoning ?? '',
       ].filter(Boolean).join(' | ');
 
       tryEnter(sig.ticker, 'OPTIONS', direction, entryPrice, sig.underlyingPrice, contracts, c, {
         source: 'UOA', uoaScore: sig.uoa.uoaScore, uoaTier: sig.uoa.tier,
         alertType: sig.uoa.alertType, reasoning,
-      });
+        claudeConviction: claudeDecision?.conviction,
+        claudeRiskMultiplier: claudeDecision?.riskMultiplier,
+      }, targetPct, stopPct);
     }
 
     // Enter stock signals
-    for (const sig of stockSignals) {
+    for (let i = 0; i < stockSignals.length; i++) {
+      const sig = stockSignals[i];
       const currentStocksOpen = positions.filter(p => p.status === 'OPEN' && p.positionType === 'STOCK').length;
       if (currentStocksOpen >= MAX_STOCK_POSITIONS) break;
-      if (positions.filter(p => p.status === 'OPEN').length >= MAX_TOTAL_POSITIONS) break;
+      if (positions.filter(p => p.status === 'OPEN').length >= runMaxPositions) break;
+
+      const claudeResult = claudeStockDecisions[i];
+      const claudeDecision = claudeResult.status === 'fulfilled' ? claudeResult.value : null;
+
+      if (claudeDecision?.action === 'SKIP') {
+        skipped.push({ ticker: sig.ticker, reason: `Claude SKIP: ${claudeDecision.reasoning}` });
+        continue;
+      }
 
       const entryPrice = sig.price * (1 + SLIP_STOCK);
-      const rawShares  = sizeStockShares(portfolio.totalValue, entryPrice);
+      const riskMult   = claudeDecision ? claudeDecision.riskMultiplier : 1.0;
+      const effectiveRisk = runRiskBase * riskMult;
+      const riskPerShare  = entryPrice * STOCK_TRAILING_PCT;
+      const sharesFromRisk = Math.floor((portfolio.totalValue * Math.min(effectiveRisk, 0.05)) / riskPerShare);
+      const sharesFromMax  = Math.floor((portfolio.totalValue * HARD_MAX_POSITION_PCT) / entryPrice);
+      const rawShares  = Math.max(1, Math.min(sharesFromRisk, sharesFromMax));
       const shares     = Math.max(1, Math.floor(rawShares * (reduceSize ? 0.5 : 1)));
 
+      const targetPct = claudeDecision?.targetPct ?? STOCK_TARGET_PCT;
+      const stopPct   = claudeDecision?.stopPct   ?? -STOCK_TRAILING_PCT;
+
+      const convictionLabel = claudeDecision ? ` | Claude ENTER (conviction ${claudeDecision.conviction}/5 × ${riskMult.toFixed(1)}x)` : '';
       const reasoning = [
         `Momentum breakout: ${sig.ticker}`,
         `Heat ${sig.heat}/100 · Volume ${sig.volRatio.toFixed(1)}× above 10-day avg`,
         `Entry $${entryPrice.toFixed(2)} × ${shares} shares = $${(entryPrice * shares).toFixed(0)}`,
-        `Target +10% ($${(entryPrice * 1.10).toFixed(2)}) · Trailing stop 7% from peak`,
-        `Regime: ${regime}`,
-      ].join(' | ');
+        `Target +${(targetPct * 100).toFixed(0)}% · Stop ${(stopPct * 100).toFixed(0)}% from entry`,
+        `Regime: ${regime}${convictionLabel}`,
+        claudeDecision?.reasoning ?? '',
+      ].filter(Boolean).join(' | ');
 
       tryEnter(sig.ticker, 'STOCK', 'LONG_STOCK', entryPrice, sig.price, shares, null, {
         source: 'STOCK_HEAT', reasoning,
-      });
+        claudeConviction: claudeDecision?.conviction,
+        claudeRiskMultiplier: claudeDecision?.riskMultiplier,
+      }, targetPct, stopPct);
     }
   }
 

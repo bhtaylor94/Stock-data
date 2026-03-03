@@ -16,7 +16,7 @@ export interface PaperPortfolio {
 export type PositionType = 'OPTIONS' | 'STOCK';
 export type PositionDirection = 'LONG_CALL' | 'LONG_PUT' | 'LONG_STOCK';
 export type PositionStatus = 'OPEN' | 'CLOSED';
-export type ExitReason = 'TARGET_HIT' | 'STOP_HIT' | 'EXPIRED' | 'DTE_STOP' | 'TIME_STOP';
+export type ExitReason = 'TARGET_HIT' | 'STOP_HIT' | 'EXPIRED' | 'DTE_STOP' | 'TIME_STOP' | 'AI_EXIT';
 
 export interface PaperPosition {
   id: string;
@@ -65,6 +65,8 @@ export interface PaperPosition {
     uoaTier?: string;
     alertType?: string;
     reasoning: string;
+    claudeConviction?: number;
+    claudeRiskMultiplier?: number;
   };
 
   sector: string;
@@ -109,6 +111,31 @@ export interface EquitySnapshot {
   value: number;
 }
 
+export interface TradeMemory {
+  tradeId: string;
+  ticker: string;
+  direction: PositionDirection;
+  positionType: PositionType;
+  entrySignal: {
+    uoaScore: number;
+    alertType: string;
+    regime: string;
+    ivRank: number;
+  };
+  claudeEntry: {
+    conviction: number;
+    riskMultiplier: number;
+    reasoning: string;
+  };
+  outcome: {
+    realizedPnlPct: number;
+    exitReason: string;
+    daysHeld: number;
+    won: boolean;
+  };
+  closedAt: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -121,6 +148,7 @@ const KEYS = {
   log: 'paper:log',
   equity: 'paper:equity',
   lock: 'paper:agent_lock',
+  tradeMemory: 'paper:trade_memory',
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -276,6 +304,33 @@ export async function appendEquitySnapshot(value: number): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// TRADE MEMORY
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function loadTradeMemory(): Promise<TradeMemory[]> {
+  if (isRedisAvailable()) {
+    try {
+      const data = await getRedis().get<TradeMemory[]>(KEYS.tradeMemory);
+      return data ?? [];
+    } catch (err) {
+      console.error('[paperTradingStore] Redis read tradeMemory:', err);
+    }
+  }
+  return [];
+}
+
+export async function appendTradeMemory(trade: TradeMemory): Promise<void> {
+  if (!isRedisAvailable()) return;
+  try {
+    const existing = await loadTradeMemory();
+    const updated = [trade, ...existing].slice(0, 50);
+    await getRedis().set(KEYS.tradeMemory, JSON.stringify(updated));
+  } catch (err) {
+    console.error('[paperTradingStore] Redis write tradeMemory:', err);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // RESET
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -289,5 +344,6 @@ export async function resetPaperTrading(): Promise<void> {
     redis.set(KEYS.positions, JSON.stringify([])),
     redis.set(KEYS.log, JSON.stringify([])),
     redis.set(KEYS.equity, JSON.stringify([])),
+    redis.set(KEYS.tradeMemory, JSON.stringify([])),
   ]);
 }
