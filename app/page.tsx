@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Sparkles, BarChart2, Layers, Activity, BookOpen, Newspaper,
   CheckCircle2, AlertCircle, AlertTriangle,
-  Search, ChevronDown,
+  Search, ChevronDown, Bot,
 } from 'lucide-react';
 
 // New refactored components
@@ -35,6 +35,7 @@ import { MarketBreadthPanel } from './components/market/MarketBreadthPanel';
 import { COTWidget } from './components/market/COTWidget';
 import { EarningsScreener } from './components/scanner/EarningsScreener';
 import { FiftyTwoWeekPanel } from './components/scanner/FiftyTwoWeekPanel';
+import { PaperTradingDashboard } from './components/paper-trading/PaperTradingDashboard';
 
 // ============================================================
 // UTILITY COMPONENTS
@@ -582,13 +583,14 @@ export default function TradingDashboard() {
     { id: 'scanner', label: 'Scanner',  Icon: Activity  },
     { id: 'news',    label: 'News',     Icon: Newspaper },
     { id: 'learn',   label: 'Learn',    Icon: BookOpen  },
+    { id: 'agent',   label: 'Agent',    Icon: Bot       },
   ] as const;
 
   const searchRef = useRef<HTMLInputElement>(null);
 
   const [ticker, setTicker] = useState('');
   const [showMoreTickers, setShowMoreTickers] = useState(false);
-  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'scanner' | 'news' | 'learn'>('feed');
+  const [activeTab, setActiveTab] = useState<'feed' | 'stock' | 'options' | 'scanner' | 'news' | 'learn' | 'agent'>('feed');
   const [stockData, setStockData] = useState<any>(null);
   const [optionsData, setOptionsData] = useState<any>(null);
   const [stockLoading, setStockLoading] = useState(false);
@@ -924,6 +926,10 @@ export default function TradingDashboard() {
 
             {activeTab === 'learn' && (
               <LearnTab />
+            )}
+
+            {activeTab === 'agent' && (
+              <PaperTradingDashboard />
             )}
           </ErrorBoundary>
         </div>
