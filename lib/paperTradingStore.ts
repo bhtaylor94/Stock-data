@@ -127,15 +127,23 @@ const KEYS = {
 // ADVISORY LOCK (prevents concurrent Vercel instances)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Lock duration: if a run started within this window, consider it still running
+const LOCK_MS = 90_000; // 90s — safe for 2-minute cron interval
+
 export async function acquireLock(): Promise<boolean> {
   if (!isRedisAvailable()) return true; // local dev: no contention
   try {
-    // Upstash returns 'OK' (string) when set, null when key already exists
-    // Use !== null to be safe across SDK versions
-    const result = await getRedis().set(KEYS.lock, '1', { nx: true, ex: 45 });
-    return result !== null;
+    const redis = getRedis();
+    // Read the timestamp of the last lock acquisition
+    const existing = await redis.get<number>(KEYS.lock);
+    if (existing !== null && Date.now() - Number(existing) < LOCK_MS) {
+      return false; // another run started within the last 90s
+    }
+    // Write current timestamp as the lock (plain SET, no NX — simpler + reliable)
+    await redis.set(KEYS.lock, Date.now(), { ex: 120 });
+    return true;
   } catch {
-    return false;
+    return true; // on Redis error, allow run rather than deadlock
   }
 }
 
