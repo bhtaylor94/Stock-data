@@ -34,7 +34,10 @@ export async function GET() {
       loadLog(),
       loadEquity(),
     ]);
-    return NextResponse.json({ portfolio, positions, log, equity, redisConnected: redisAvailable, redisPing });
+    return NextResponse.json(
+      { portfolio, positions, log, equity, redisConnected: redisAvailable, redisPing },
+      { headers: { 'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate' } }
+    );
   } catch (err: any) {
     console.error('[paper-trade] GET error:', err);
     return NextResponse.json({ error: String(err?.message ?? err), redisPing }, { status: 500 });

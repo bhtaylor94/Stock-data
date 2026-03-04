@@ -444,10 +444,13 @@ interface State {
   log: AgentLogEntry[];
   equity: EquitySnapshot[];
   redisConnected: boolean;
+  redisPing: string;
+  rawPositionCount: number;
+  rawLogCount: number;
 }
 
 export function PaperTradingDashboard() {
-  const [state, setState]     = useState<State>({ portfolio: null, positions: [], log: [], equity: [], redisConnected: true });
+  const [state, setState]     = useState<State>({ portfolio: null, positions: [], log: [], equity: [], redisConnected: true, redisPing: '...', rawPositionCount: -1, rawLogCount: -1 });
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
@@ -460,12 +463,17 @@ export function PaperTradingDashboard() {
         setError(data.error ?? 'Failed to load agent state');
         return;
       }
+      const positions = data.positions ?? [];
+      const log       = data.log ?? [];
       setState({
-        portfolio:      data.portfolio ?? null,
-        positions:      data.positions ?? [],
-        log:            data.log ?? [],
-        equity:         data.equity ?? [],
-        redisConnected: data.redisConnected ?? false,
+        portfolio:        data.portfolio ?? null,
+        positions,
+        log,
+        equity:           data.equity ?? [],
+        redisConnected:   data.redisConnected ?? false,
+        redisPing:        data.redisPing ?? 'none',
+        rawPositionCount: positions.length,
+        rawLogCount:      log.length,
       });
       setError(null);
       setLastFetch(new Date());
@@ -504,22 +512,39 @@ export function PaperTradingDashboard() {
     );
   }
 
-  const { portfolio, positions, log, equity, redisConnected } = state;
+  const { portfolio, positions, log, equity, redisConnected, redisPing, rawPositionCount, rawLogCount } = state;
+  const openPositions = positions.filter(p => p.status === 'OPEN');
+  const isActive = log.length > 0 && Date.now() - new Date(log[0].runAt).getTime() < 300_000;
+
+  // Debug strip + no-portfolio fallback rendered even before portfolio loads
+  const debugStrip = rawPositionCount >= 0 ? (
+    <div className="px-3 py-2 rounded-xl bg-slate-900/80 border border-slate-700/50 text-[10px] text-slate-400 font-mono flex flex-wrap gap-x-4 gap-y-1">
+      <span>redis: <span className={redisPing === 'ok' ? 'text-emerald-400' : 'text-red-400'}>{redisPing}</span></span>
+      <span>positions in Redis: <span className="text-white">{rawPositionCount}</span></span>
+      <span>log entries: <span className="text-white">{rawLogCount}</span></span>
+      <span>fetched: <span className="text-white">{lastFetch ? lastFetch.toLocaleTimeString() : '—'}</span></span>
+    </div>
+  ) : null;
+
   if (!portfolio) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 size={24} className="animate-spin text-blue-400" />
-        <span className="ml-3 text-slate-400">Waiting for first agent run…</span>
+      <div className="space-y-4">
+        {debugStrip}
+        <div className="flex items-center justify-center py-20">
+          <Loader2 size={24} className="animate-spin text-blue-400" />
+          <span className="ml-3 text-slate-400">Waiting for first agent run…</span>
+        </div>
       </div>
     );
   }
 
-  const metrics  = computeMetrics(positions, equity, portfolio);
-  const openPositions = positions.filter(p => p.status === 'OPEN');
-  const isActive = log.length > 0 && Date.now() - new Date(log[0].runAt).getTime() < 300_000;
+  const metrics = computeMetrics(positions, equity, portfolio);
 
   return (
     <div className="space-y-5 animate-fade-in">
+
+      {/* ── Debug strip ──────────────────────────────────────────────────────── */}
+      {debugStrip}
 
       {/* ── Redis warning ────────────────────────────────────────────────────── */}
       {!redisConnected && (
