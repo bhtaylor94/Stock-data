@@ -210,12 +210,15 @@ export async function loadPortfolio(): Promise<PaperPortfolio> {
   return freshPortfolio();
 }
 
-export async function savePortfolio(p: PaperPortfolio): Promise<void> {
-  if (!isRedisAvailable()) return;
+export async function savePortfolio(p: PaperPortfolio): Promise<string | null> {
+  if (!isRedisAvailable()) return 'Redis env vars not set';
   try {
     await getRedis().set(KEYS.portfolio, JSON.stringify(p));
+    return null;
   } catch (err) {
-    console.error('[paperTradingStore] Redis write portfolio:', err);
+    const msg = `Redis write portfolio: ${String((err as any)?.message ?? err)}`;
+    console.error('[paperTradingStore]', msg);
+    return msg;
   }
 }
 
@@ -235,12 +238,15 @@ export async function loadPositions(): Promise<PaperPosition[]> {
   return [];
 }
 
-export async function savePositions(positions: PaperPosition[]): Promise<void> {
-  if (!isRedisAvailable()) return;
+export async function savePositions(positions: PaperPosition[]): Promise<string | null> {
+  if (!isRedisAvailable()) return 'Redis env vars not set';
   try {
     await getRedis().set(KEYS.positions, JSON.stringify(positions));
+    return null;
   } catch (err) {
-    console.error('[paperTradingStore] Redis write positions:', err);
+    const msg = `Redis write positions: ${String((err as any)?.message ?? err)}`;
+    console.error('[paperTradingStore]', msg);
+    return msg;
   }
 }
 
@@ -260,14 +266,17 @@ export async function loadLog(): Promise<AgentLogEntry[]> {
   return [];
 }
 
-export async function appendLog(entry: AgentLogEntry): Promise<void> {
-  if (!isRedisAvailable()) return;
+export async function appendLog(entry: AgentLogEntry): Promise<string | null> {
+  if (!isRedisAvailable()) return 'Redis env vars not set';
   try {
     const existing = await loadLog();
     const updated = [entry, ...existing].slice(0, 100);
     await getRedis().set(KEYS.log, JSON.stringify(updated));
+    return null;
   } catch (err) {
-    console.error('[paperTradingStore] Redis write log:', err);
+    const msg = `Redis write log: ${String((err as any)?.message ?? err)}`;
+    console.error('[paperTradingStore]', msg);
+    return msg;
   }
 }
 
@@ -287,19 +296,21 @@ export async function loadEquity(): Promise<EquitySnapshot[]> {
   return [];
 }
 
-export async function appendEquitySnapshot(value: number): Promise<void> {
-  if (!isRedisAvailable()) return;
+export async function appendEquitySnapshot(value: number): Promise<string | null> {
+  if (!isRedisAvailable()) return 'Redis env vars not set';
   try {
     const today = new Date().toISOString().slice(0, 10);
     const existing = await loadEquity();
-    // Dedupe by date: remove today's existing snapshot if any, then append
     const filtered = existing.filter(s => s.date !== today);
     const updated = [...filtered, { date: today, value }]
       .sort((a, b) => a.date.localeCompare(b.date))
       .slice(-365);
     await getRedis().set(KEYS.equity, JSON.stringify(updated));
+    return null;
   } catch (err) {
-    console.error('[paperTradingStore] Redis write equity:', err);
+    const msg = `Redis write equity: ${String((err as any)?.message ?? err)}`;
+    console.error('[paperTradingStore]', msg);
+    return msg;
   }
 }
 

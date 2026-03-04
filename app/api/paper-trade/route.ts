@@ -13,6 +13,20 @@ export const dynamic = 'force-dynamic';
 
 /** GET /api/paper-trade — full state for dashboard */
 export async function GET() {
+  const redisAvailable = isRedisAvailable();
+
+  // Ping Redis so connection errors are visible in the response
+  let redisPing: string = 'skip';
+  if (redisAvailable) {
+    try {
+      const { getRedis } = await import('@/lib/redis');
+      await getRedis().ping();
+      redisPing = 'ok';
+    } catch (err: any) {
+      redisPing = `FAIL: ${String(err?.message ?? err)}`;
+    }
+  }
+
   try {
     const [portfolio, positions, log, equity] = await Promise.all([
       loadPortfolio(),
@@ -20,10 +34,10 @@ export async function GET() {
       loadLog(),
       loadEquity(),
     ]);
-    return NextResponse.json({ portfolio, positions, log, equity, redisConnected: isRedisAvailable() });
+    return NextResponse.json({ portfolio, positions, log, equity, redisConnected: redisAvailable, redisPing });
   } catch (err: any) {
     console.error('[paper-trade] GET error:', err);
-    return NextResponse.json({ error: String(err?.message ?? err) }, { status: 500 });
+    return NextResponse.json({ error: String(err?.message ?? err), redisPing }, { status: 500 });
   }
 }
 

@@ -974,9 +974,14 @@ export async function runPaperTradingAgent(): Promise<AgentRunResult> {
   portfolio.peakValue    = Math.max(portfolio.peakValue, portfolio.totalValue);
   portfolio.lastUpdated  = new Date().toISOString();
 
-  await savePositions(positions);
-  await savePortfolio(portfolio);
-  await appendEquitySnapshot(portfolio.totalValue);
+  const [savePositionsErr, savePortfolioErr, saveEquityErr] = await Promise.all([
+    savePositions(positions),
+    savePortfolio(portfolio),
+    appendEquitySnapshot(portfolio.totalValue),
+  ]);
+  if (savePositionsErr)  errors.push(`REDIS_SAVE: ${savePositionsErr}`);
+  if (savePortfolioErr)  errors.push(`REDIS_SAVE: ${savePortfolioErr}`);
+  if (saveEquityErr)     errors.push(`REDIS_SAVE: ${saveEquityErr}`);
 
   const durationMs = Date.now() - startTime;
   const message = [
