@@ -1,5 +1,5 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
@@ -52,7 +52,20 @@ function AnalysisResult({ text }) {
   );
 }
 
+// Default export wraps in Suspense to satisfy Next.js requirement for useSearchParams
 export default function AnalyzePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#08080a' }}>
+        <span className="text-white/20 text-sm font-mono">Loading analyzer...</span>
+      </div>
+    }>
+      <AnalyzePageInner />
+    </Suspense>
+  );
+}
+
+function AnalyzePageInner() {
   const searchParams = useSearchParams();
   const [mode, setMode] = useState('contract'); // 'contract' | 'leap' | 'freeform'
   const [loading, setLoading] = useState(false);
