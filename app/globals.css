@@ -2,184 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Design Tokens ─────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
 :root {
-  --border:        rgba(51, 65, 85, 0.5);
-  --border-subtle: rgba(51, 65, 85, 0.25);
-  --border-accent: rgba(59, 130, 246, 0.4);
-  --text-1: #f1f5f9;
-  --text-2: #94a3b8;
-  --text-3: #475569;
-  --positive: #10b981;
-  --negative: #ef4444;
-  --warning:  #f59e0b;
-  --accent:   #3b82f6;
+  --bg: #08080a;
+  --card: rgba(255,255,255,0.015);
+  --border: rgba(255,255,255,0.06);
+  --text: #fff;
+  --text-dim: rgba(255,255,255,0.45);
+  --text-muted: rgba(255,255,255,0.25);
+  --green: #22c55e;
+  --red: #ef4444;
+  --blue: #00d4ff;
+  --gold: #f59e0b;
 }
 
-/* ── Body Background ──────────────────────────────────────── */
 body {
-  color: var(--text-1);
-  background:
-    linear-gradient(rgba(30, 41, 59, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(30, 41, 59, 0.03) 1px, transparent 1px),
-    linear-gradient(180deg, #020617 0%, #0f172a 50%, #020617 100%);
-  background-size: 40px 40px, 40px 40px, 100% 100%;
-  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
 
-/* Top glow */
-body::before {
-  content: '';
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 400px;
-  background: radial-gradient(ellipse at 50% 0%, rgba(59, 130, 246, 0.08) 0%, transparent 70%);
-  pointer-events: none;
-  z-index: 0;
+* { box-sizing: border-box; }
+
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 2px; }
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Scrollbar ────────────────────────────────────────────── */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); border-radius: 3px; }
-::-webkit-scrollbar-thumb { background: rgba(71, 85, 105, 0.6); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(100, 116, 139, 0.8); }
-
-/* ── Utility Classes ──────────────────────────────────────── */
-@layer components {
-  /* Cards */
-  .card {
-    @apply rounded-2xl backdrop-blur-xl transition-all;
-    background: rgba(15, 23, 42, 0.60);
-    border: 1px solid var(--border);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-  }
-  .card-elevated {
-    @apply rounded-2xl backdrop-blur-xl transition-all;
-    background: rgba(15, 23, 42, 0.80);
-    border: 1px solid var(--border);
-    box-shadow: 0 8px 32px -8px rgba(0,0,0,0.4);
-  }
-  .card-inset {
-    @apply rounded-2xl backdrop-blur-xl transition-all;
-    background: rgba(2, 6, 23, 0.80);
-    border: 1px solid var(--border-subtle);
-  }
-  .card-accent {
-    @apply rounded-2xl backdrop-blur-xl transition-all;
-    background: rgba(15, 23, 42, 0.60);
-    border: 1px solid var(--border-accent);
-  }
-  .card-interactive {
-    @apply card cursor-pointer;
-  }
-  .card-interactive:hover {
-    border-color: rgba(71, 85, 105, 0.6);
-    box-shadow: 0 8px 32px -8px rgba(0,0,0,0.4);
-  }
-
-  /* Typography helpers */
-  .stat-label {
-    @apply text-xs font-medium tracking-wide uppercase;
-    color: var(--text-3);
-  }
-  .stat-value {
-    @apply text-sm font-semibold;
-    color: var(--text-1);
-  }
-
-  /* Navigation */
-  .nav-pill {
-    @apply flex items-center gap-1.5 px-1 pb-2.5 text-sm font-medium transition-colors border-b-2 border-transparent whitespace-nowrap;
-    color: var(--text-3);
-  }
-  .nav-pill:hover { color: var(--text-2); }
-  .nav-pill-active {
-    color: var(--text-1);
-    border-bottom-color: var(--accent);
-  }
-
-  /* Buttons */
-  .btn-primary {
-    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all;
-    background: var(--accent);
-  }
-  .btn-primary:hover { filter: brightness(1.12); }
-  .btn-primary:active { transform: scale(0.97); }
-  .btn-ghost {
-    @apply inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all;
-    color: var(--text-2);
-    background: transparent;
-    border: 1px solid var(--border);
-  }
-  .btn-ghost:hover {
-    color: var(--text-1);
-    border-color: rgba(71, 85, 105, 0.6);
-    background: rgba(30, 41, 59, 0.5);
-  }
-}
-
-/* ── Animations ───────────────────────────────────────────── */
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes slide-in-right {
-  from { opacity: 0; transform: translateX(20px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-@keyframes slide-in-left {
-  from { opacity: 0; transform: translateX(-20px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-@keyframes pulse-slow {
+@keyframes pulse {
   0%, 100% { opacity: 1; }
-  50%  { opacity: 0.5; }
-}
-@keyframes livePulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.6; transform: scale(1.1); }
+  50% { opacity: 0.3; }
 }
 
-.animate-fade-in       { animation: fade-in 0.3s ease-out; }
-.animate-slide-in-right { animation: slide-in-right 0.3s ease-out; }
-.animate-slide-in-left  { animation: slide-in-left 0.3s ease-out; }
-.animate-pulse-slow     { animation: pulse-slow 2s ease-in-out infinite; }
-.live-dot               { animation: livePulse 1.5s ease-in-out infinite; }
-
-/* ── Interactive defaults ─────────────────────────────────── */
-button:active { transform: scale(0.98); }
-
-input[type="text"] {
-  background: rgba(15, 23, 42, 0.6);
-  border: 1px solid var(--border);
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-input[type="text"]:focus {
-  border-color: rgba(59, 130, 246, 0.5);
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-  outline: none;
+.animate-fade-up {
+  animation: fadeUp 0.35s ease both;
 }
 
-/* ── Gradient text helper ─────────────────────────────────── */
-.gradient-text {
-  background: linear-gradient(135deg, #10b981 0%, #3b82f6 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-/* ── Signal badges (legacy, kept for compat) ──────────────── */
-.signal-bullish {
-  background: linear-gradient(135deg, rgba(16,185,129,0.15) 0%, rgba(6,78,59,0.2) 100%);
-  border: 1px solid rgba(16,185,129,0.3);
-}
-.signal-bearish {
-  background: linear-gradient(135deg, rgba(239,68,68,0.15) 0%, rgba(127,29,29,0.2) 100%);
-  border: 1px solid rgba(239,68,68,0.3);
-}
-.signal-neutral {
-  background: linear-gradient(135deg, rgba(234,179,8,0.15) 0%, rgba(113,63,18,0.2) 100%);
-  border: 1px solid rgba(234,179,8,0.3);
+.animate-pulse-dot {
+  animation: pulse 1.5s ease infinite;
 }
