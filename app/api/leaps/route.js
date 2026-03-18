@@ -103,13 +103,14 @@ async function scanTickerForLeaps(ticker, bias, maxPremium, portfolioSize) {
         const thetaPctWeek = mid > 0 ? thetaWeekly / mid : 1;
 
         // Estimate IV rank (simplified — compare IV to realized vol)
-        const ivPct = iv * 100;
+        // IMPORTANT: Schwab returns iv as percentage already (e.g. 46.69, not 0.4669)
+        const ivPct = iv; // already a percentage
         const ivCheap = rv20 ? ivPct < rv20 * 1.3 : ivPct < 40;
 
         // Score factors
         const factors = {
           ivCheap,
-          goodDelta: delta >= 0.50 && delta <= 0.70,
+          goodDelta: delta >= 0.45 && delta <= 0.75,
           liquidOI: oi >= 1000,
           tightSpread: spreadPct < 0.05,
           noEarningsSoon: !nearEarnings,
