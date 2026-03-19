@@ -100,6 +100,7 @@ function LeapCard({ setup }) {
         }}>
           <div className="font-bold text-[11px] mb-1 tracking-wide">
             {setup.emaProximity.state === 'CONFIRMED' && '✅ BOUNCE CONFIRMED — ENTRY CONDITIONS MET'}
+            {setup.emaProximity.state === 'CAUTION_BOUNCE' && '⚠️ BOUNCE DETECTED — DOWNTREND CAUTION'}
             {setup.emaProximity.state === 'APPROACHING' && '⚠️ APPROACHING 200 EMA SUPPORT'}
             {setup.emaProximity.state === 'AT_SUPPORT' && '🔶 AT 200 EMA SUPPORT — WAIT FOR CONFIRMATION'}
             {setup.emaProximity.state === 'BELOW_EMA' && '🔴 BELOW 200 EMA — BROKEN SUPPORT'}
@@ -111,6 +112,16 @@ function LeapCard({ setup }) {
           <div className="mt-1" style={{ color: `${setup.emaProximity.color}aa` }}>
             {setup.emaProximity.message}
           </div>
+          {/* Trend context line */}
+          {setup.emaProximity.trendContext && (
+            <div className="mt-1.5 text-[10px] flex items-center gap-2" style={{ color: setup.emaProximity.trendContext.trendColor }}>
+              <span className="font-bold">TREND:</span>
+              <span>{setup.emaProximity.trendContext.trend}</span>
+              <span className="text-white/20">|</span>
+              <span className="text-white/35">50 EMA: ${setup.emaProximity.trendContext.ema50}</span>
+              <span className="text-white/35">Spread: {setup.emaProximity.trendContext.emaSpread}%</span>
+            </div>
+          )}
           {setup.originalGrade && (
             <div className="mt-1 text-[10px]" style={{ color: `${setup.emaProximity.color}88` }}>
               Grade adjusted: {setup.originalGrade} → {setup.grade} based on EMA position
@@ -126,8 +137,14 @@ function LeapCard({ setup }) {
           {' · '}<span style={{
             color: setup.emaProximity.distance >= 0 ? '#22c55e' : '#ef4444',
           }}>{setup.emaProximity.distance > 0 ? '+' : ''}{setup.emaProximity.distance}%</span>
+          {setup.emaProximity.trendContext && (
+            <span style={{ color: setup.emaProximity.trendContext.trendColor }}>
+              {' · '}{setup.emaProximity.trendContext.trend}
+            </span>
+          )}
           {setup.emaProximity.state === 'BELOW_EMA' && ' · ⚠ BELOW SUPPORT'}
           {setup.emaProximity.state === 'AT_SUPPORT' && ' · ⚠ AT SUPPORT'}
+          {setup.emaProximity.state === 'CAUTION_BOUNCE' && ' · ⚠ DOWNTREND BOUNCE'}
         </div>
       )}
 
