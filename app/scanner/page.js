@@ -34,6 +34,14 @@ function FlowRow({ entry, maxVolume }) {
             <span className="text-base font-bold font-mono" style={{ color: bull ? '#22c55e' : '#ef4444' }}>
               {entry.putCall === 'CALL' ? `${entry.strike} Call` : `${entry.strike} Put`}
             </span>
+            {/* Expiration badge */}
+            <span className="text-[9px] font-mono font-semibold px-1.5 py-0.5 rounded" style={{
+              background: entry.dte <= 30 ? 'rgba(239,68,68,0.1)' : entry.dte <= 90 ? 'rgba(234,179,8,0.1)' : 'rgba(0,212,255,0.1)',
+              color: entry.dte <= 30 ? '#ef4444' : entry.dte <= 90 ? '#eab308' : '#00d4ff',
+              border: `1px solid ${entry.dte <= 30 ? 'rgba(239,68,68,0.15)' : entry.dte <= 90 ? 'rgba(234,179,8,0.15)' : 'rgba(0,212,255,0.15)'}`,
+            }}>
+              {entry.expiration} · {entry.dte}d
+            </span>
             {entry.isUnusual && (
               <span className="text-[8px] font-bold px-1.5 py-px rounded" style={{
                 background: 'rgba(255,160,0,0.15)', color: '#ffa500',
@@ -48,7 +56,7 @@ function FlowRow({ entry, maxVolume }) {
 
         {/* Exp + meta row */}
         <div className="flex items-center justify-between text-[10px] font-mono text-white/40 mb-2.5">
-          <span>Exp. {entry.expiration} · {entry.dte}d · {entry.moneyness} {entry.pctFromSpot > 0 ? '+' : ''}{entry.pctFromSpot}%</span>
+          <span>{entry.moneyness} {entry.pctFromSpot > 0 ? '+' : ''}{entry.pctFromSpot}% from spot</span>
           <span className="text-white/25">{expanded ? '▴' : '▾'}</span>
         </div>
 
@@ -322,10 +330,52 @@ export default function ScannerPage() {
                 {(() => {
                   const entries = tab === 'calls' ? data.calls : data.puts;
                   if (entries.length === 0) return <p className="text-center py-8 text-white/15 text-xs font-mono">No significant activity</p>;
+
+                  // Expiration heat map — show which dates have the most volume
+                  const expVolume = {};
+                  entries.forEach(e => {
+                    if (!expVolume[e.expiration]) expVolume[e.expiration] = { vol: 0, premium: 0, count: 0, dte: e.dte };
+                    expVolume[e.expiration].vol += e.volume;
+                    expVolume[e.expiration].premium += e.premium;
+                    expVolume[e.expiration].count++;
+                  });
+                  const sortedExps = Object.entries(expVolume).sort((a, b) => b[1].vol - a[1].vol);
+                  const maxExpVol = sortedExps.length > 0 ? sortedExps[0][1].vol : 1;
+
                   const maxVol = Math.max(...entries.map(e => e.volume), 1);
-                  return entries.map((entry, i) => (
-                    <FlowRow key={`${entry.strike}-${entry.expiration}-${i}`} entry={entry} maxVolume={maxVol} />
-                  ));
+                  return (
+                    <>
+                      {/* Expiration heat strip */}
+                      {sortedExps.length > 1 && (
+                        <div className="mb-3 p-2.5 rounded-lg" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                          <span className="block text-[9px] font-bold text-white/20 font-mono tracking-wide mb-2">VOLUME BY EXPIRATION</span>
+                          <div className="flex gap-1.5 flex-wrap">
+                            {sortedExps.slice(0, 8).map(([exp, info]) => {
+                              const heat = info.vol / maxExpVol;
+                              return (
+                                <div key={exp} className="rounded px-2 py-1.5 text-center" style={{
+                                  background: heat > 0.7 ? 'rgba(34,197,94,0.12)' : heat > 0.3 ? 'rgba(234,179,8,0.08)' : 'rgba(255,255,255,0.03)',
+                                  border: `1px solid ${heat > 0.7 ? 'rgba(34,197,94,0.2)' : heat > 0.3 ? 'rgba(234,179,8,0.12)' : 'rgba(255,255,255,0.06)'}`,
+                                  minWidth: '72px',
+                                }}>
+                                  <span className="block text-[10px] font-mono font-semibold" style={{
+                                    color: heat > 0.7 ? '#22c55e' : heat > 0.3 ? '#eab308' : 'rgba(255,255,255,0.4)',
+                                  }}>{exp.slice(5)}</span>
+                                  <span className="block text-[9px] font-mono text-white/25">{info.dte}d</span>
+                                  <span className="block text-[9px] font-mono mt-0.5" style={{ color: heat > 0.7 ? '#22c55e' : 'rgba(255,255,255,0.35)' }}>
+                                    {info.vol >= 1000 ? `${(info.vol / 1000).toFixed(1)}K` : info.vol} vol
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                      {entries.map((entry, i) => (
+                        <FlowRow key={`${entry.strike}-${entry.expiration}-${i}`} entry={entry} maxVolume={maxVol} />
+                      ))}
+                    </>
+                  );
                 })()}
               </div>
             )}
