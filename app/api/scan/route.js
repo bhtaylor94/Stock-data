@@ -2,7 +2,7 @@
 import { NextResponse } from 'next/server';
 import { getOptionsChain, getQuotes, getPriceHistory } from '@/lib/schwab';
 import { getNews, getEarnings } from '@/lib/finnhub';
-import { WATCHLIST, VOL_OI_THRESHOLD, MIN_PREMIUM, MIN_DTE, MAX_DTE } from '@/lib/watchlist';
+import { WATCHLIST, VOL_OI_THRESHOLD, MIN_PREMIUM, MIN_DTE, MAX_DTE, VIX_CAUTION, VIX_DANGER, VIX_HALT } from '@/lib/watchlist';
 import { scoreOpportunity } from '@/lib/engine';
 import { getInsiderActivity } from '@/lib/edgar';
 import { calculateNetFlow, getMarketFlow } from '@/lib/netflow';
@@ -50,16 +50,52 @@ export async function GET() {
     const opportunities = [];
     const errors = [];
     const marketQuotes = {};
+    let vixLevel = null;
+    let vixWarning = null;
 
+    // Fetch market benchmarks + VIX
     try {
       const quotes = await getQuotes(['SPY', 'QQQ']);
       if (quotes) {
         Object.entries(quotes).forEach(([sym, data]) => {
           const q = data.quote || data;
-          marketQuotes[sym] = { price: q.lastPrice || q.mark || 0, change: Math.round((q.netPercentChangeInDouble || 0) * 100) / 100 };
+          marketQuotes[sym] = { price: q.lastPrice || q.mark || 0, change: Math.round((q.netPercentChangeInDouble || q.netPercentChange || 0) * 100) / 100 };
         });
       }
     } catch (e) { /* non-critical */ }
+
+    // Fetch VIX separately (Finnhub for free VIX quote)
+    try {
+      const vixRes = await fetch(`https://finnhub.io/api/v1/quote?symbol=VIX&token=${process.env.FINNHUB_API_KEY}`);
+      if (vixRes.ok) {
+        const vixData = await vixRes.json();
+        vixLevel = vixData.c || null; // current price
+        marketQuotes.VIX = { price: vixLevel, change: Math.round((vixData.dp || 0) * 100) / 100 };
+      }
+    } catch (e) { /* non-critical */ }
+
+    // VIX Circuit Breaker
+    if (vixLevel) {
+      if (vixLevel >= VIX_HALT) {
+        vixWarning = {
+          level: 'HALT',
+          message: `🚨 VIX at ${vixLevel.toFixed(1)} — EXTREME FEAR. All bullish suggestions paused. Market conditions are too volatile for directional long options. Protect capital.`,
+          color: '#ef4444',
+        };
+      } else if (vixLevel >= VIX_DANGER) {
+        vixWarning = {
+          level: 'DANGER',
+          message: `🔴 VIX at ${vixLevel.toFixed(1)} — HIGH VOLATILITY. Bullish setups are high risk. Premiums are inflated. Consider reducing position size or sitting out.`,
+          color: '#ef4444',
+        };
+      } else if (vixLevel >= VIX_CAUTION) {
+        vixWarning = {
+          level: 'CAUTION',
+          message: `⚠️ VIX at ${vixLevel.toFixed(1)} — ELEVATED. Options premiums are above average. Be selective and favor spreads over naked long options.`,
+          color: '#eab308',
+        };
+      }
+    }
 
     const batchSize = 5;
     for (let i = 0; i < WATCHLIST.length; i += batchSize) {
@@ -83,11 +119,12 @@ export async function GET() {
 
           calculateNetFlow(ticker, chainData);
           const closePrices = historyData?.candles ? historyData.candles.map(c => c.close) : [];
+          const volumes = historyData?.candles ? historyData.candles.map(c => c.volume) : [];
           const flows = detectUnusualFlow(chainData, stockPrice);
           prevScanCache[ticker] = { timestamp: Date.now() };
 
           for (const flowData of flows.slice(0, 3)) {
-            const card = scoreOpportunity({ flowData, chainData, closePrices, earningsData, newsData, ticker, stockPrice });
+            const card = scoreOpportunity({ flowData, chainData, closePrices, earningsData, newsData, ticker, stockPrice, volumes });
             if (!card) continue;
 
             const prevClose = closePrices.length >= 2 ? closePrices[closePrices.length - 2] : stockPrice;
@@ -135,7 +172,22 @@ export async function GET() {
     }
 
     cleanupExpiredTrades();
-    opportunities.sort((a, b) => {
+
+    // Apply VIX circuit breaker — filter bullish cards in extreme conditions
+    let filteredOpps = opportunities;
+    if (vixWarning?.level === 'HALT') {
+      filteredOpps = opportunities.filter(o => o.direction !== 'BULLISH');
+    } else if (vixWarning) {
+      // Add VIX warning to every bullish card's thesis
+      filteredOpps = opportunities.map(o => {
+        if (o.direction === 'BULLISH') {
+          return { ...o, vixWarning, thesis: o.thesis + ` ${vixWarning.message}` };
+        }
+        return o;
+      });
+    }
+
+    filteredOpps.sort((a, b) => {
       if (a.insiderActivity?.confirmed && !b.insiderActivity?.confirmed) return -1;
       if (!a.insiderActivity?.confirmed && b.insiderActivity?.confirmed) return 1;
       if (b.confidence !== a.confidence) return b.confidence - a.confidence;
@@ -144,10 +196,12 @@ export async function GET() {
 
     const mf = getMarketFlow();
     return NextResponse.json({
-      opportunities,
+      opportunities: filteredOpps,
       trackedTrades: getTrackedTrades().filter(t => t.status !== 'EXPIRED'),
       marketFlow: { sentiment: mf.sentiment, netPremium: mf.formatted, bullish: mf.netPremium > 0 },
       marketQuotes,
+      vixWarning,
+      vixLevel,
       scannedAt: new Date().toISOString(),
       tickersScanned: WATCHLIST.length,
       errors: errors.length > 0 ? errors : undefined,

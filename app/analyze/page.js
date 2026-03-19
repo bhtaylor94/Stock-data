@@ -76,19 +76,63 @@ function LeapCard({ setup }) {
     }
   };
 
+  const isOnFire = setup.grade === 'A' || setup.emaProximity?.state === 'CONFIRMED';
+
   return (
-    <div className="rounded-lg p-4 border animate-fade-up" style={{
+    <div className={`rounded-lg p-4 border animate-fade-up ${isOnFire ? 'fire-card' : ''}`} style={isOnFire ? {} : {
       background: 'rgba(255,255,255,0.015)',
       borderColor: `${GRADE_COLORS[setup.grade]}25`,
       borderLeft: `3px solid ${GRADE_COLORS[setup.grade]}`,
     }}>
+      {/* Rising ember particles for fire cards */}
+      {isOnFire && (
+        <div className="embers">
+          <div className="ember" /><div className="ember" /><div className="ember" /><div className="ember" /><div className="ember" />
+        </div>
+      )}
+
+      {/* 200 EMA Proximity Banner */}
+      {setup.emaProximity?.message && (
+        <div className="rounded-lg p-3 mb-3 text-[12px] leading-snug font-mono relative z-10" style={{
+          background: `${setup.emaProximity.color}10`,
+          borderLeft: `3px solid ${setup.emaProximity.color}`,
+          color: setup.emaProximity.color,
+        }}>
+          <div className="font-bold text-[11px] mb-1 tracking-wide">
+            {setup.emaProximity.state === 'CONFIRMED' && '✅ BOUNCE CONFIRMED — ENTRY CONDITIONS MET'}
+            {setup.emaProximity.state === 'APPROACHING' && '⚠️ APPROACHING 200 EMA SUPPORT'}
+            {setup.emaProximity.state === 'AT_SUPPORT' && '🔶 AT 200 EMA SUPPORT — WAIT FOR CONFIRMATION'}
+            {setup.emaProximity.state === 'BELOW_EMA' && '🔴 BELOW 200 EMA — BROKEN SUPPORT'}
+            {setup.emaProximity.state === 'FAILED' && '🔴 BOUNCE FAILED — AVOID ENTRY'}
+          </div>
+          <div style={{ color: `${setup.emaProximity.color}cc` }}>
+            200 EMA: ${setup.emaProximity.ema200} | Current: ${setup.emaProximity.currentPrice} ({setup.emaProximity.distance}%)
+          </div>
+          <div className="mt-1" style={{ color: `${setup.emaProximity.color}aa` }}>
+            {setup.emaProximity.message}
+          </div>
+          {setup.originalGrade && (
+            <div className="mt-1 text-[10px]" style={{ color: `${setup.emaProximity.color}88` }}>
+              Grade adjusted: {setup.originalGrade} → {setup.grade} based on EMA position
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Header */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 relative z-10">
         <div className="flex items-center gap-2">
           <span className="text-2xl font-extrabold font-display text-white">{setup.ticker}</span>
-          <span className="text-sm font-bold font-mono" style={{ color: GRADE_COLORS[setup.grade] }}>
-            {setup.gradeEmoji} Grade {setup.grade}
-          </span>
+          {isOnFire ? (
+            <span className="text-sm font-bold font-mono px-2 py-0.5 rounded fire-badge">
+              🔥 Grade {setup.grade}
+            </span>
+          ) : (
+            <span className="text-sm font-bold font-mono" style={{ color: GRADE_COLORS[setup.grade] }}>
+              {setup.gradeEmoji} Grade {setup.grade}
+            </span>
+          )}
+          {isOnFire && <span className="text-[10px] font-bold tracking-wider font-mono" style={{ color: '#ff8c00', textShadow: '0 0 8px rgba(255,140,0,0.4)' }}>HIGH CONVICTION</span>}
         </div>
         <span className="text-xs text-white/30 font-mono">${setup.stockPrice}</span>
       </div>

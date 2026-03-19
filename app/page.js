@@ -62,6 +62,15 @@ function OpportunityCard({ opp, index, onActivate, onDeepDive }) {
   const layers = opp.layers;
   const insider = opp.insiderActivity;
 
+  // Determine if this card gets the fire treatment
+  const isOnFire = opp.confidence === 5 || opp.emaProximity?.state === 'CONFIRMED';
+  const isConfirmedBounce = opp.emaProximity?.state === 'CONFIRMED';
+  const cardClass = isOnFire
+    ? `animate-fade-up rounded-lg p-4 fire-card`
+    : isConfirmedBounce
+      ? `animate-fade-up rounded-lg p-4 confirmed-card`
+      : `animate-fade-up rounded-lg p-4 transition-colors hover:bg-white/[0.03]`;
+
   const layerConfig = [
     { key: 'flow', icon: '⚡', name: 'FLOW INTENT', ...layers.flow },
     { key: 'gamma', icon: '🧲', name: 'DEALER POSITIONING', ...layers.gamma },
@@ -71,14 +80,46 @@ function OpportunityCard({ opp, index, onActivate, onDeepDive }) {
   ];
 
   return (
-    <div className="animate-fade-up rounded-lg p-4 transition-colors hover:bg-white/[0.03]"
-      style={{ animationDelay: `${index * 60}ms`, background: 'rgba(255,255,255,0.015)', border: `1px solid ${bull ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)'}`, borderLeft: `3px solid ${bull ? '#22c55e' : '#ef4444'}` }}>
+    <div className={cardClass}
+      style={isOnFire ? { animationDelay: `${index * 60}ms` } : { animationDelay: `${index * 60}ms`, background: 'rgba(255,255,255,0.015)', border: `1px solid ${bull ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)'}`, borderLeft: `3px solid ${bull ? '#22c55e' : '#ef4444'}` }}>
+
+      {/* Rising ember particles for fire cards */}
+      {isOnFire && (
+        <div className="embers">
+          <div className="ember" /><div className="ember" /><div className="ember" /><div className="ember" /><div className="ember" />
+        </div>
+      )}
+
+      {/* 200 EMA Proximity Banner */}
+      {opp.emaProximity?.message && (
+        <div className="rounded p-2.5 mb-3 text-[11px] leading-snug font-mono" style={{
+          background: `${opp.emaProximity.color}10`,
+          borderLeft: `3px solid ${opp.emaProximity.color}`,
+          color: opp.emaProximity.color,
+        }}>
+          <span className="font-bold text-[10px] tracking-wide">
+            {opp.emaProximity.state === 'CONFIRMED' && '✅ BOUNCE CONFIRMED'}
+            {opp.emaProximity.state === 'APPROACHING' && '⚠️ APPROACHING 200 EMA'}
+            {opp.emaProximity.state === 'AT_SUPPORT' && '🔶 AT 200 EMA — WAIT'}
+            {opp.emaProximity.state === 'BELOW_EMA' && '🔴 BELOW 200 EMA'}
+            {opp.emaProximity.state === 'FAILED' && '🔴 BOUNCE FAILED'}
+          </span>
+          <span className="ml-2" style={{ color: `${opp.emaProximity.color}aa` }}>
+            EMA: ${opp.emaProximity.ema200} ({opp.emaProximity.distance}%)
+          </span>
+        </div>
+      )}
 
       <div className="flex justify-between items-center mb-2.5">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-bold tracking-widest font-mono" style={{ color: bull ? '#22c55e' : '#ef4444' }}>{bull ? '▲ BULLISH' : '▼ BEARISH'}</span>
-          <span className="text-[10px] font-semibold font-mono px-1.5 py-px rounded" style={{ background: 'rgba(0,212,255,0.1)', color: '#00d4ff' }}>{opp.confidence}/5</span>
+          {isOnFire ? (
+            <span className="text-[10px] font-semibold font-mono px-2 py-0.5 rounded fire-badge">🔥 {opp.confidence}/5</span>
+          ) : (
+            <span className="text-[10px] font-semibold font-mono px-1.5 py-px rounded" style={{ background: 'rgba(0,212,255,0.1)', color: '#00d4ff' }}>{opp.confidence}/5</span>
+          )}
           {insider?.confirmed && <span className="text-[10px] font-semibold font-mono px-1.5 py-px rounded" style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}>🛡 INSIDER</span>}
+          {isOnFire && <span className="text-[10px] font-bold tracking-wider font-mono" style={{ color: '#ff8c00', textShadow: '0 0 8px rgba(255,140,0,0.4)' }}>HIGH CONVICTION</span>}
         </div>
         <div className="flex items-center gap-2">
           <ConfidencePips level={opp.confidence} />
@@ -224,13 +265,15 @@ export default function Home() {
   const [trackedTrades, setTrackedTrades] = useState([]);
   const [marketFlow, setMarketFlow] = useState(null);
   const [marketQuotes, setMarketQuotes] = useState({});
+  const [vixWarning, setVixWarning] = useState(null);
+  const [vixLevel, setVixLevel] = useState(null);
   const [loading, setLoading] = useState(true);
   const [lastScan, setLastScan] = useState(null);
   const [error, setError] = useState(null);
   const [dirFilter, setDirFilter] = useState('ALL');
   const [minConf, setMinConf] = useState(4);
   const [showFilters, setShowFilters] = useState(false);
-  const [activeTab, setActiveTab] = useState('feed'); // 'feed' | 'trades'
+  const [activeTab, setActiveTab] = useState('feed');
 
   const scan = useCallback(async () => {
     try {
@@ -241,6 +284,8 @@ export default function Home() {
       if (data.trackedTrades) setTrackedTrades(data.trackedTrades);
       if (data.marketFlow) setMarketFlow(data.marketFlow);
       if (data.marketQuotes) setMarketQuotes(data.marketQuotes);
+      if (data.vixWarning !== undefined) setVixWarning(data.vixWarning);
+      if (data.vixLevel !== undefined) setVixLevel(data.vixLevel);
       setLastScan(data.scannedAt);
       setError(null);
     } catch (err) {
@@ -316,6 +361,11 @@ export default function Home() {
               style={{ background: 'rgba(255,255,255,0.05)' }}>
               🔬 Analyze
             </Link>
+            <Link href="/journal"
+              className="px-2.5 py-1 text-[10px] font-semibold font-mono border border-white/10 rounded text-white/40 hover:text-green-400 hover:border-green-500/30 transition-all"
+              style={{ background: 'rgba(255,255,255,0.05)' }}>
+              📓 Journal
+            </Link>
             {activeTab === 'feed' && (
               <button onClick={() => setShowFilters(!showFilters)}
                 className="px-2.5 py-1 text-[10px] font-semibold font-mono border border-white/10 rounded"
@@ -361,6 +411,23 @@ export default function Home() {
       <div className="max-w-[680px] mx-auto px-3.5 pt-3.5 pb-20 flex flex-col gap-2.5">
         {activeTab === 'feed' && (
           <>
+            {/* VIX Circuit Breaker Banner */}
+            {vixWarning && (
+              <div className="rounded-lg p-3 text-[12px] font-mono leading-snug animate-fade-up" style={{
+                background: `${vixWarning.color}10`,
+                border: `1px solid ${vixWarning.color}30`,
+                borderLeft: `3px solid ${vixWarning.color}`,
+                color: vixWarning.color,
+              }}>
+                <span className="font-bold text-[11px] tracking-wide block mb-1">
+                  {vixWarning.level === 'HALT' && '🚨 VIX CIRCUIT BREAKER — BULLISH SUGGESTIONS PAUSED'}
+                  {vixWarning.level === 'DANGER' && '🔴 VIX HIGH — ELEVATED RISK'}
+                  {vixWarning.level === 'CAUTION' && '⚠️ VIX ELEVATED — PROCEED WITH CAUTION'}
+                </span>
+                <span style={{ color: `${vixWarning.color}bb` }}>{vixWarning.message}</span>
+              </div>
+            )}
+
             <div className="flex items-center justify-center gap-2 py-1.5 text-[10px] text-white/15 font-mono">
               <div className="flex gap-[2px]">{[0, 1, 2].map(i => <div key={i} className="w-[2px] h-2.5 rounded-sm animate-pulse-dot" style={{ background: 'rgba(0,212,255,0.35)', animationDelay: `${i * 150}ms` }} />)}</div>
               {loading ? 'Running initial scan of 25 tickers...' : lastScan ? `Last scan ${new Date(lastScan).toLocaleTimeString()} · 5-layer analysis active` : 'Waiting...'}
@@ -403,6 +470,14 @@ export default function Home() {
             <span className="text-white/20">QQQ</span>
             <span className="font-semibold" style={{ color: (qqq?.change || 0) >= 0 ? '#22c55e' : '#ef4444' }}>
               {qqq ? `${qqq.change >= 0 ? '+' : ''}${qqq.change}%` : '—'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1 text-[10px] font-mono">
+            <span className="text-white/20">VIX</span>
+            <span className="font-semibold" style={{
+              color: vixLevel >= 28 ? '#ef4444' : vixLevel >= 22 ? '#eab308' : '#22c55e',
+            }}>
+              {vixLevel ? vixLevel.toFixed(1) : '—'}
             </span>
           </div>
           <div className="flex items-center gap-1 text-[10px] font-mono">

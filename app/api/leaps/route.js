@@ -5,12 +5,12 @@
 import { NextResponse } from 'next/server';
 import { getOptionsChain, getPriceHistory } from '@/lib/schwab';
 import { getEarnings } from '@/lib/finnhub';
-import { analyzeTechnicals, realizedVol } from '@/lib/technicals';
+import { analyzeTechnicals, realizedVol, calculateEma200Proximity, adjustGrade } from '@/lib/technicals';
 import { MIN_OI, MAX_SPREAD_PCT } from '@/lib/watchlist';
 
 // LEAP ideal criteria
 const LEAP_MIN_DTE = 180;
-const LEAP_MAX_DTE = 540;
+const LEAP_MAX_DTE = 730; // 2 years
 const LEAP_DELTA_MIN = 0.45;
 const LEAP_DELTA_MAX = 0.75;
 const LEAP_MAX_THETA_PCT = 0.005; // 0.5% of contract value per week
@@ -47,8 +47,12 @@ async function scanTickerForLeaps(ticker, bias, maxPremium, portfolioSize) {
     if (stockPrice === 0) return null;
 
     const closePrices = historyData?.candles ? historyData.candles.map(c => c.close) : [];
+    const volumes = historyData?.candles ? historyData.candles.map(c => c.volume) : [];
     const technicals = closePrices.length >= 50 ? analyzeTechnicals(closePrices) : null;
     const rv20 = closePrices.length >= 21 ? realizedVol(closePrices, 20) : null;
+
+    // 200 EMA Proximity
+    const emaProximity = calculateEma200Proximity(closePrices, volumes);
 
     // Check for upcoming earnings
     let nearEarnings = false;
@@ -171,14 +175,18 @@ async function scanTickerForLeaps(ticker, bias, maxPremium, portfolioSize) {
             }
           }
 
+          // Apply 200 EMA grade modifier
+          const adjustedGrade = emaProximity ? adjustGrade(grade, emaProximity.gradeModifier) : grade;
+
           bestSetup = {
             ticker,
             strike: c.strikePrice,
             type: bias === 'bullish' ? 'CALL' : 'PUT',
             expiration: expDate,
             dte,
-            grade,
-            gradeEmoji: gradeEmoji(grade),
+            grade: adjustedGrade,
+            originalGrade: grade !== adjustedGrade ? grade : undefined,
+            gradeEmoji: gradeEmoji(adjustedGrade),
             factors,
             premium: Math.round(mid * 100) / 100,
             premiumTotal: Math.round(premium),
@@ -198,6 +206,7 @@ async function scanTickerForLeaps(ticker, bias, maxPremium, portfolioSize) {
             trend: technicals?.trend || null,
             nearEarnings,
             earningsDate,
+            emaProximity,
             sizing: {
               portfolio25k: maxContracts25k,
               portfolio50k: maxContracts50k,
