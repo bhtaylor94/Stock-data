@@ -286,7 +286,7 @@ export async function GET(request) {
   try {
     const [chain, history, earnings, news] = await Promise.allSettled([
       getOptionsChain(ticker),
-      getPriceHistory(ticker, 'year', 1, 'daily', 1),
+      getPriceHistory(ticker, 'year', 2, 'daily', 1),
       getEarnings(ticker),
       getNews(ticker, 7),
     ]);

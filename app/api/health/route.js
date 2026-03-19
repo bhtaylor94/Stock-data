@@ -103,7 +103,7 @@ export async function GET() {
 
   // Schwab price history
   try {
-    const history = await getPriceHistory('AAPL', 'year', 1, 'daily', 1);
+    const history = await getPriceHistory('AAPL', 'year', 2, 'daily', 1);
     results.schwab.priceHistory = {
       status: history ? 'SUCCESS' : 'FAILED',
       candleCount: history?.candles?.length || 0,

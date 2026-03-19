@@ -92,7 +92,7 @@ function LeapCard({ setup }) {
       )}
 
       {/* 200 EMA Proximity Banner */}
-      {setup.emaProximity?.message && (
+      {setup.emaProximity && setup.emaProximity.state !== 'ABOVE_EMA' && setup.emaProximity.message && (
         <div className="rounded-lg p-3 mb-3 text-[12px] leading-snug font-mono relative z-10" style={{
           background: `${setup.emaProximity.color}10`,
           borderLeft: `3px solid ${setup.emaProximity.color}`,
@@ -116,6 +116,18 @@ function LeapCard({ setup }) {
               Grade adjusted: {setup.originalGrade} → {setup.grade} based on EMA position
             </div>
           )}
+        </div>
+      )}
+      {/* Always show EMA level as subtle info line */}
+      {setup.emaProximity && (
+        <div className="text-[10px] font-mono text-white/25 mb-2 relative z-10">
+          200 EMA: <span className="text-white/40">${setup.emaProximity.ema200}</span>
+          {' · '}Price: <span className="text-white/40">${setup.emaProximity.currentPrice}</span>
+          {' · '}<span style={{
+            color: setup.emaProximity.distance >= 0 ? '#22c55e' : '#ef4444',
+          }}>{setup.emaProximity.distance > 0 ? '+' : ''}{setup.emaProximity.distance}%</span>
+          {setup.emaProximity.state === 'BELOW_EMA' && ' · ⚠ BELOW SUPPORT'}
+          {setup.emaProximity.state === 'AT_SUPPORT' && ' · ⚠ AT SUPPORT'}
         </div>
       )}
 

@@ -104,7 +104,7 @@ export async function GET() {
         try {
           const [chain, priceHistory, news, earnings] = await Promise.allSettled([
             getOptionsChain(ticker),
-            getPriceHistory(ticker, 'year', 1, 'daily', 1),
+            getPriceHistory(ticker, 'year', 2, 'daily', 1),
             getNews(ticker, 7),
             getEarnings(ticker),
           ]);

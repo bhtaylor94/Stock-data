@@ -33,7 +33,7 @@ async function scanTickerForLeaps(ticker, bias, maxPremium, portfolioSize) {
   try {
     const [chain, priceHistory, earnings] = await Promise.allSettled([
       getOptionsChain(ticker),
-      getPriceHistory(ticker, 'year', 1, 'daily', 1),
+      getPriceHistory(ticker, 'year', 2, 'daily', 1),
       getEarnings(ticker),
     ]);
 
@@ -52,7 +52,7 @@ async function scanTickerForLeaps(ticker, bias, maxPremium, portfolioSize) {
     const rv20 = closePrices.length >= 21 ? realizedVol(closePrices, 20) : null;
 
     // 200 EMA Proximity
-    const emaProximity = calculateEma200Proximity(closePrices, volumes);
+    const emaProximity = calculateEma200Proximity(closePrices, volumes, stockPrice);
 
     // Check for upcoming earnings
     let nearEarnings = false;
