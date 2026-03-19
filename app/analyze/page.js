@@ -447,7 +447,17 @@ function AnalyzePageInner() {
             </div>
             {leapResults && (
               <div className="space-y-3">
-                {leapResults.map((setup, i) => <LeapCard key={setup.ticker + i} setup={setup} />)}
+                {[...leapResults]
+                  .sort((a, b) => {
+                    // Fire cards (A grade or confirmed bounce) go to top
+                    const aFire = a.grade === 'A' || a.emaProximity?.state === 'CONFIRMED' ? 1 : 0;
+                    const bFire = b.grade === 'A' || b.emaProximity?.state === 'CONFIRMED' ? 1 : 0;
+                    if (bFire !== aFire) return bFire - aFire;
+                    // Then by grade
+                    const gradeOrder = { A: 0, B: 1, C: 2, D: 3, F: 4 };
+                    return (gradeOrder[a.grade] || 4) - (gradeOrder[b.grade] || 4);
+                  })
+                  .map((setup, i) => <LeapCard key={setup.ticker + i} setup={setup} />)}
               </div>
             )}
           </div>

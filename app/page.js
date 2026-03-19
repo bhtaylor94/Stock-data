@@ -356,6 +356,11 @@ export default function Home() {
             <span className="text-[10px] text-white/20 font-mono">
               {activeTab === 'feed' ? `${filtered.length} setups` : `${trackedTrades.length} trades`}
             </span>
+            <Link href="/scanner"
+              className="px-2.5 py-1 text-[10px] font-semibold font-mono border border-white/10 rounded text-white/40 hover:text-amber-400 hover:border-amber-500/30 transition-all"
+              style={{ background: 'rgba(255,255,255,0.05)' }}>
+              🔍 Scanner
+            </Link>
             <Link href="/analyze"
               className="px-2.5 py-1 text-[10px] font-semibold font-mono border border-white/10 rounded text-white/40 hover:text-cyan-400 hover:border-cyan-500/30 transition-all"
               style={{ background: 'rgba(255,255,255,0.05)' }}>
