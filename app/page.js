@@ -91,7 +91,7 @@ function OpportunityCard({ opp, index, onActivate, onDeepDive }) {
       )}
 
       {/* 200 EMA Proximity Banner */}
-      {opp.emaProximity?.message && (
+      {opp.emaProximity?.message && opp.emaProximity.state !== 'ABOVE_EMA' && (
         <div className="rounded p-2.5 mb-3 text-[11px] leading-snug font-mono" style={{
           background: `${opp.emaProximity.color}10`,
           borderLeft: `3px solid ${opp.emaProximity.color}`,
@@ -99,6 +99,7 @@ function OpportunityCard({ opp, index, onActivate, onDeepDive }) {
         }}>
           <span className="font-bold text-[10px] tracking-wide">
             {opp.emaProximity.state === 'CONFIRMED' && '✅ BOUNCE CONFIRMED'}
+            {opp.emaProximity.state === 'CAUTION_BOUNCE' && '⚠️ DOWNTREND BOUNCE'}
             {opp.emaProximity.state === 'APPROACHING' && '⚠️ APPROACHING 200 EMA'}
             {opp.emaProximity.state === 'AT_SUPPORT' && '🔶 AT 200 EMA — WAIT'}
             {opp.emaProximity.state === 'BELOW_EMA' && '🔴 BELOW 200 EMA'}
@@ -107,57 +108,79 @@ function OpportunityCard({ opp, index, onActivate, onDeepDive }) {
           <span className="ml-2" style={{ color: `${opp.emaProximity.color}aa` }}>
             EMA: ${opp.emaProximity.ema200} ({opp.emaProximity.distance}%)
           </span>
+          {opp.emaProximity.trendContext && (
+            <span className="ml-2 text-[9px]" style={{ color: opp.emaProximity.trendContext.trendColor }}>
+              · {opp.emaProximity.trendContext.trend}
+            </span>
+          )}
         </div>
       )}
 
-      <div className="flex justify-between items-center mb-2.5">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold tracking-widest font-mono" style={{ color: bull ? '#22c55e' : '#ef4444' }}>{bull ? '▲ BULLISH' : '▼ BEARISH'}</span>
-          {isOnFire ? (
-            <span className="text-[10px] font-semibold font-mono px-2 py-0.5 rounded fire-badge">🔥 {opp.confidence}/5</span>
-          ) : (
-            <span className="text-[10px] font-semibold font-mono px-1.5 py-px rounded" style={{ background: 'rgba(0,212,255,0.1)', color: '#00d4ff' }}>{opp.confidence}/5</span>
-          )}
-          {insider?.confirmed && <span className="text-[10px] font-semibold font-mono px-1.5 py-px rounded" style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}>🛡 INSIDER</span>}
-          {isOnFire && <span className="text-[10px] font-bold tracking-wider font-mono" style={{ color: '#ff8c00', textShadow: '0 0 8px rgba(255,140,0,0.4)' }}>HIGH CONVICTION</span>}
-        </div>
-        <div className="flex items-center gap-2">
-          <ConfidencePips level={opp.confidence} />
-          <span className="text-[11px] text-white/20 font-mono">{new Date(opp.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-        </div>
-      </div>
-
-      <div className="flex items-baseline gap-2.5 mb-1.5">
-        <span className="text-3xl font-extrabold text-white tracking-tight font-display">{opp.ticker}</span>
+      {/* Header — Ticker + Contract + Direction */}
+      <div className="flex items-baseline gap-2.5 mb-1">
+        <span className="text-2xl font-extrabold text-white tracking-tight font-display">{opp.ticker}</span>
         <span className="text-base text-white/40 font-mono">${opp.stockPrice}</span>
         <span className="text-sm font-semibold font-mono" style={{ color: opp.change >= 0 ? '#22c55e' : '#ef4444' }}>{opp.change >= 0 ? '+' : ''}{opp.change}%</span>
       </div>
 
+      {/* THE TRADE — specific contract, big and clear */}
+      <div className="rounded-lg p-3 mb-3" style={{
+        background: bull ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)',
+        border: `1px solid ${bull ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)'}`,
+      }}>
+        <div className="flex items-center justify-between mb-1">
+          <span className="text-base font-bold font-mono" style={{ color: bull ? '#22c55e' : '#ef4444' }}>
+            {play.strategy}
+          </span>
+          <div className="flex items-center gap-1.5">
+            {isOnFire ? (
+              <span className="text-[10px] font-semibold font-mono px-2 py-0.5 rounded fire-badge">🔥 {opp.confidence}/5</span>
+            ) : (
+              <span className="text-[10px] font-semibold font-mono px-1.5 py-px rounded" style={{ background: 'rgba(0,212,255,0.1)', color: '#00d4ff' }}>{opp.confidence}/5</span>
+            )}
+            {insider?.confirmed && <span className="text-[10px] font-semibold font-mono px-1.5 py-px rounded" style={{ background: 'rgba(245,158,11,0.1)', color: '#f59e0b' }}>🛡 INSIDER</span>}
+          </div>
+        </div>
+
+        {/* Contract details — the specific option */}
+        <div className="text-[15px] font-bold font-mono text-white mb-1">
+          {play.legs.map((l, i) => (
+            <span key={i}>
+              {i > 0 && <span className="text-white/25"> / </span>}
+              <span className="text-white/35">{l.action}</span> ${l.strike}<span style={{ color: l.type === 'CALL' ? '#22c55e' : '#ef4444' }}>{l.type === 'CALL' ? 'C' : 'P'}</span>
+            </span>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-3 text-[11px] font-mono text-white/45">
+          <span>exp {play.legs[0]?.expiration}</span>
+          <span>{play.legs[0]?.dte} DTE</span>
+          <span>@ ${play.legs[0]?.price}</span>
+          {play.pop && <span>{play.pop}% PoP</span>}
+        </div>
+
+        <p className="text-[10px] text-white/30 italic mt-1 font-mono">{play.reasoning}</p>
+        <PLBar {...play} />
+      </div>
+
+      {/* Flow meta badges */}
       <div className="flex gap-1.5 flex-wrap mb-3">
+        <span className="text-[10px] font-bold tracking-widest font-mono px-2 py-0.5 rounded" style={{ background: bull ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)', color: bull ? '#22c55e' : '#ef4444' }}>{bull ? '▲ BULLISH' : '▼ BEARISH'}</span>
         {[
           { label: 'Vol/OI', value: `${layers.flow.volOiRatio}x` },
           { label: layers.flow.orderType, value: layers.flow.side },
           { label: 'Premium', value: layers.flow.premium >= 1000000 ? `$${(layers.flow.premium / 1000000).toFixed(1)}M` : `$${(layers.flow.premium / 1000).toFixed(0)}K` },
-          { label: 'DTE', value: play.legs[0]?.dte || '—' },
         ].map(b => (
           <span key={b.label} className="text-[10px] font-mono px-2 py-0.5 rounded border" style={{ background: 'rgba(255,255,255,0.03)', borderColor: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.5)' }}>
             {b.label} <span className="text-white/80 font-semibold">{b.value}</span>
           </span>
         ))}
+        {isOnFire && <span className="text-[10px] font-bold tracking-wider font-mono" style={{ color: '#ff8c00', textShadow: '0 0 8px rgba(255,140,0,0.4)' }}>HIGH CONVICTION</span>}
       </div>
 
+      {/* Thesis */}
       <div className="rounded-lg p-3 mb-3" style={{ background: 'rgba(255,255,255,0.02)', borderLeft: '2px solid rgba(255,255,255,0.06)' }}>
         <p className="text-[13px] leading-relaxed text-white/70">{opp.thesis}</p>
-      </div>
-
-      <div className="rounded-lg p-3" style={{ background: bull ? 'rgba(34,197,94,0.04)' : 'rgba(239,68,68,0.04)', border: `1px solid ${bull ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)'}` }}>
-        <span className="text-xs font-bold font-mono" style={{ color: bull ? '#22c55e' : '#ef4444' }}>▸ {play.strategy.toUpperCase()}</span>
-        <p className="text-[13px] text-white/60 font-mono mt-0.5">
-          {play.legs.map((l, i) => <span key={i}>{i > 0 ? ' / ' : ''}{l.action} ${l.strike}{l.type === 'CALL' ? 'C' : 'P'}</span>)}
-          {' · '}{play.legs[0]?.expiration} · {play.legs[0]?.dte} DTE
-        </p>
-        <p className="text-[11px] text-white/35 italic mt-0.5">{play.reasoning}</p>
-        <PLBar {...play} />
       </div>
 
       <div className="flex gap-2 mt-2.5">

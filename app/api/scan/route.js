@@ -130,6 +130,18 @@ export async function GET() {
             const prevClose = closePrices.length >= 2 ? closePrices[closePrices.length - 2] : stockPrice;
             card.change = Math.round(((stockPrice - prevClose) / prevClose) * 1000) / 10;
 
+            // Deduplicate: only keep the best card per ticker
+            const existingIdx = opportunities.findIndex(o => o.ticker === ticker);
+            if (existingIdx >= 0) {
+              // Replace only if this card has higher confidence or same confidence + bigger premium
+              const existing = opportunities[existingIdx];
+              if (card.confidence > existing.confidence ||
+                 (card.confidence === existing.confidence && (card.layers.flow.premium || 0) > (existing.layers.flow.premium || 0))) {
+                opportunities[existingIdx] = card;
+              }
+              continue; // skip adding a duplicate
+            }
+
             // Layer 6: Insider/Congressional (once per day per ticker)
             const now = Date.now();
             if (now - (lastInsiderCheck[ticker] || 0) > 24 * 60 * 60 * 1000) {
