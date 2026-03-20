@@ -3,6 +3,10 @@
 // Deep analysis of a single ticker's chain — shows both sides of every unusual trade
 
 import { NextResponse } from 'next/server';
+
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 import { getOptionsChain, getPriceHistory } from '@/lib/schwab';
 import { getEarnings, getNews } from '@/lib/finnhub';
 

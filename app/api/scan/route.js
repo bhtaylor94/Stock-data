@@ -8,8 +8,26 @@ import { getInsiderActivity } from '@/lib/edgar';
 import { calculateNetFlow, getMarketFlow } from '@/lib/netflow';
 import { getTrackedTrades, updateTrackedTrade, cleanupExpiredTrades } from '@/lib/tracker';
 
+// Force dynamic rendering — never cache this route
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 let prevScanCache = {};
 let lastInsiderCheck = {};
+
+// Cache price history per ticker for 1 hour (doesn't change intraday for daily candles)
+const priceHistoryCache = {};
+const PRICE_HISTORY_TTL = 60 * 60 * 1000; // 1 hour
+
+async function getCachedPriceHistory(ticker) {
+  const cached = priceHistoryCache[ticker];
+  if (cached && Date.now() - cached.timestamp < PRICE_HISTORY_TTL) {
+    return cached.data;
+  }
+  const data = await getPriceHistory(ticker, 'year', 2, 'daily', 1);
+  priceHistoryCache[ticker] = { data, timestamp: Date.now() };
+  return data;
+}
 
 function detectUnusualFlow(chain, stockPrice) {
   const flows = [];
@@ -104,7 +122,7 @@ export async function GET() {
         try {
           const [chain, priceHistory, news, earnings] = await Promise.allSettled([
             getOptionsChain(ticker),
-            getPriceHistory(ticker, 'year', 2, 'daily', 1),
+            getCachedPriceHistory(ticker),
             getNews(ticker, 7),
             getEarnings(ticker),
           ]);
@@ -207,17 +225,55 @@ export async function GET() {
     });
 
     const mf = getMarketFlow();
-    return NextResponse.json({
+
+    // Detect market status for freshness indicator
+    const now = new Date();
+    const et = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+    const hour = et.getHours();
+    const minute = et.getMinutes();
+    const day = et.getDay(); // 0=Sun, 6=Sat
+    const isWeekend = day === 0 || day === 6;
+    const timeInMinutes = hour * 60 + minute;
+    const preMarket = timeInMinutes >= 4 * 60 && timeInMinutes < 9 * 60 + 30;
+    const marketOpen = timeInMinutes >= 9 * 60 + 30 && timeInMinutes < 16 * 60;
+    const afterHours = timeInMinutes >= 16 * 60 && timeInMinutes < 20 * 60;
+
+    let marketStatus = 'CLOSED';
+    if (isWeekend) marketStatus = 'WEEKEND';
+    else if (marketOpen) marketStatus = 'OPEN';
+    else if (preMarket) marketStatus = 'PRE_MARKET';
+    else if (afterHours) marketStatus = 'AFTER_HOURS';
+
+    // Data freshness note
+    let freshnessNote = '';
+    if (marketStatus === 'OPEN') {
+      freshnessNote = 'Live data — chain and quotes are real-time from Schwab.';
+    } else if (marketStatus === 'PRE_MARKET') {
+      freshnessNote = 'Pre-market — chain data reflects yesterday\'s close. Quotes may update.';
+    } else if (marketStatus === 'AFTER_HOURS') {
+      freshnessNote = 'After hours — chain data reflects today\'s close. OI updates overnight.';
+    } else {
+      freshnessNote = 'Market closed — data reflects last trading session. OI may have updated overnight.';
+    }
+
+    const response = NextResponse.json({
       opportunities: filteredOpps,
       trackedTrades: getTrackedTrades().filter(t => t.status !== 'EXPIRED'),
       marketFlow: { sentiment: mf.sentiment, netPremium: mf.formatted, bullish: mf.netPremium > 0 },
       marketQuotes,
       vixWarning,
       vixLevel,
+      marketStatus,
+      freshnessNote,
       scannedAt: new Date().toISOString(),
       tickersScanned: WATCHLIST.length,
       errors: errors.length > 0 ? errors : undefined,
     });
+
+    // Prevent any caching
+    response.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    response.headers.set('Pragma', 'no-cache');
+    return response;
   } catch (error) {
     console.error('Scan error:', error);
     return NextResponse.json({ error: 'Scan failed', message: error.message }, { status: 500 });

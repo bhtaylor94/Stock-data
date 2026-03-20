@@ -4,6 +4,10 @@
 
 import { NextResponse } from 'next/server';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 // In-memory store (resets on cold start — see note below)
 // For persistence across deploys, you'd use Vercel KV:
 //   import { kv } from '@vercel/kv';

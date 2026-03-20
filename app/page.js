@@ -291,7 +291,10 @@ export default function Home() {
   const [vixWarning, setVixWarning] = useState(null);
   const [vixLevel, setVixLevel] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [scanning, setScanning] = useState(false);
   const [lastScan, setLastScan] = useState(null);
+  const [marketStatus, setMarketStatus] = useState(null);
+  const [freshnessNote, setFreshnessNote] = useState('');
   const [error, setError] = useState(null);
   const [dirFilter, setDirFilter] = useState('ALL');
   const [minConf, setMinConf] = useState(4);
@@ -299,8 +302,10 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState('feed');
 
   const scan = useCallback(async () => {
+    setScanning(true);
     try {
-      const res = await fetch('/api/scan');
+      // Cache-bust: add timestamp to URL so Vercel/browser never serves stale
+      const res = await fetch(`/api/scan?t=${Date.now()}`);
       if (!res.ok) throw new Error(`Scan failed: ${res.status}`);
       const data = await res.json();
       if (data.opportunities) setOpportunities(data.opportunities);
@@ -309,16 +314,30 @@ export default function Home() {
       if (data.marketQuotes) setMarketQuotes(data.marketQuotes);
       if (data.vixWarning !== undefined) setVixWarning(data.vixWarning);
       if (data.vixLevel !== undefined) setVixLevel(data.vixLevel);
+      if (data.marketStatus) setMarketStatus(data.marketStatus);
+      if (data.freshnessNote) setFreshnessNote(data.freshnessNote);
       setLastScan(data.scannedAt);
       setError(null);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+      setScanning(false);
     }
   }, []);
 
-  useEffect(() => { scan(); const i = setInterval(scan, 60000); return () => clearInterval(i); }, [scan]);
+  // Smart polling: 60s when market open, 5min when closed
+  useEffect(() => {
+    scan();
+    const getInterval = () => {
+      if (marketStatus === 'OPEN') return 60000;      // 1 min during market hours
+      if (marketStatus === 'PRE_MARKET') return 120000; // 2 min pre-market
+      return 300000; // 5 min after hours / weekends / closed
+    };
+    let interval = setInterval(scan, getInterval());
+    // Re-create interval when market status changes
+    return () => clearInterval(interval);
+  }, [scan, marketStatus]);
 
   const activateTrade = async (card) => {
     try {
@@ -456,9 +475,48 @@ export default function Home() {
               </div>
             )}
 
-            <div className="flex items-center justify-center gap-2 py-1.5 text-[10px] text-white/15 font-mono">
-              <div className="flex gap-[2px]">{[0, 1, 2].map(i => <div key={i} className="w-[2px] h-2.5 rounded-sm animate-pulse-dot" style={{ background: 'rgba(0,212,255,0.35)', animationDelay: `${i * 150}ms` }} />)}</div>
-              {loading ? 'Running initial scan of 25 tickers...' : lastScan ? `Last scan ${new Date(lastScan).toLocaleTimeString()} · 5-layer analysis active` : 'Waiting...'}
+            {/* Market status + freshness */}
+            <div className="flex flex-col items-center gap-1.5 py-2">
+              <div className="flex items-center gap-2">
+                {/* Market status badge */}
+                {marketStatus && (
+                  <span className="text-[9px] font-bold font-mono px-2 py-0.5 rounded tracking-wide" style={{
+                    background: marketStatus === 'OPEN' ? 'rgba(34,197,94,0.1)' : marketStatus === 'PRE_MARKET' ? 'rgba(234,179,8,0.1)' : 'rgba(255,255,255,0.03)',
+                    color: marketStatus === 'OPEN' ? '#22c55e' : marketStatus === 'PRE_MARKET' ? '#eab308' : 'rgba(255,255,255,0.25)',
+                    border: `1px solid ${marketStatus === 'OPEN' ? 'rgba(34,197,94,0.2)' : marketStatus === 'PRE_MARKET' ? 'rgba(234,179,8,0.15)' : 'rgba(255,255,255,0.06)'}`,
+                  }}>
+                    {marketStatus === 'OPEN' && '● MARKET OPEN'}
+                    {marketStatus === 'PRE_MARKET' && '◐ PRE-MARKET'}
+                    {marketStatus === 'AFTER_HOURS' && '◑ AFTER HOURS'}
+                    {marketStatus === 'CLOSED' && '○ MARKET CLOSED'}
+                    {marketStatus === 'WEEKEND' && '○ WEEKEND'}
+                  </span>
+                )}
+
+                {/* Scan time + scanning indicator */}
+                <div className="flex items-center gap-1.5 text-[10px] text-white/15 font-mono">
+                  {(loading || scanning) && (
+                    <div className="flex gap-[2px]">{[0, 1, 2].map(i => <div key={i} className="w-[2px] h-2.5 rounded-sm animate-pulse-dot" style={{ background: 'rgba(0,212,255,0.35)', animationDelay: `${i * 150}ms` }} />)}</div>
+                  )}
+                  {loading ? 'Scanning 25 tickers...' : lastScan ? `Scanned ${new Date(lastScan).toLocaleTimeString()}` : ''}
+                </div>
+
+                {/* Refresh button */}
+                {!loading && (
+                  <button onClick={scan} disabled={scanning}
+                    className="text-[10px] font-mono text-white/20 hover:text-cyan-400 transition-colors disabled:opacity-50"
+                    title="Force refresh all data">
+                    {scanning ? '⟳' : '↻'} Refresh
+                  </button>
+                )}
+              </div>
+
+              {/* Freshness note — visible when market is not open */}
+              {freshnessNote && marketStatus !== 'OPEN' && (
+                <span className="text-[9px] font-mono text-white/12 text-center leading-snug">
+                  {freshnessNote}
+                </span>
+              )}
             </div>
             {error && <div className="text-center py-4 text-red-400/60 text-xs font-mono">{error}</div>}
             {!loading && filtered.length === 0 && !error && (
